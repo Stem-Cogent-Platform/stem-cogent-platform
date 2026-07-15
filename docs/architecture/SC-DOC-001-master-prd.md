@@ -51,7 +51,7 @@ Internal codename: `SC-PLATFORM`
 
 ## 1.2 Mission Statement
 
-Stem Cogent exists to eliminate strategic guesswork in African financial services by converting fragmented, multi-source market signals into **validated, explainable, decision-ready operational intelligence** — delivered with confidence scores, source lineage, temporal context, and actionable recommendations.
+Stem Cogent exists to eliminate strategic guesswork in Nigeria/African financial and fintech services and company by converting fragmented, multi-source market signals into **validated, explainable, decision-ready operational intelligence** — delivered with confidence scores, source lineage, temporal context, and actionable recommendations.
 
 It is not a data product. It is not a reporting tool. It is an **intelligence operating system**.
 
@@ -126,15 +126,7 @@ Rwanda, Senegal, Tanzania, Côte d'Ivoire — event-level monitoring for expansi
 
 ### Intelligence Domain Scope
 
-Stem Cogent will ingest, process, score, and deliver intelligence across 20 macro signal domains (documented in full in the Signal Taxonomy Specification, SC-DOC-TAXONOMY). Top-priority domains at launch:
-
-1. Regulatory Signals (CBN, SEC, NDPC, NIBSS directives)
-2. Competitive Signals (product launches, hiring, partnerships, funding)
-3. Infrastructure Signals (payment rail health, NIBSS status, telco events)
-4. Consumer Signals (sentiment, trust, complaint velocity, behavior shifts)
-5. Financial Signals (FX rates, interest rates, liquidity conditions)
-6. Macroeconomic Signals (inflation, GDP, policy signals)
-
+Stem Cogent will ingest, process, score, and deliver intelligence across macro signal domains (documented in full in the Signal Taxonomy Specification, SC-DOC-TAXONOMY).
 ---
 
 ## 1.6 What Stem Cogent IS
@@ -163,7 +155,7 @@ The following are **explicitly out of scope** and must not be designed for, impl
 | CRM or Relationship Management Platform | Stem Cogent does not manage customer relationships, sales pipelines, contact records, or account data. |
 | Social Listening Platform | Stem Cogent is not a social media monitoring product in the Brandwatch/Sprinklr category. Social signals are one input tier in the broader intelligence stack, not the product's core value delivery. |
 | Predictive Forecasting Engine | Stem Cogent does not generate future market forecasts, price predictions, or probabilistic financial models. It provides pattern detection, trend emergence identification, and historical contextualization. |
-| Autonomous Decision Engine | Stem Cogent never makes decisions on behalf of users. It surfaces recommendations with supporting evidence. Human decision ownership is a strict product principle. |
+| Autonomous Decision Engine | Stem Cogent never makes decisions that are not grounded to the truth and also actionable to and reliable. It surfaces recommendations with supporting evidence. Human decision ownership is a strict product principle. |
 | Raw Data Export Marketplace | Stem Cogent is not a data broker. It does not sell raw signal data. It sells processed intelligence. |
 
 ---
@@ -180,7 +172,7 @@ The following are **explicitly out of scope** and must not be designed for, impl
 
 | Metric | Target | Measurement Method |
 |---|---|---|
-| Signal ingestion volume | 50,000+ raw signals/day at launch; 500,000+/day at scale | Pipeline throughput counter (Celery worker metrics) |
+| Signal ingestion volume | 50,000+ raw signals/day at launch; 500,000+/day at scale | Pipeline throughput counter (worker metrics) |
 | Signal processing latency (raw → classified) | < 90 seconds for Tier 1 priority signals | Event timestamp delta (ingest_received → classified_at) |
 | Signal processing latency (raw → delivered) | < 5 minutes for high-urgency alerts | Event timestamp delta (ingest_received → alert_dispatched) |
 | Ingestion pipeline uptime | 99.5% monthly availability | Health check monitoring; dead letter queue volume |
@@ -212,9 +204,9 @@ The following are **explicitly out of scope** and must not be designed for, impl
 
 | Phase | Target Outcome | Success Signal |
 |---|---|---|
-| Phase 1 (Foundation) | Full ingestion pipeline operational for Tier 1 sources; signal scoring live | 10,000+ processed signals/day in staging |
-| Phase 2 (Intelligence) | Full classification, enrichment, entity graph live; dashboard v1 deployed | 3 pilot customers accessing live intelligence |
-| Phase 3 (Delivery) | Alert engine, digests, and Conversational Intelligence Layer v1 live | Pilot customers using daily; NPS > 40 |
+| Phase  (Foundation) | Full ingestion pipeline operational for Tier 1 sources; signal scoring live | 10,000+ processed signals/day in staging |
+| Phase  (Intelligence) | Full classification, enrichment, entity graph live; dashboard v1 deployed | 3 pilot customers accessing live intelligence |
+| Phase  (Delivery) | Alert engine, digests, and Conversational Intelligence Layer v1 live | Pilot customers using daily; NPS > 40 |
 | Phase 4 (Scale) | Multi-region signal coverage; enterprise tier; API delivery | ARR pipeline established |
 
 ---
@@ -295,7 +287,7 @@ The following are **explicitly out of scope** and must not be designed for, impl
 8. User exports intelligence summary for executive briefing
 ```
 
-**System Dependencies:** Entity resolution engine, entity graph, historical signal memory, Conversational Intelligence Layer.
+**System Dependencies:** Entity resolution engine, entity graph, historical signal memory, Conversational Intelligence Layer, live search query.
 
 ---
 
@@ -410,7 +402,7 @@ Every data source must be registered in the **Source Registry** before any colle
 ```
 source_id: UUID
 source_name: string
-source_type: ENUM [API, WEB_SCRAPER, RSS_FEED, PDF_DOWNLOAD, USER_UPLOAD, PARTNER_FEED]
+source_type: ENUM [API, WEB_SCRAPER, RSS_FEED, PDF_DOWNLOAD, USER_UPLOAD, PARTNER_FEED, Live Search]
 tier: INT [1–7]  // Matches Data Source Strategy tier classification
 base_url: string
 auth_type: ENUM [API_KEY, OAUTH2, NO_AUTH, COOKIE_SESSION]
@@ -438,7 +430,7 @@ updated_at: timestamp
 - Tier 6 (Enterprise Proprietary Inputs): on-demand trigger only
 - Tier 7 (Derived Intelligence): computed on pipeline completion event, not scheduled
 
-**Implementation Constraint:** Scheduler uses Celery Beat backed by Redis. Each scheduled job enqueues a `CollectionJob` message onto the `ingestion.queue`. Collectors are stateless workers that consume from this queue.
+**Implementation Constraint:** Scheduler uses worker backed by Redis. Each scheduled job enqueues a `CollectionJob` message onto the `ingestion.queue`. Collectors are stateless workers that consume from this queue.
 
 ### 4.1.3 Real-Time Ingestion Triggers
 
@@ -707,6 +699,8 @@ IF domain = INFRASTRUCTURE AND source_tier = 1 AND signal_type = OUTAGE:
 
 Recommendation rules are stored in database (not hardcoded); configurable by domain administrators.
 
+Recommendation rules are to genreted on rule based not static recommendation
+
 ---
 
 ## 4.4 Intelligence Delivery
@@ -826,7 +820,7 @@ See Section 4.1.6 (Collector Failure Handling) for ingestion retry policy.
 
 ### 5.2.1 Expected Load Profile
 
-| Dimension | Launch (Phase 2) | Scale (Phase 4) |
+| Dimension | Launch | Scale (Phase 4) |
 |---|---|---|
 | Raw signals ingested/day | 50,000 | 500,000+ |
 | Processed signals/day | 45,000 | 450,000+ |
@@ -932,13 +926,13 @@ Every CIL response is:
 
 CIL is a downstream layer. It has no operational value without the signal infrastructure beneath it. It must not be built or deployed before the following are production-stable:
 
-1. Ingestion pipeline (Phase 2)
-2. Classification and confidence scoring engine (Phase 2)
-3. Entity graph (Phase 2)
-4. Signal memory and historical storage (Phase 2)
-5. Synthesis engine (Phase 3)
+1. Ingestion pipeline
+2. Classification and confidence scoring engine
+3. Entity graph
+4. Signal memory and historical storage
+5. Synthesis engine
 
-**CIL is scoped to Phase 3 delivery.**
+
 
 ## 6.3 Query Processing Architecture
 
@@ -1010,7 +1004,7 @@ User Query Input
 
 ## 6.5 UX Anchoring
 
-**CIL must never open as a blank empty chat interface.**
+**CIL can open also have a chat interface for live search query.**
 
 Three primary entry points:
 
@@ -1019,6 +1013,7 @@ Three primary entry points:
 2. **Entity-Anchored Chat:** User opens CIL from an entity profile. Chat context pre-loaded with entity's recent signal history and relationship graph.
 
 3. **Chat-Interface:** Where user can query for live search and signal investigations. User can ask "What is the trend in Moniepoint as of last month" System run live search and delivers to the user in the chat interface
+
 
 ---
 
@@ -1336,8 +1331,8 @@ Stem Cogent is composed of the following bounded service domains. Each communica
 
 ## 8.2 Business Assumptions
 
-- Nigeria-first regional depth is sufficient for Phase 2 commercial launch
-- Pilot customers willing to accept weekly digest as primary delivery format for Phase 2 (real-time alerts added Phase 3)
+- Nigeria-first regional depth is sufficient for commercial launch
+- Pilot customers willing to accept weekly digest as primary delivery format for (real-time alerts)
 - Enterprise document upload feature required by at least one pilot customer
 
 ## 8.3 External Dependencies

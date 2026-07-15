@@ -40,5 +40,5 @@ The value is:
 - API access tier (Professional gets limited API; full API is Phase 3)
 - Custom signal sources (Enterprise only, Phase 3)
 - SSO (Enterprise only, Phase 3)
-- ClickHouse (PostgreSQL read replica for analytics at MVP)
+
 
