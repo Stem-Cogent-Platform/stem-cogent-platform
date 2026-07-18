@@ -108,7 +108,7 @@ Stage 19:  Conversational Querying    → Conversational Intelligence Service
 |                    [enqueues: CollectionJob]                                 |
 |                           v                                                 |
 |  LAYER 1 — SIGNAL ACQUISITION                                               |
-|  Collector Worker Pool (API / Scraper / RSS / PDF / Upload workers)          |
+|  Collector Worker Pool (API / Scraper / RSS / PDF / Upload workers / Live search)          |
 |                           |                                                 |
 |                [publishes: RawSignalEnvelope]                                |
 |                           v                                                 |
@@ -234,14 +234,14 @@ The authoritative registry of all data sources. No collector may fetch data from
 ```json
 POST /internal/sources
 {
-  "source_name": "CBN Official Circulars Feed",
-  "source_type": "RSS_FEED",
+  "source_name": "",
+  "source_type": "",
   "tier": 1,
-  "base_url": "https://www.cbn.gov.ng/rss/circulars.xml",
+  "base_url": "l",
   "auth_type": "NO_AUTH",
   "schedule_cron": "0 */1 * * *",
   "priority_class": "CRITICAL",
-  "region": "NG",
+  "region": "",
   "reliability_score": 0.97,
   "retry_policy": {
     "max_retries": 5,
@@ -259,7 +259,7 @@ POST /internal/sources
       "source_id": "uuid",
       "schedule_cron": "0 */1 * * *",
       "priority_class": "CRITICAL",
-      "collector_type": "RSS_COLLECTOR"
+      "collector_type": ""
     }
   ]
 }
@@ -305,9 +305,9 @@ Converts source registry schedule entries into `CollectionJob` queue messages at
     "source_id": "uuid",
     "source_type": "RSS_FEED",
     "collector_type": "RSS_COLLECTOR",
-    "base_url": "https://www.cbn.gov.ng/rss/circulars.xml",
+    "base_url": "",
     "auth_config_ref": "secrets://sc/sources/cbn-circulars/auth",
-    "scheduled_at": "2025-06-01T04:00:00.000Z",
+    "scheduled_at": "",
     "trigger_type": "SCHEDULED",
     "retry_count": 0,
     "retry_policy": {

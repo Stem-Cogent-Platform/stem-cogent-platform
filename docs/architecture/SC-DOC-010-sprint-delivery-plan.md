@@ -6,7 +6,7 @@
 **Owner:** Engineering Lead / Product Director
 **Document ID:** SC-DOC-010
 **Depends On:** SC-DOC-001 through SC-DOC-009
-**Last Updated:** 2025
+**Last Updated:** 2026
 
 ---
 
@@ -28,7 +28,7 @@ This document serves two audiences simultaneously:
 You always know what phase you are in, what stage within that phase, what
 task you are currently on, what "done" means for that task, and what comes next.
 
-**For Coding Agents (Claude, GPT, Cursor):** Every task includes the exact
+**For Coding Agents:** Every task includes the exact
 files to create or modify, the exact references to the specification documents
 where the implementation detail lives, and explicit acceptance criteria.
 A coding agent can be given a single task block and have everything it needs.
@@ -180,7 +180,7 @@ what IS and IS NOT in the MVP.
 
 ## IN SCOPE (Phase 1–4 delivery)
 - Signal ingestion from  Tier 1 Nigerian fintech sources
-- DistilBERT taxonomy classifier ( priority domains)
+- Taxonomy classifier ( priority domains)
 - Confidence scoring (5-factor deterministic formula)
 - Urgency scoring (deterministic formula)
 - Deduplication (hash + semantic)
