@@ -1,0 +1,78 @@
+name: stem-cogent
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: stemcogent
+      POSTGRES_USER: sc_local
+      POSTGRES_PASSWORD: sc_local_password
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sc_local -d stemcogent"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+
+  api:
+    build:
+      context: ../../backend
+      dockerfile: ../infrastructure/docker/backend.Dockerfile
+    environment:
+      ENVIRONMENT: development
+      DATABASE_URL: postgresql://sc_local:sc_local_password@postgres:5432/stemcogent
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+
+  frontend:
+    build:
+      context: ../../frontend
+      dockerfile: ../infrastructure/docker/frontend.Dockerfile
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:8000
+      NEXT_PUBLIC_WS_URL: ws://localhost:8000
+    depends_on:
+      api:
+        condition: service_started
+    ports:
+      - "3000:3000"
+
+  worker:
+    profiles: ["worker"]
+    build:
+      context: ../../backend
+      dockerfile: ../infrastructure/docker/worker.Dockerfile
+    environment:
+      ENVIRONMENT: development
+      DATABASE_URL: postgresql://sc_local:sc_local_password@postgres:5432/stemcogent
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
+  redis_data:
