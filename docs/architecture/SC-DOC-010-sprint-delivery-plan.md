@@ -284,7 +284,7 @@ TASK 1.1.2 — Create backend skeleton (FastAPI)
            Redis module, and health endpoints
   Files:
     backend/app/main.py
-    backend/app/core/config.py        (see SC-DOC-006 Section 9.1)
+    backend/app/core/config.py        (see SC-DOC-009 Section 9.1)
     backend/app/core/database.py      (SQLAlchemy async engine)
     backend/app/core/redis.py         (Redis connection pool)
     backend/app/api/v1/health.py      (GET /health/live, GET /health/ready)
