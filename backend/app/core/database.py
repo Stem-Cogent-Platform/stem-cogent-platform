@@ -1,10 +1,13 @@
 import asyncio
+import logging
 from collections.abc import AsyncIterator
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
 
 from app.core.config import get_settings
+
+logger = logging.getLogger(__name__)
 
 _engine: AsyncEngine | None = None
 _session_factory: async_sessionmaker[AsyncSession] | None = None
@@ -48,6 +51,7 @@ async def check_database_connection() -> str:
             async with engine.connect() as connection:
                 await connection.execute(text("SELECT 1"))
     except Exception:
+        logger.exception("PostgreSQL readiness check failed")
         return "unavailable"
 
     return "ok"

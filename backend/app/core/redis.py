@@ -1,8 +1,11 @@
 import asyncio
+import logging
 
 from redis.asyncio import Redis
 
 from app.core.config import get_settings
+
+logger = logging.getLogger(__name__)
 
 _client: Redis | None = None
 
@@ -37,6 +40,7 @@ async def check_redis_connection() -> str:
         async with asyncio.timeout(1):
             await client.ping()
     except Exception:
+        logger.exception("Redis readiness check failed")
         return "unavailable"
 
     return "ok"
