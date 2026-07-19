@@ -1644,7 +1644,12 @@ No secrets in environment variables. All secret values referenced via Secrets Ma
 ```python
 # app/core/config.py — Pydantic settings model
 
-class Settings(BaseModel):
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+class Settings(BaseSettings):
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
+
     # Service identity (non-secret — set in ECS task definition)
     ENVIRONMENT:           str = "development"
     SERVICE_NAME:          str = "sc-api-service"
@@ -1656,10 +1661,12 @@ class Settings(BaseModel):
     DATABASE_PORT:         int = 5432
     DATABASE_NAME:         str = "stemcogent"
     DATABASE_REPLICA_HOST: str | None = None
+    DATABASE_URL:          str | None = None  # Local development and CI only
 
     # Redis (non-secret endpoint — auth token fetched from Secrets Manager)
     REDIS_HOST:            str
     REDIS_PORT:            int = 6379
+    REDIS_URL:             str | None = None  # Local development and CI only
 
     # SQS Queue URLs (non-secret)
     SQS_INGESTION_PRIORITY_URL:   str
@@ -1684,8 +1691,6 @@ class Settings(BaseModel):
     CIL_ENABLED:                  bool = True
     CLICKHOUSE_ENABLED:           bool = True
 
-    class Config:
-        env_file = ".env"   # Local development only — never in production
 ```
 
 ---

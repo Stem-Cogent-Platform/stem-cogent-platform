@@ -135,7 +135,7 @@ The interface must not require users to discover their own workflow. The two ent
 
 **Visual tone:** Premium strategy memo. Think Goldman Sachs research brief meets Palantir operational intelligence interface. Not Notion. Not Mixpanel. Not Linear.
 
-**Color philosophy:** Near-black backgrounds for primary surfaces with high-contrast content areas. One primary accent color for urgency/action states (deep amber for HIGH, red-adjacent for CRITICAL). Confidence indicators use a desaturated scale. Domain tags use a constrained 6-color taxonomy palette.
+**Color philosophy:** White backgrounds for primary surfaces with high-contrast content areas. One primary accent color for urgency/action states (deep amber for HIGH, red-adjacent for CRITICAL). Confidence indicators use a desaturated scale. Domain tags use a constrained 6-color taxonomy palette.
 
 **Typography philosophy:** Two typefaces maximum. One serif for headlines and signal titles (authority, gravitas). One sans-serif for all body, metadata, and UI chrome (clarity, speed). Never use more than three font sizes on a single screen.
 
@@ -1119,7 +1119,7 @@ The full intelligence brief for a single signal. Opened when user clicks "Invest
 LEFT COLUMN (60% width)                   RIGHT PANEL (40% width)
 ───────────────────────────────────────   ────────────────────────
 [CRITICAL] [REGULATORY] [60 days]         CONFIDENCE BREAKDOWN
-[CBN · T1] [3 sources] [30 May 2025]      ●●●●○  0.94  HIGH
+[CBN · T1] [3 sources] [30 May 2026]      ●●●●○  0.94  HIGH
                                           Source:   97%
 SIGNAL TITLE (full, no truncation)        Corroboration: 85%
                                           Recency:  96%
@@ -1857,15 +1857,15 @@ function generateSuggestedQueries(
 
 :root {
   /* Background layers */
-  --bg-app:       #09090b;   /* zinc-950 — main app background */
-  --bg-surface:   #18181b;   /* zinc-900 — card/panel background */
-  --bg-elevated:  #27272a;   /* zinc-800 — dropdown/tooltip/input */
+  --bg-app:       #eeeef2;   /* zinc-950 — main app background */
+  --bg-surface:   #f9f9ff;   /* zinc-900 — card/panel background */
+  --bg-elevated:  #525253;   /* zinc-800 — dropdown/tooltip/input */
   --bg-hover:     #3f3f46;   /* zinc-700 — hover states */
 
   /* Content */
-  --text-primary:   #fafafa;  /* zinc-50 — headlines, important labels */
+  --text-primary:   #000000;  /* zinc-50 — headlines, important labels */
   --text-secondary: #a1a1aa;  /* zinc-400 — body text, descriptions */
-  --text-muted:     #71717a;  /* zinc-500 — metadata, timestamps */
+  --text-muted:     #2e2d2d;  /* zinc-500 — metadata, timestamps */
   --text-disabled:  #52525b;  /* zinc-600 — disabled states */
 
   /* Borders */
