@@ -16,7 +16,7 @@ jobs:
           POSTGRES_USER: sc_test
           POSTGRES_PASSWORD: sc_test
         ports:
-          - 5432:5432
+          - 5432
         options: >-
           --health-cmd "pg_isready -U sc_test -d sc_test"
           --health-interval 5s
@@ -25,7 +25,7 @@ jobs:
       redis:
         image: redis:7-alpine
         ports:
-          - 6379:6379
+          - 6379
         options: >-
           --health-cmd "redis-cli ping"
           --health-interval 5s
@@ -49,6 +49,13 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r backend/requirements.txt
           pip install -r backend/requirements-dev.txt
+
+      - name: Verify integration service ports
+        run: |
+          python -c "import os, socket; socket.create_connection(('127.0.0.1', int(os.environ['POSTGRES_PORT'])), timeout=5).close(); socket.create_connection(('127.0.0.1', int(os.environ['REDIS_PORT'])), timeout=5).close()"
+        env:
+          POSTGRES_PORT: ${{ job.services.postgres.ports[5432] }}
+          REDIS_PORT: ${{ job.services.redis.ports[6379] }}
 
       # ── Code quality ──────────────────────────────────────────────
       - name: Lint (ruff)
@@ -79,16 +86,16 @@ jobs:
             --cov-report=xml \
             --cov-fail-under=75
         env:
-          DATABASE_URL: postgresql://sc_test:sc_test@localhost/sc_test
-          REDIS_URL: redis://localhost:6379
+          DATABASE_URL: postgresql://sc_test:sc_test@127.0.0.1:${{ job.services.postgres.ports[5432] }}/sc_test
+          REDIS_URL: redis://127.0.0.1:${{ job.services.redis.ports[6379] }}/0
 
       - name: Run integration tests
         run: |
           pytest backend/tests/integration/ -v \
             --timeout=30
         env:
-          DATABASE_URL: postgresql://sc_test:sc_test@localhost/sc_test
-          REDIS_URL: redis://localhost:6379
+          DATABASE_URL: postgresql://sc_test:sc_test@127.0.0.1:${{ job.services.postgres.ports[5432] }}/sc_test
+          REDIS_URL: redis://127.0.0.1:${{ job.services.redis.ports[6379] }}/0
           ENVIRONMENT: test
 
       # ── Build Docker image ─────────────────────────────────────────
