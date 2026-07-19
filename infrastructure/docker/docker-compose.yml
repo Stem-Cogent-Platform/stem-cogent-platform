@@ -9,6 +9,7 @@ services:
       POSTGRES_PASSWORD: sc_local_password
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U sc_local -d stemcogent"]
+      start_period: 90s
       interval: 5s
       timeout: 5s
       retries: 10
