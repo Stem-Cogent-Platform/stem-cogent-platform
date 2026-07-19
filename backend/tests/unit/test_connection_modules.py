@@ -11,10 +11,10 @@ def test_database_url_converts_postgres_scheme(monkeypatch) -> None:
     monkeypatch.setattr(
         database,
         "get_settings",
-        lambda: SimpleNamespace(DATABASE_URL="postgresql://user:pass@db/app"),
+        lambda: SimpleNamespace(DATABASE_URL="postgresql://example.invalid/app"),
     )
 
-    assert database._database_url() == "postgresql+asyncpg://user:pass@db/app"
+    assert database._database_url() == "postgresql+asyncpg://example.invalid/app"
 
 
 def test_database_url_is_none_when_not_configured(monkeypatch) -> None:

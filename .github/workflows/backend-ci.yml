@@ -57,7 +57,7 @@ jobs:
           docker run --rm \
             --volume "${{ github.workspace }}:/repo:ro" \
             trufflesecurity/trufflehog:3.88.0 \
-            filesystem --directory=/repo/backend --fail
+            filesystem /repo/backend --fail
 
       - name: Dependency CVE scan — Safety
         run: safety check -r backend/requirements.txt --full-report
