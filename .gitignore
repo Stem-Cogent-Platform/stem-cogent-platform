@@ -6,3 +6,5 @@ coverage.xml
 bandit-report.json
 frontend/node_modules/
 frontend/.next/
+frontend/coverage/
+frontend/*.tsbuildinfo
