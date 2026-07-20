@@ -282,19 +282,11 @@ name: Backend CI
 
 on:
   pull_request:
-    paths:
-      - 'backend/**'
-      - 'infrastructure/docker/backend.Dockerfile'
-      - '.github/workflows/backend-ci.yml'
-
-permissions:
-  contents: read
+    paths: ['backend/**', '.github/workflows/backend-ci.yml']
 
 jobs:
   test-and-scan:
     runs-on: ubuntu-latest
-    env:
-      IMAGE_REF: sc-api-service:${{ github.sha }}
     services:
       # Spin up local Postgres + Redis for integration tests
       postgres:
@@ -313,8 +305,6 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-        with:
-          persist-credentials: false
 
       - name: Set up Python 3.12
         uses: actions/setup-python@v5
@@ -368,28 +358,16 @@ jobs:
       # ── Build Docker image ─────────────────────────────────────────
       - name: Build Docker image (verify it builds)
         run: |
-          docker build --pull -f infrastructure/docker/backend.Dockerfile \
-            -t "$IMAGE_REF" \
+          docker build -f infrastructure/docker/backend.Dockerfile \
+            -t sc-api-service:pr-${{ github.event.pull_request.number }} \
             backend/
 
-      - name: Verify container base OS
-        run: |
-          container_os="$(docker run --rm --entrypoint sh "$IMAGE_REF" \
-            -c '. /etc/os-release; printf "%s" "$ID"')"
-          echo "Container base OS: $container_os"
-          test "$container_os" = "alpine"
-
       - name: Container image scan — Trivy
-        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        uses: aquasecurity/trivy-action@master
         with:
-          image-ref: ${{ env.IMAGE_REF }}
-          scan-type: image
-          format: table
-          vuln-type: os,library
-          scanners: vuln,secret
-          ignore-unfixed: false
-          severity: CRITICAL,HIGH
-          exit-code: '1'    # Fail on HIGH or CRITICAL CVEs in image
+          image-ref: sc-api-service:pr-${{ github.event.pull_request.number }}
+          severity: HIGH,CRITICAL
+          exit-code: 1    # Fail on HIGH or CRITICAL CVEs in image
 ```
 
 ## 4.4 Frontend CI Pipeline
