@@ -743,17 +743,16 @@ ZERO-DOWNTIME GUARANTEES:
 
 ```dockerfile
 # infrastructure/docker/backend.Dockerfile
-FROM python:3.12.13-alpine3.23 AS builder
+FROM python:3.12-slim AS builder
 
 WORKDIR /build
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-FROM python:3.12.13-alpine3.23 AS runtime
+FROM python:3.12-slim AS runtime
 
 # Security: non-root user
-RUN addgroup -g 1000 -S appuser \
-    && adduser -u 1000 -S -D -H -G appuser appuser
+RUN useradd --uid 1000 --no-create-home appuser
 
 WORKDIR /app
 
@@ -771,7 +770,7 @@ RUN chmod -R 444 /app
 EXPOSE 8000
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
-  CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/health/ready', timeout=5).close()"
+  CMD curl -f http://localhost:8000/health/ready || exit 1
 
 CMD ["gunicorn", "app.main:app",
      "--worker-class", "uvicorn.workers.UvicornWorker",
@@ -784,10 +783,9 @@ CMD ["gunicorn", "app.main:app",
 
 ```dockerfile
 # infrastructure/docker/worker.Dockerfile
-FROM python:3.12.13-alpine3.23 AS runtime
+FROM python:3.12-slim AS runtime
 
-RUN addgroup -g 1000 -S workeruser \
-    && adduser -u 1000 -S -D -H -G workeruser workeruser
+RUN useradd --uid 1000 --no-create-home workeruser
 
 WORKDIR /app
 

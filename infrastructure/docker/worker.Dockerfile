@@ -1,10 +1,9 @@
-FROM python:3.12.13-alpine3.23 AS runtime
+FROM python:3.12-slim AS runtime
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 
-RUN addgroup -g 1000 -S workeruser \
-    && adduser -u 1000 -S -D -H -G workeruser workeruser
+RUN useradd --uid 1000 --no-create-home workeruser
 
 WORKDIR /app
 
