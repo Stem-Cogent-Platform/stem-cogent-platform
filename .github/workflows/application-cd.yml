@@ -1,6 +1,10 @@
 name: Application CD
 
 on:
+  pull_request:
+    paths:
+      - 'infrastructure/docker/**'
+      - '.github/workflows/application-cd.yml'
   push:
     branches: [main, staging]
     paths:
@@ -8,6 +12,20 @@ on:
       - 'frontend/**'
       - 'infrastructure/docker/**'
       - '.github/workflows/application-cd.yml'
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Environment whose images should be built
+        required: true
+        type: choice
+        options:
+          - staging
+          - production
+      deploy:
+        description: Run migrations and deploy after building images
+        required: true
+        default: false
+        type: boolean
 
 env:
   AWS_REGION: eu-west-1
@@ -17,11 +35,55 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  validate-definition:
+    name: Validate deployment definition
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Verify required deployment assets
+        shell: bash
+        run: |
+          required_files=(
+            infrastructure/docker/backend.Dockerfile
+            infrastructure/docker/worker.Dockerfile
+            infrastructure/docker/frontend.Dockerfile
+          )
+          for file in "${required_files[@]}"; do
+            test -s "$file" || {
+              echo "Required deployment asset is missing or empty: $file" >&2
+              exit 1
+            }
+          done
+          if grep -Eq 'arn:aws:iam::(ACCOUNT|[0-9]{12}):|aws-access-key-id|aws-secret-access-key' \
+            .github/workflows/application-cd.yml; then
+            echo "The application deployment workflow contains a static AWS identity or credential field." >&2
+            exit 1
+          fi
+
+  deployment-disabled:
+    name: Deployment intentionally disabled
+    if: github.event_name == 'push' && ((github.ref_name == 'staging' && vars.STAGING_APPLICATION_DEPLOY_ENABLED != 'true') || (github.ref_name == 'main' && vars.PRODUCTION_APPLICATION_DEPLOY_ENABLED != 'true'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - name: Report inactive deployment gate
+        run: echo "Application deployment remains disabled until its Phase 1 infrastructure prerequisites are complete."
+
   build-images:
     name: Build ${{ matrix.image }} image
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && ((github.ref_name == 'staging' && vars.STAGING_APPLICATION_DEPLOY_ENABLED == 'true') || (github.ref_name == 'main' && vars.PRODUCTION_APPLICATION_DEPLOY_ENABLED == 'true')))
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    environment: ${{ github.ref_name == 'main' && 'production' || 'staging' }}
+    environment: ${{ github.event_name == 'workflow_dispatch' && inputs.environment || github.ref_name == 'main' && 'production' || 'staging' }}
     permissions:
       contents: read
       id-token: write
@@ -54,6 +116,13 @@ jobs:
       - name: Verify build configuration
         shell: bash
         run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            expected_ref="${{ inputs.environment == 'production' && 'main' || 'staging' }}"
+            test "$GITHUB_REF_NAME" = "$expected_ref" || {
+              echo "${{ inputs.environment }} builds must run from the $expected_ref branch." >&2
+              exit 1
+            }
+          fi
           for variable in AWS_ROLE_ARN AWS_ACCOUNT_ID ECR_REPOSITORY; do
             test -n "${!variable}" || {
               echo "$variable is not configured in the GitHub deployment environment." >&2
@@ -117,10 +186,11 @@ jobs:
 
   deploy:
     name: Deploy to ${{ github.ref_name == 'main' && 'production' || 'staging' }}
+    if: (github.event_name == 'push' && ((github.ref_name == 'staging' && vars.STAGING_APPLICATION_DEPLOY_ENABLED == 'true') || (github.ref_name == 'main' && vars.PRODUCTION_APPLICATION_DEPLOY_ENABLED == 'true'))) || (github.event_name == 'workflow_dispatch' && inputs.deploy == true && ((inputs.environment == 'staging' && vars.STAGING_APPLICATION_DEPLOY_ENABLED == 'true') || (inputs.environment == 'production' && vars.PRODUCTION_APPLICATION_DEPLOY_ENABLED == 'true')))
     needs: build-images
     runs-on: ubuntu-latest
     timeout-minutes: 60
-    environment: ${{ github.ref_name == 'main' && 'production' || 'staging' }}
+    environment: ${{ github.event_name == 'workflow_dispatch' && inputs.environment || github.ref_name == 'main' && 'production' || 'staging' }}
     permissions:
       contents: read
       id-token: write

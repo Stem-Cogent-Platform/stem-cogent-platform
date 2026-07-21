@@ -597,6 +597,38 @@ jobs:
             --task-definition $PREV_TASK_DEF
 ```
 
+### 4.6.1 Production Implementation Requirements
+
+The workflow above defines the intended deployment sequence. The production
+implementation must additionally satisfy the following requirements:
+
+- Pull requests validate the workflow definition but never receive AWS deploy
+  credentials and never deploy.
+- A manual build-only mode seeds ECR before the initial ECS services exist.
+- Because GitHub only accepts `workflow_dispatch` events for workflow files
+  present on the default branch, the validated workflow definition must be
+  promoted to the default branch while both deployment activation variables
+  remain false.
+- Full environment deployment is disabled until the matching repository-level
+  `STAGING_APPLICATION_DEPLOY_ENABLED=true` or
+  `PRODUCTION_APPLICATION_DEPLOY_ENABLED=true` variable is set. Repository
+  scope is required because GitHub evaluates job conditions before loading
+  environment-scoped variables onto a runner.
+- GitHub authenticates through OIDC using separate least-privilege build and
+  deploy roles. Static AWS account IDs, access keys, and role ARNs are forbidden
+  in the workflow.
+- API, worker, and frontend images build in parallel and are pushed with the
+  immutable Git commit SHA. `latest` is convenience metadata only and must not
+  be the task-definition deployment reference.
+- The migration task uses the new API image, runs before service updates, and
+  must reach `STOPPED` with exit code 0 before deployment continues.
+- Every service update registers a new task-definition revision containing the
+  immutable image URI, uses the ECS rolling deployment strategy, waits for
+  stability, and retains the previous task-definition ARN for rollback.
+- Rollback covers every service changed by the workflow, not only the API.
+- The readiness smoke test must return HTTP 200 with `status=ready`. Once a
+  protected API route exists, an unauthenticated request must also return 401.
+
 ---
 
 ---

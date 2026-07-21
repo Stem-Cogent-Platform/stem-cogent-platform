@@ -343,11 +343,22 @@ TASK 1.2.3 — Infrastructure CD pipeline
   Done when: `terraform plan` runs without error on staging
 
 TASK 1.2.4 — Application CD pipeline
-  File:    .github/workflows/application-cd.yml
+  Files:
+    .github/workflows/application-cd.yml
+    infrastructure/docker/frontend.Dockerfile
   Content: Per SC-DOC-009 Section 4.6
   Includes: ECR push, ECS migration task, rolling service update,
-            smoke test, auto-rollback on failure
-  Done when: Merge to staging triggers deploy and health check passes
+            smoke test, auto-rollback on failure, PR definition validation,
+            and manual build-only mode for initial ECR bootstrap
+  Safety:  Full deploy jobs require the matching repository variable
+           STAGING_APPLICATION_DEPLOY_ENABLED=true or
+           PRODUCTION_APPLICATION_DEPLOY_ENABLED=true.
+           Keep both false until the corresponding environment is ready.
+  Done when: Application CD workflow is accepted by GitHub;
+             "Validate deployment definition" runs green on a test PR;
+             workflow definition is promoted to the default branch while both
+             application deployment activation variables remain false
+  Live acceptance: TASK 1.5.6 — Application CD staging acceptance
 ```
 
 ---
@@ -438,6 +449,62 @@ TASK 1.3.11 — VPC Endpoints
   Creates: VPC endpoints for all AWS services per SC-DOC-009 Section 7.4
            (S3, SQS, Secrets Manager, KMS, ECR, CloudWatch, X-Ray, SNS)
   Done when: All endpoints created; route tables updated
+
+TASK 1.3.12 — ECR Repositories
+  File:    infrastructure/terraform/modules/ecr/
+  Creates: Separate repositories for API, worker, and frontend images
+           in each environment
+  Config:  KMS encryption, immutable release tags, scan-on-push,
+           lifecycle retention policy
+  Done when: All 3 staging repositories exist; manual build-only run of
+             application-cd.yml pushes the current commit SHA to each repo
+
+TASK 1.3.13 — Application CD IAM Roles & GitHub Contract
+  File:    infrastructure/terraform/modules/iam/application_cd.tf
+  Creates: Separate GitHub OIDC build role (ECR push only) and deploy role
+           (ECS deployment only) for each environment
+  Outputs: Actual role ARNs and deployment resource values required by the
+           staging and production GitHub Environments
+  GitHub repository variables:
+    STAGING_APPLICATION_DEPLOY_ENABLED=false
+    PRODUCTION_APPLICATION_DEPLOY_ENABLED=false
+  GitHub Environment variables:
+    AWS_APPLICATION_BUILD_ROLE_ARN
+    AWS_APPLICATION_DEPLOY_ROLE_ARN
+    AWS_ACCOUNT_ID
+    ECR_API_REPOSITORY
+    ECR_WORKER_REPOSITORY
+    ECR_FRONTEND_REPOSITORY
+    NEXT_PUBLIC_API_URL
+    NEXT_PUBLIC_WS_URL
+    ECS_CLUSTER_NAME
+    ECS_MIGRATION_TASK_DEFINITION
+    ECS_MIGRATION_CONTAINER_NAME
+    ECS_MIGRATION_SUBNET_IDS
+    ECS_MIGRATION_SECURITY_GROUP_IDS
+    ECS_SERVICE_DEPLOYMENTS
+    API_BASE_URL
+    AUTH_SMOKE_TEST_PATH (set when the first protected endpoint exists)
+  Done when: GitHub can assume both roles through OIDC; build role cannot
+             update ECS; deploy role cannot push ECR images
+
+TASK 1.3.14 — Application Load Balancer & HTTPS
+  File:    infrastructure/terraform/modules/alb/
+  Creates: Internet-facing ALB, API and frontend target groups, HTTPS listener,
+           HTTP-to-HTTPS redirect, ACM certificate attachment, Route 53 records
+  Done when: HTTPS endpoint resolves; ALB target groups exist with health-check
+             paths configured; no public listener serves plaintext application traffic
+
+TASK 1.3.15 — ECS Task Definitions & Phase 1 Services
+  File:    infrastructure/terraform/modules/ecs/services.tf
+  Creates: API and frontend task definitions/services plus a one-shot migration
+           task definition; deployment circuit breaker with rollback enabled;
+           minimumHealthyPercent=50 and maximumPercent=200
+  Bootstrap: Use the immutable commit SHA pushed by TASK 1.3.12.
+             Do not create Phase 2 worker services before their worker code exists.
+  Output:  ECS_SERVICE_DEPLOYMENTS JSON for the Phase 1 API/frontend services
+  Done when: API and frontend services are stable in staging; migration task
+             definition can start in private-app subnets
 ```
 
 ---
@@ -552,6 +619,17 @@ TASK 1.5.5 — P1 Alarms
            sc-dlq-critical-depth alarm
   Spec:    SC-DOC-009 Section 7.5
   Done when: Alarms in INSUFFICIENT_DATA state (no data yet — correct)
+
+TASK 1.5.6 — Application CD staging acceptance
+  Prerequisites: TASKS 1.3.12–1.3.15 complete; all TASK 1.4 migrations complete;
+                 staging RDS and Redis reachable; required secrets populated
+  Action:
+    1. Set repository variable STAGING_APPLICATION_DEPLOY_ENABLED=true
+    2. Merge a reviewed application change to staging
+    3. Observe ECR push, migration task, rolling service deployment,
+       stability wait, and smoke test
+  Done when: Merge to staging triggers deploy; migration exits 0;
+             GET /health/ready returns 200; workflow is green
 ```
 
 ---
@@ -1664,6 +1742,11 @@ DONE CONDITION:
 | 1.2.2 | Frontend CI pipeline | SC-DOC-009 §4.4 | .github/workflows/frontend-ci.yml |
 | 1.2.3 | Infrastructure CD | SC-DOC-009 §4.5 | .github/workflows/infrastructure-cd.yml |
 | 1.2.4 | Application CD | SC-DOC-009 §4.6 | .github/workflows/application-cd.yml |
+| 1.3.12 | ECR repositories | SC-DOC-009 §4.6, §5 | infrastructure/terraform/modules/ecr/ |
+| 1.3.13 | Application CD IAM roles | SC-DOC-008 §4.6, SC-DOC-009 §4.6 | infrastructure/terraform/modules/iam/application_cd.tf |
+| 1.3.14 | ALB & HTTPS | SC-DOC-008 §7, SC-DOC-009 §5 | infrastructure/terraform/modules/alb/ |
+| 1.3.15 | ECS services & task definitions | SC-DOC-009 §5 | infrastructure/terraform/modules/ecs/services.tf |
+| 1.5.6 | Application CD staging acceptance | SC-DOC-009 §4.6, §5.4 | Staging GitHub deployment run |
 | 1.3.1 | VPC & networking | SC-DOC-009 §7.1, SC-DOC-008 §7.1 | terraform/modules/vpc/ |
 | 1.3.6 | RDS PostgreSQL | SC-DOC-009 §6.1 | terraform/modules/rds/ |
 | 1.3.7 | ElastiCache Redis | SC-DOC-009 §6.2 | terraform/modules/elasticache/ |
