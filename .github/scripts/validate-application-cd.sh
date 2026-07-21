@@ -18,13 +18,15 @@ for file in "${required_files[@]}"; do
   }
 done
 
-iam_role_prefix='arn:aws:iam::'
-access_key_field='aws-access-key-id'
-secret_key_field='aws-secret-access-key'
-forbidden_pattern="${iam_role_prefix}(ACCOUNT|[0-9]{12}):|${access_key_field}|${secret_key_field}"
+workflow_file=.github/workflows/application-cd.yml
+static_identity_matches="$({
+  grep -En '^[[:space:]]*role-to-assume:[[:space:]]*arn:aws:iam::' "$workflow_file" || true
+  grep -En '^[[:space:]]*(aws-access-key-id|aws-secret-access-key):' "$workflow_file" || true
+})"
 
-if grep -Eq "$forbidden_pattern" .github/workflows/application-cd.yml; then
-  echo "The application deployment workflow contains a static AWS identity or credential field." >&2
+if [ -n "$static_identity_matches" ]; then
+  echo "The application deployment workflow contains a static AWS identity or credential field:" >&2
+  echo "$static_identity_matches" >&2
   exit 1
 fi
 
