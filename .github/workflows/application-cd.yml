@@ -1,0 +1,447 @@
+name: Application CD
+
+on:
+  push:
+    branches: [main, staging]
+    paths:
+      - 'backend/**'
+      - 'frontend/**'
+      - 'infrastructure/docker/**'
+      - '.github/workflows/application-cd.yml'
+
+env:
+  AWS_REGION: eu-west-1
+
+concurrency:
+  group: application-deploy-${{ github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  build-images:
+    name: Build ${{ matrix.image }} image
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: ${{ github.ref_name == 'main' && 'production' || 'staging' }}
+    permissions:
+      contents: read
+      id-token: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: api
+            dockerfile: infrastructure/docker/backend.Dockerfile
+            context: backend
+          - image: worker
+            dockerfile: infrastructure/docker/worker.Dockerfile
+            context: backend
+          - image: frontend
+            dockerfile: infrastructure/docker/frontend.Dockerfile
+            context: frontend
+    env:
+      AWS_ROLE_ARN: ${{ vars.AWS_APPLICATION_BUILD_ROLE_ARN }}
+      AWS_ACCOUNT_ID: ${{ vars.AWS_ACCOUNT_ID }}
+      ECR_REPOSITORY: ${{ matrix.image == 'api' && vars.ECR_API_REPOSITORY || matrix.image == 'worker' && vars.ECR_WORKER_REPOSITORY || vars.ECR_FRONTEND_REPOSITORY }}
+      NEXT_PUBLIC_API_URL: ${{ vars.NEXT_PUBLIC_API_URL }}
+      NEXT_PUBLIC_WS_URL: ${{ vars.NEXT_PUBLIC_WS_URL }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Verify build configuration
+        shell: bash
+        run: |
+          for variable in AWS_ROLE_ARN AWS_ACCOUNT_ID ECR_REPOSITORY; do
+            test -n "${!variable}" || {
+              echo "$variable is not configured in the GitHub deployment environment." >&2
+              exit 1
+            }
+          done
+          [[ "$AWS_ACCOUNT_ID" =~ ^[0-9]{12}$ ]] || {
+            echo "AWS_ACCOUNT_ID must contain exactly 12 digits." >&2
+            exit 1
+          }
+          if [ "${{ matrix.image }}" = "frontend" ]; then
+            for variable in NEXT_PUBLIC_API_URL NEXT_PUBLIC_WS_URL; do
+              test -n "${!variable}" || {
+                echo "$variable is required to build the frontend image." >&2
+                exit 1
+              }
+            done
+          fi
+
+      - name: Configure AWS credentials through OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.AWS_ROLE_ARN }}
+          role-session-name: sc-application-build-${{ matrix.image }}-${{ github.run_id }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Verify ECR repository
+        run: aws ecr describe-repositories --repository-names "$ECR_REPOSITORY" >/dev/null
+
+      - name: Log in to Amazon ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build image
+        shell: bash
+        env:
+          ECR_REGISTRY: ${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          build_args=()
+          if [ "${{ matrix.image }}" = "frontend" ]; then
+            build_args+=(
+              --build-arg "NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL"
+              --build-arg "NEXT_PUBLIC_WS_URL=$NEXT_PUBLIC_WS_URL"
+            )
+          fi
+
+          docker build --pull \
+            -f "${{ matrix.dockerfile }}" \
+            "${build_args[@]}" \
+            -t "$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" \
+            -t "$ECR_REGISTRY/$ECR_REPOSITORY:latest" \
+            "${{ matrix.context }}"
+
+      - name: Push immutable and convenience tags
+        env:
+          ECR_REGISTRY: ${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          docker push "$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
+          docker push "$ECR_REGISTRY/$ECR_REPOSITORY:latest"
+
+  deploy:
+    name: Deploy to ${{ github.ref_name == 'main' && 'production' || 'staging' }}
+    needs: build-images
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    environment: ${{ github.ref_name == 'main' && 'production' || 'staging' }}
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      AWS_ROLE_ARN: ${{ vars.AWS_APPLICATION_DEPLOY_ROLE_ARN }}
+      AWS_ACCOUNT_ID: ${{ vars.AWS_ACCOUNT_ID }}
+      ECR_API_REPOSITORY: ${{ vars.ECR_API_REPOSITORY }}
+      ECR_WORKER_REPOSITORY: ${{ vars.ECR_WORKER_REPOSITORY }}
+      ECR_FRONTEND_REPOSITORY: ${{ vars.ECR_FRONTEND_REPOSITORY }}
+      ECS_CLUSTER_NAME: ${{ vars.ECS_CLUSTER_NAME }}
+      ECS_MIGRATION_TASK_DEFINITION: ${{ vars.ECS_MIGRATION_TASK_DEFINITION }}
+      ECS_MIGRATION_CONTAINER_NAME: ${{ vars.ECS_MIGRATION_CONTAINER_NAME }}
+      ECS_MIGRATION_SUBNET_IDS: ${{ vars.ECS_MIGRATION_SUBNET_IDS }}
+      ECS_MIGRATION_SECURITY_GROUP_IDS: ${{ vars.ECS_MIGRATION_SECURITY_GROUP_IDS }}
+      ECS_SERVICE_DEPLOYMENTS: ${{ vars.ECS_SERVICE_DEPLOYMENTS }}
+      API_BASE_URL: ${{ vars.API_BASE_URL }}
+      AUTH_SMOKE_TEST_PATH: ${{ vars.AUTH_SMOKE_TEST_PATH }}
+      IMAGE_TAG: ${{ github.sha }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Verify deployment configuration
+        shell: bash
+        run: |
+          required_variables=(
+            AWS_ROLE_ARN
+            AWS_ACCOUNT_ID
+            ECR_API_REPOSITORY
+            ECR_WORKER_REPOSITORY
+            ECR_FRONTEND_REPOSITORY
+            ECS_CLUSTER_NAME
+            ECS_MIGRATION_TASK_DEFINITION
+            ECS_MIGRATION_CONTAINER_NAME
+            ECS_MIGRATION_SUBNET_IDS
+            ECS_MIGRATION_SECURITY_GROUP_IDS
+            ECS_SERVICE_DEPLOYMENTS
+            API_BASE_URL
+          )
+          for variable in "${required_variables[@]}"; do
+            test -n "${!variable}" || {
+              echo "$variable is not configured in the GitHub deployment environment." >&2
+              exit 1
+            }
+          done
+          [[ "$AWS_ACCOUNT_ID" =~ ^[0-9]{12}$ ]] || {
+            echo "AWS_ACCOUNT_ID must contain exactly 12 digits." >&2
+            exit 1
+          }
+          [[ "$API_BASE_URL" == https://* ]] || {
+            echo "API_BASE_URL must use HTTPS." >&2
+            exit 1
+          }
+          jq -e 'type == "array" and length > 0 and all(.[]; ((.service | type) == "string") and ((.service | length) > 0) and ((.container | type) == "string") and ((.container | length) > 0) and (.image == "api" or .image == "worker" or .image == "frontend"))' <<<"$ECS_SERVICE_DEPLOYMENTS" >/dev/null || {
+            echo "ECS_SERVICE_DEPLOYMENTS must be a non-empty valid service deployment array." >&2
+            exit 1
+          }
+          jq -e 'type == "array" and length > 0 and all(.[]; type == "string")' \
+            <<<"$ECS_MIGRATION_SUBNET_IDS" >/dev/null || {
+            echo "ECS_MIGRATION_SUBNET_IDS must be a non-empty JSON string array." >&2
+            exit 1
+          }
+          jq -e 'type == "array" and length > 0 and all(.[]; type == "string")' \
+            <<<"$ECS_MIGRATION_SECURITY_GROUP_IDS" >/dev/null || {
+            echo "ECS_MIGRATION_SECURITY_GROUP_IDS must be a non-empty JSON string array." >&2
+            exit 1
+          }
+
+      - name: Configure AWS credentials through OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.AWS_ROLE_ARN }}
+          role-session-name: sc-application-deploy-${{ github.run_id }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Verify AWS deployment target
+        shell: bash
+        run: |
+          actual_account_id="$(aws sts get-caller-identity --query Account --output text)"
+          test "$actual_account_id" = "$AWS_ACCOUNT_ID" || {
+            echo "OIDC role targets AWS account $actual_account_id; expected $AWS_ACCOUNT_ID." >&2
+            exit 1
+          }
+          aws ecs describe-clusters \
+            --clusters "$ECS_CLUSTER_NAME" \
+            --query 'clusters[?status==`ACTIVE`].clusterName | [0]' \
+            --output text | grep -Fx "$ECS_CLUSTER_NAME" >/dev/null
+
+      - name: Register migration task definition
+        id: migration-definition
+        shell: bash
+        env:
+          ECR_REGISTRY: ${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com
+        run: |
+          aws ecs describe-task-definition \
+            --task-definition "$ECS_MIGRATION_TASK_DEFINITION" \
+            --query taskDefinition \
+            --output json > migration-current.json
+
+          matching_containers="$(jq --arg container "$ECS_MIGRATION_CONTAINER_NAME" \
+            '[.containerDefinitions[] | select(.name == $container)] | length' \
+            migration-current.json)"
+          test "$matching_containers" = "1" || {
+            echo "Expected exactly one migration container named $ECS_MIGRATION_CONTAINER_NAME." >&2
+            exit 1
+          }
+
+          jq \
+            --arg container "$ECS_MIGRATION_CONTAINER_NAME" \
+            --arg image "$ECR_REGISTRY/$ECR_API_REPOSITORY:$IMAGE_TAG" '
+              del(
+                .taskDefinitionArn,
+                .revision,
+                .status,
+                .requiresAttributes,
+                .compatibilities,
+                .registeredAt,
+                .registeredBy,
+                .deregisteredAt
+              )
+              | (.containerDefinitions[] | select(.name == $container).image) = $image
+            ' migration-current.json > migration-next.json
+
+          migration_task_definition="$(aws ecs register-task-definition \
+            --cli-input-json file://migration-next.json \
+            --query taskDefinition.taskDefinitionArn \
+            --output text)"
+          echo "arn=$migration_task_definition" >> "$GITHUB_OUTPUT"
+
+      - name: Run and verify database migrations
+        shell: bash
+        env:
+          MIGRATION_TASK_DEFINITION: ${{ steps.migration-definition.outputs.arn }}
+        run: |
+          jq -n \
+            --argjson subnets "$ECS_MIGRATION_SUBNET_IDS" \
+            --argjson security_groups "$ECS_MIGRATION_SECURITY_GROUP_IDS" '
+              {
+                awsvpcConfiguration: {
+                  subnets: $subnets,
+                  securityGroups: $security_groups,
+                  assignPublicIp: "DISABLED"
+                }
+              }
+            ' > migration-network.json
+          jq -n --arg container "$ECS_MIGRATION_CONTAINER_NAME" '
+            {
+              containerOverrides: [
+                {name: $container, command: ["alembic", "upgrade", "head"]}
+              ]
+            }
+          ' > migration-overrides.json
+
+          aws ecs run-task \
+            --cluster "$ECS_CLUSTER_NAME" \
+            --task-definition "$MIGRATION_TASK_DEFINITION" \
+            --launch-type FARGATE \
+            --count 1 \
+            --started-by "github-${GITHUB_RUN_ID}" \
+            --network-configuration file://migration-network.json \
+            --overrides file://migration-overrides.json > migration-run.json
+
+          if [ "$(jq '.failures | length' migration-run.json)" -ne 0 ]; then
+            jq '.failures' migration-run.json >&2
+            exit 1
+          fi
+          migration_task_arn="$(jq -r '.tasks[0].taskArn // empty' migration-run.json)"
+          test -n "$migration_task_arn" || {
+            echo "ECS did not return a migration task ARN." >&2
+            exit 1
+          }
+
+          aws ecs wait tasks-stopped \
+            --cluster "$ECS_CLUSTER_NAME" \
+            --tasks "$migration_task_arn"
+          aws ecs describe-tasks \
+            --cluster "$ECS_CLUSTER_NAME" \
+            --tasks "$migration_task_arn" > migration-result.json
+
+          exit_code="$(jq -r --arg container "$ECS_MIGRATION_CONTAINER_NAME" '.tasks[0].containers[] | select(.name == $container).exitCode // empty' migration-result.json)"
+          if [ "$exit_code" != "0" ]; then
+            jq '{stoppedReason: .tasks[0].stoppedReason, containers: [.tasks[0].containers[] | {name, exitCode, reason, lastStatus}]}' migration-result.json >&2
+            exit 1
+          fi
+
+      - name: Register task definitions and start rolling deployments
+        shell: bash
+        env:
+          ECR_REGISTRY: ${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com
+        run: |
+          : > rollback-task-definitions.tsv
+          : > deployed-services.txt
+
+          while IFS= read -r deployment; do
+            service="$(jq -r '.service' <<<"$deployment")"
+            container="$(jq -r '.container' <<<"$deployment")"
+            image_type="$(jq -r '.image' <<<"$deployment")"
+            case "$image_type" in
+              api) repository="$ECR_API_REPOSITORY" ;;
+              worker) repository="$ECR_WORKER_REPOSITORY" ;;
+              frontend) repository="$ECR_FRONTEND_REPOSITORY" ;;
+              *) echo "Unsupported image type: $image_type" >&2; exit 1 ;;
+            esac
+            image_uri="$ECR_REGISTRY/$repository:$IMAGE_TAG"
+
+            aws ecs describe-services \
+              --cluster "$ECS_CLUSTER_NAME" \
+              --services "$service" > service-current.json
+            failure_reason="$(jq -r '.failures[0].reason // empty' service-current.json)"
+            test -z "$failure_reason" || {
+              echo "ECS service $service is unavailable: $failure_reason" >&2
+              exit 1
+            }
+            current_task_definition="$(jq -r '.services[0].taskDefinition // empty' service-current.json)"
+            test -n "$current_task_definition" || {
+              echo "ECS service $service has no task definition." >&2
+              exit 1
+            }
+
+            aws ecs describe-task-definition \
+              --task-definition "$current_task_definition" \
+              --query taskDefinition \
+              --output json > task-definition-current.json
+            matching_containers="$(jq --arg container "$container" \
+              '[.containerDefinitions[] | select(.name == $container)] | length' \
+              task-definition-current.json)"
+            test "$matching_containers" = "1" || {
+              echo "Expected exactly one container named $container in $current_task_definition." >&2
+              exit 1
+            }
+
+            jq --arg container "$container" --arg image "$image_uri" '
+              del(
+                .taskDefinitionArn,
+                .revision,
+                .status,
+                .requiresAttributes,
+                .compatibilities,
+                .registeredAt,
+                .registeredBy,
+                .deregisteredAt
+              )
+              | (.containerDefinitions[] | select(.name == $container).image) = $image
+            ' task-definition-current.json > task-definition-next.json
+            next_task_definition="$(aws ecs register-task-definition \
+              --cli-input-json file://task-definition-next.json \
+              --query taskDefinition.taskDefinitionArn \
+              --output text)"
+
+            printf '%s\t%s\n' "$service" "$current_task_definition" >> rollback-task-definitions.tsv
+            printf '%s\n' "$service" >> deployed-services.txt
+            aws ecs update-service \
+              --cluster "$ECS_CLUSTER_NAME" \
+              --service "$service" \
+              --task-definition "$next_task_definition" \
+              --deployment-configuration 'minimumHealthyPercent=50,maximumPercent=200,deploymentCircuitBreaker={enable=true,rollback=true}' \
+              >/dev/null
+          done < <(jq -c '.[]' <<<"$ECS_SERVICE_DEPLOYMENTS")
+
+      - name: Wait for all services to become stable
+        shell: bash
+        run: |
+          mapfile -t services < deployed-services.txt
+          test "${#services[@]}" -gt 0
+          for ((offset = 0; offset < ${#services[@]}; offset += 10)); do
+            batch=("${services[@]:offset:10}")
+            aws ecs wait services-stable \
+              --cluster "$ECS_CLUSTER_NAME" \
+              --services "${batch[@]}"
+          done
+
+      - name: Smoke test deployed API
+        shell: bash
+        run: |
+          api_base_url="${API_BASE_URL%/}"
+          curl --fail --silent --show-error \
+            --retry 6 \
+            --retry-all-errors \
+            --retry-delay 10 \
+            "$api_base_url/health/ready" > health-response.json
+          jq -e '.status == "ready"' health-response.json >/dev/null
+
+          if [ -n "$AUTH_SMOKE_TEST_PATH" ]; then
+            auth_status="$(curl --silent --show-error \
+              --output /dev/null \
+              --write-out '%{http_code}' \
+              "$api_base_url/${AUTH_SMOKE_TEST_PATH#/}")"
+            test "$auth_status" = "401" || {
+              echo "Unauthenticated smoke request returned $auth_status; expected 401." >&2
+              exit 1
+            }
+          else
+            echo "AUTH_SMOKE_TEST_PATH is not configured; protected-route smoke test is deferred."
+          fi
+
+      - name: Roll back services after deployment failure
+        if: failure()
+        shell: bash
+        run: |
+          if [ ! -s rollback-task-definitions.tsv ]; then
+            echo "No ECS service updates were started; rollback is not required."
+            exit 0
+          fi
+
+          rollback_services=()
+          while IFS=$'\t' read -r service task_definition; do
+            rollback_services+=("$service")
+            aws ecs update-service \
+              --cluster "$ECS_CLUSTER_NAME" \
+              --service "$service" \
+              --task-definition "$task_definition" \
+              --force-new-deployment \
+              >/dev/null
+          done < rollback-task-definitions.tsv
+
+          for ((offset = 0; offset < ${#rollback_services[@]}; offset += 10)); do
+            batch=("${rollback_services[@]:offset:10}")
+            aws ecs wait services-stable \
+              --cluster "$ECS_CLUSTER_NAME" \
+              --services "${batch[@]}"
+          done
