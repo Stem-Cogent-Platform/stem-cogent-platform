@@ -345,6 +345,7 @@ TASK 1.2.3 — Infrastructure CD pipeline
 TASK 1.2.4 — Application CD pipeline
   Files:
     .github/workflows/application-cd.yml
+    .github/scripts/validate-application-cd.sh
     infrastructure/docker/frontend.Dockerfile
   Content: Per SC-DOC-009 Section 4.6
   Includes: ECR push, ECS migration task, rolling service update,

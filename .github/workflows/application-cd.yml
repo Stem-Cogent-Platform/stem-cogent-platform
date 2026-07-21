@@ -49,24 +49,7 @@ jobs:
           persist-credentials: false
 
       - name: Verify required deployment assets
-        shell: bash
-        run: |
-          required_files=(
-            infrastructure/docker/backend.Dockerfile
-            infrastructure/docker/worker.Dockerfile
-            infrastructure/docker/frontend.Dockerfile
-          )
-          for file in "${required_files[@]}"; do
-            test -s "$file" || {
-              echo "Required deployment asset is missing or empty: $file" >&2
-              exit 1
-            }
-          done
-          if grep -Eq 'arn:aws:iam::(ACCOUNT|[0-9]{12}):|aws-access-key-id|aws-secret-access-key' \
-            .github/workflows/application-cd.yml; then
-            echo "The application deployment workflow contains a static AWS identity or credential field." >&2
-            exit 1
-          fi
+        run: bash .github/scripts/validate-application-cd.sh
 
   deployment-disabled:
     name: Deployment intentionally disabled
