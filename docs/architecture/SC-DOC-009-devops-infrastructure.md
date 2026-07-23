@@ -282,11 +282,19 @@ name: Backend CI
 
 on:
   pull_request:
-    paths: ['backend/**', '.github/workflows/backend-ci.yml']
+    paths:
+      - 'backend/**'
+      - 'infrastructure/docker/backend.Dockerfile'
+      - '.github/workflows/backend-ci.yml'
+
+permissions:
+  contents: read
 
 jobs:
   test-and-scan:
     runs-on: ubuntu-latest
+    env:
+      IMAGE_REF: sc-api-service:${{ github.sha }}
     services:
       # Spin up local Postgres + Redis for integration tests
       postgres:
@@ -305,6 +313,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Set up Python 3.12
         uses: actions/setup-python@v5
@@ -358,16 +368,28 @@ jobs:
       # ── Build Docker image ─────────────────────────────────────────
       - name: Build Docker image (verify it builds)
         run: |
-          docker build -f infrastructure/docker/backend.Dockerfile \
-            -t sc-api-service:pr-${{ github.event.pull_request.number }} \
+          docker build --pull -f infrastructure/docker/backend.Dockerfile \
+            -t "$IMAGE_REF" \
             backend/
 
+      - name: Verify container base OS
+        run: |
+          container_os="$(docker run --rm --entrypoint sh "$IMAGE_REF" \
+            -c '. /etc/os-release; printf "%s" "$ID"')"
+          echo "Container base OS: $container_os"
+          test "$container_os" = "alpine"
+
       - name: Container image scan — Trivy
-        uses: aquasecurity/trivy-action@master
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
-          image-ref: sc-api-service:pr-${{ github.event.pull_request.number }}
-          severity: HIGH,CRITICAL
-          exit-code: 1    # Fail on HIGH or CRITICAL CVEs in image
+          image-ref: ${{ env.IMAGE_REF }}
+          scan-type: image
+          format: table
+          vuln-type: os,library
+          scanners: vuln,secret
+          ignore-unfixed: false
+          severity: CRITICAL,HIGH
+          exit-code: '1'    # Fail on HIGH or CRITICAL CVEs in image
 ```
 
 ## 4.4 Frontend CI Pipeline
@@ -791,16 +813,17 @@ ZERO-DOWNTIME GUARANTEES:
 
 ```dockerfile
 # infrastructure/docker/backend.Dockerfile
-FROM python:3.12-slim AS builder
+FROM python:3.12.13-alpine3.23 AS builder
 
 WORKDIR /build
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-FROM python:3.12-slim AS runtime
+FROM python:3.12.13-alpine3.23 AS runtime
 
 # Security: non-root user
-RUN useradd --uid 1000 --no-create-home appuser
+RUN addgroup -g 1000 -S appuser \
+    && adduser -u 1000 -S -D -H -G appuser appuser
 
 WORKDIR /app
 
@@ -818,7 +841,7 @@ RUN chmod -R 444 /app
 EXPOSE 8000
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
-  CMD curl -f http://localhost:8000/health/ready || exit 1
+  CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/health/ready', timeout=5).close()"
 
 CMD ["gunicorn", "app.main:app",
      "--worker-class", "uvicorn.workers.UvicornWorker",
@@ -831,9 +854,10 @@ CMD ["gunicorn", "app.main:app",
 
 ```dockerfile
 # infrastructure/docker/worker.Dockerfile
-FROM python:3.12-slim AS runtime
+FROM python:3.12.13-alpine3.23 AS runtime
 
-RUN useradd --uid 1000 --no-create-home workeruser
+RUN addgroup -g 1000 -S workeruser \
+    && adduser -u 1000 -S -D -H -G workeruser workeruser
 
 WORKDIR /app
 
