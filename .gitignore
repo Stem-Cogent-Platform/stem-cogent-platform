@@ -8,7 +8,6 @@ frontend/node_modules/
 frontend/.next/
 frontend/coverage/
 frontend/*.tsbuildinfo
-
 # Terraform working data and sensitive plan/state files
 **/.terraform/*
 *.tfstate
