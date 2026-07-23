@@ -87,3 +87,23 @@ output "flow_log_group_name" {
   description = "CloudWatch log group receiving VPC Flow Logs, or null when flow logging is disabled."
   value       = try(aws_cloudwatch_log_group.vpc_flow_logs[0].name, null)
 }
+
+output "alb_security_group_id" {
+  description = "Security group ID for the application load balancer."
+  value       = aws_security_group.alb.id
+}
+
+output "frontend_service_security_group_id" {
+  description = "Security group ID for the frontend ECS service."
+  value       = aws_security_group.frontend_service.id
+}
+
+output "api_service_security_group_id" {
+  description = "Security group ID for the API ECS service."
+  value       = aws_security_group.api_service.id
+}
+
+output "data_layer_security_group_id" {
+  description = "Security group ID for PostgreSQL and Redis data services."
+  value       = aws_security_group.data_layer.id
+}

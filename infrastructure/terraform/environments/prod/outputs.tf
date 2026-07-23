@@ -37,3 +37,23 @@ output "vpc_flow_log_group_name" {
   description = "CloudWatch log group receiving production VPC Flow Logs."
   value       = module.vpc.flow_log_group_name
 }
+
+output "alb_security_group_id" {
+  description = "Security group ID for the production application load balancer."
+  value       = module.vpc.alb_security_group_id
+}
+
+output "frontend_service_security_group_id" {
+  description = "Security group ID for the production frontend ECS service."
+  value       = module.vpc.frontend_service_security_group_id
+}
+
+output "api_service_security_group_id" {
+  description = "Security group ID for the production API ECS service."
+  value       = module.vpc.api_service_security_group_id
+}
+
+output "data_layer_security_group_id" {
+  description = "Security group ID for production PostgreSQL and Redis services."
+  value       = module.vpc.data_layer_security_group_id
+}
