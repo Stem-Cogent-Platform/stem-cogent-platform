@@ -1,3 +1,23 @@
 .venv/
+__pycache__/
+*.py[cod]
+.coverage
+coverage.xml
+bandit-report.json
 frontend/node_modules/
 frontend/.next/
+frontend/coverage/
+frontend/*.tsbuildinfo
+
+# Terraform working data and sensitive plan/state files
+**/.terraform/*
+*.tfstate
+*.tfstate.*
+*.tfplan
+**/tfplan
+crash.log
+crash.*.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
