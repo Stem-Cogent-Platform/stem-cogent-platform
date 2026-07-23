@@ -482,6 +482,22 @@ jobs:
         working-directory: infrastructure/terraform/environments/${{ env.TF_ENV }}
 ```
 
+### 4.5.1 Environment Activation Gates
+
+Terraform plan and apply jobs must be protected by repository-level activation
+variables because job conditions are evaluated before GitHub Environment
+variables are loaded:
+
+```text
+STAGING_TERRAFORM_ENABLED=true
+PRODUCTION_TERRAFORM_ENABLED=false
+```
+
+An environment must remain disabled until its remote-state S3 bucket,
+DynamoDB lock table, KMS key, GitHub OIDC plan role, and GitHub OIDC apply role
+all exist and have been verified. Promoting workflow definitions to `main` must
+not implicitly initialize or mutate production infrastructure.
+
 ## 4.6 Application CD Pipeline
 
 ```yaml
