@@ -18,9 +18,19 @@ env:
   AWS_REGION: eu-west-1
 
 jobs:
+  terraform-disabled:
+    name: Terraform intentionally disabled
+    if: (github.event_name == 'pull_request' && ((github.base_ref == 'staging' && vars.STAGING_TERRAFORM_ENABLED != 'true') || (github.base_ref == 'main' && vars.PRODUCTION_TERRAFORM_ENABLED != 'true'))) || (github.event_name == 'push' && ((github.ref_name == 'staging' && vars.STAGING_TERRAFORM_ENABLED != 'true') || (github.ref_name == 'main' && vars.PRODUCTION_TERRAFORM_ENABLED != 'true')))
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - name: Report inactive Terraform gate
+        run: echo "Terraform remains disabled until the target environment backend and OIDC roles are ready."
+
   pull-request-plan:
     name: Plan (${{ github.base_ref == 'main' && 'production' || 'staging' }})
-    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && ((github.base_ref == 'staging' && vars.STAGING_TERRAFORM_ENABLED == 'true') || (github.base_ref == 'main' && vars.PRODUCTION_TERRAFORM_ENABLED == 'true'))
     runs-on: ubuntu-latest
     timeout-minutes: 30
     environment: ${{ github.base_ref == 'main' && 'production-plan' || 'staging-plan' }}
@@ -174,7 +184,7 @@ jobs:
 
   deployment-plan:
     name: Deployment plan (${{ github.ref_name }})
-    if: github.event_name == 'push'
+    if: github.event_name == 'push' && ((github.ref_name == 'staging' && vars.STAGING_TERRAFORM_ENABLED == 'true') || (github.ref_name == 'main' && vars.PRODUCTION_TERRAFORM_ENABLED == 'true'))
     runs-on: ubuntu-latest
     timeout-minutes: 30
     environment: ${{ github.ref_name == 'main' && 'production-plan' || 'staging-plan' }}
@@ -271,7 +281,7 @@ jobs:
 
   apply:
     name: Apply (${{ github.ref_name }})
-    if: github.event_name == 'push'
+    if: github.event_name == 'push' && ((github.ref_name == 'staging' && vars.STAGING_TERRAFORM_ENABLED == 'true') || (github.ref_name == 'main' && vars.PRODUCTION_TERRAFORM_ENABLED == 'true'))
     needs: deployment-plan
     runs-on: ubuntu-latest
     timeout-minutes: 45

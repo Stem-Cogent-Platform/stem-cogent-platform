@@ -340,6 +340,9 @@ TASK 1.2.3 — Infrastructure CD pipeline
   Content: Per SC-DOC-009 Section 4.5
   Includes: Terraform init, validate, plan (posted to PR), manual approval
             gate for production, apply
+  Safety:  Repository variables gate each environment independently:
+           STAGING_TERRAFORM_ENABLED=true only after staging bootstrap;
+           PRODUCTION_TERRAFORM_ENABLED=false until production bootstrap
   Done when: `terraform plan` runs without error on staging
 
 TASK 1.2.4 — Application CD pipeline
@@ -582,8 +585,7 @@ TASK 1.4.9 — Migration 0008: Audit log
 TASK 1.4.10 — Seed entity registry (launch set)
   Action:  Write and run seed script for initial Entity Registry
   File:    infrastructure/scripts/seed_entity_registry.py
-  Content: All entities from SC-DOC-005 Section 2.2 (regulators, top fintechs,
-           banks, infrastructure providers, initial legislation)
+  Content: All entities from SC-DOC-005 Section 2.2 
   Done when: intelligence.entities has 80+ rows;
              `SELECT COUNT(*) FROM intelligence.entities` >= 80
 ```
@@ -747,14 +749,14 @@ Build collectors in this exact order — each one validates the base class
 works before building the next:
 
 ```
-TASK 2.2.1 — RSS Collector (first and most important)
+TASK 2.2.1 — RSS Collector (first and most important and others will be added after )
   File:    backend/app/ingestion/rss_collector.py
   Source:  CBN Official Circulars RSS feed
-           (https://www.cbn.gov.ng/rss/ — Tier 1, CRITICAL priority)
+           (https://www.cbn.gov.ng/rss/ — Tier 1, CRITICAL priority) and others to be added
   Content: feedparser XML parsing, per-item extraction (title, body,
            published_at, source_url), S3 write, RawSignalEnvelope publish
   Spec:    SC-DOC-004 Section 3.3 (RSS_COLLECTOR parsing logic)
-  Test:    Run collector manually against CBN RSS feed
+  Test:    Run collector manually against RSS feed
   Done when: At least 1 real CBN signal in:
              - S3 sc-raw-signals-staging/ with correct path convention
              - pipeline.raw_signals table with validation_status=PENDING
@@ -789,7 +791,7 @@ TASK 2.2.5 — Upload Collector
   Spec:    SC-DOC-004 Section 3.3 (UPLOAD_COLLECTOR)
   Done when: Enterprise document uploaded via API and processed to pipeline
 
-TASK 2.2.6 — Register first 10 sources in source registry
+TASK 2.2.6 — Register first 30 sources in source registry
   Action:  Run seed script to register initial Tier 1–2 sources
   File:    infrastructure/scripts/seed_sources.py
   Sources to register (minimum):
@@ -802,7 +804,7 @@ TASK 2.2.6 — Register first 10 sources in source registry
     7. BusinessDay FinTech section (RSS, Tier 4, STANDARD, 6-hourly)
     8. Nairametrics Financial (RSS, Tier 3, STANDARD, 6-hourly)
     9. NIBSS Status Page (HTML, Tier 2, HIGH, hourly)
-    10. LinkedIn Jobs Nigeria FinTech (Search, Tier 5, LOW, daily)
+    10. LinkedIn Jobs Nigeria FinTech (Search, Tier 5, LOW, daily) e.t.c
   Done when: 10 rows in config.sources; all with health_status=ACTIVE
 ```
 
@@ -1685,49 +1687,7 @@ NOT IN MVP — DO NOT BUILD DURING PHASES 1-4:
 
 ---
 
-# SECTION 8 — CODING AGENT TASK REFERENCE INDEX
-
----
-
-This section provides a structured index of every task in this document,
-formatted for use with coding agents (Claude, GPT-4, Cursor).
-
-**How to use with a coding agent:**
-Copy the task block below and paste it as the agent's instruction.
-The agent has everything it needs: the file to create, the spec section
-to reference, the exact done condition, and the context of where it
-fits in the pipeline.
-
----
-
-## Coding Agent — Standard Task Template
-
-When assigning any task to a coding agent, use this wrapper:
-
-```
-CONTEXT:
-You are implementing Stem Cogent, an event-driven financial intelligence
-platform for African fintech markets. The platform is built with:
-- FastAPI (Python 3.12) for the backend
-- Next.js 15 (TypeScript) for the frontend
-- PostgreSQL 16 + pgvector for the database
-- Redis 7 + Celery for the message queue and workers
-- AWS SQS for the event broker
-- All inter-service communication via SQS message queues
-
-CORE ARCHITECTURAL RULE (DO NOT VIOLATE):
-LLMs never assign confidence scores, urgency scores, or make classification
-decisions. LLMs are used ONLY for: translation, entity string extraction,
-synthesis formatting, and CIL response generation.
-
-TASK: {paste the specific task block below}
-
-REFERENCE DOCUMENTS:
-{list the spec sections referenced in the task}
-
-DONE CONDITION:
-{paste the done condition from the task}
-```
+# SECTION 8 —  TASK REFERENCE INDEX
 
 ---
 
