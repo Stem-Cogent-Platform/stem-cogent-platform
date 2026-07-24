@@ -57,3 +57,13 @@ output "data_layer_security_group_id" {
   description = "Security group ID for staging PostgreSQL and Redis services."
   value       = module.vpc.data_layer_security_group_id
 }
+
+output "kms_key_arns" {
+  description = "Customer-managed KMS key ARNs for the staging environment, keyed by purpose."
+  value       = module.kms.key_arns
+}
+
+output "kms_alias_names" {
+  description = "Customer-managed KMS alias names for the staging environment, keyed by purpose."
+  value       = module.kms.alias_names
+}

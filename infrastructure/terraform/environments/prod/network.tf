@@ -11,5 +11,5 @@ module "vpc" {
   private_data_subnet_cidrs = var.private_data_subnet_cidrs
   enable_flow_logs          = var.enable_vpc_flow_logs
   flow_log_retention_days   = var.vpc_flow_log_retention_days
-  flow_log_kms_key_arn      = var.vpc_flow_log_kms_key_arn
+  flow_log_kms_key_arn      = module.kms.key_arns["logs"]
 }
