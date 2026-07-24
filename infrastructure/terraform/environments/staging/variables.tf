@@ -77,10 +77,3 @@ variable "vpc_flow_log_retention_days" {
   type        = number
   default     = 90
 }
-
-variable "vpc_flow_log_kms_key_arn" {
-  description = "Optional customer-managed KMS key ARN for the staging VPC Flow Logs log group."
-  type        = string
-  default     = null
-  nullable    = true
-}
