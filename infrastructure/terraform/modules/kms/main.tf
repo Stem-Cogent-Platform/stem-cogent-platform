@@ -1,7 +1,8 @@
 locals {
-  # SC-DOC-008 Section 2.1 is authoritative for the current seven-key
-  # hierarchy. Analytics and graph keys are intentionally excluded because
-  # SC-DOC-010 defers ClickHouse and Neo4j beyond the MVP.
+  # SC-DOC-008 Section 2.1 is authoritative for the seven application data
+  # keys. The Terraform backend has a separate bootstrap-owned CMK so that
+  # the environment stack never owns the backend on which it depends.
+  # Analytics and graph keys remain deferred with their post-MVP stores.
   key_definitions = {
     rds = {
       alias_component     = "rds"
@@ -53,7 +54,7 @@ locals {
 check "seven_key_hierarchy" {
   assert {
     condition     = length(local.key_definitions) == 7
-    error_message = "The Stem Cogent MVP KMS hierarchy must contain exactly seven keys."
+    error_message = "The Stem Cogent application data hierarchy must contain exactly seven keys."
   }
 }
 
