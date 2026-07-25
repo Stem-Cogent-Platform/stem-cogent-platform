@@ -1,4 +1,13 @@
-mock_provider "aws" {}
+mock_provider "aws" {
+  mock_data "aws_iam_policy_document" {
+    defaults = {
+      json = jsonencode({
+        Version   = "2012-10-17"
+        Statement = []
+      })
+    }
+  }
+}
 
 run "creates_the_seven_key_hierarchy" {
   command = plan
@@ -11,7 +20,7 @@ run "creates_the_seven_key_hierarchy" {
 
   assert {
     condition     = length(aws_kms_key.this) == 7
-    error_message = "The module must create exactly seven customer-managed KMS keys."
+    error_message = "The module must create exactly seven customer-managed application data keys."
   }
 
   assert {

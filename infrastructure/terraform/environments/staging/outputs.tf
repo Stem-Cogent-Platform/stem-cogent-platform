@@ -67,3 +67,23 @@ output "kms_alias_names" {
   description = "Customer-managed KMS alias names for the staging environment, keyed by purpose."
   value       = module.kms.alias_names
 }
+
+output "s3_bucket_names" {
+  description = "S3 bucket names for the staging environment, keyed by purpose."
+  value       = module.s3.bucket_names
+}
+
+output "s3_bucket_arns" {
+  description = "S3 bucket ARNs for the staging environment, keyed by purpose."
+  value       = module.s3.bucket_arns
+}
+
+output "secret_arns" {
+  description = "Secrets Manager ARNs for the staging environment, keyed by application purpose."
+  value       = module.secrets.secret_arns
+}
+
+output "secret_names" {
+  description = "Secrets Manager paths for the staging environment, keyed by application purpose."
+  value       = module.secrets.secret_names
+}

@@ -389,19 +389,28 @@ TASK 1.3.3 — KMS Keys
   Done when: All keys created; rotation enabled; access policies applied
 
 TASK 1.3.4 — S3 Buckets
-  File:    infrastructure/terraform/modules/s3/
-  Creates: All 8 buckets per SC-DOC-009 Section 6.3
+  Files:   infrastructure/terraform/modules/s3/
+           infrastructure/terraform/modules/terraform_backend/
+           infrastructure/terraform/bootstrap/{staging,prod}/
+  Creates: All 8 application/data buckets per SC-DOC-003 Section 6.1
            sc-raw-signals-{env}, sc-enterprise-uploads-{env},
+           sc-processed-documents-{env},
            sc-ml-artefacts-{env}, sc-digest-renders-{env},
            sc-intelligence-exports-{env}, sc-audit-archives-{env},
-           sc-backup-{env}, sc-terraform-state-{env}
+           sc-backup-{env}
+           Plus the independently bootstrapped sc-terraform-state-{env}
+           bucket, dedicated CMK, and DynamoDB state-lock table required by
+           SC-DOC-009 Section 3.2. Physical S3 names append the AWS account ID
+           because S3 bucket names are globally unique.
   Config:  SSE-KMS, BlockPublicAccess=true, lifecycle policies
-  Spec:    SC-DOC-003 Section 6.1, SC-DOC-008 Section 3.3
+  Spec:    SC-DOC-003 Sections 6.1-6.4, SC-DOC-008 Sections 2.1 and 3.3,
+           SC-DOC-009 Sections 2.3 and 3.2
   Done when: All buckets created; public access blocked; encryption confirmed
 
 TASK 1.3.5 — Secrets Manager (structure only — values added manually)
   File:    infrastructure/terraform/modules/secrets/
-  Creates: Secret definitions for all paths in SC-DOC-009 Section 9.1
+  Creates: Secret definitions following SC-DOC-008 Section 2.4 and exposing
+           the ARN references required by SC-DOC-009 Section 9.1
            NOTE: This creates the secret PATHS/ARNs — not the values.
            Values are added manually via AWS console after creation.
   Secrets to create:
