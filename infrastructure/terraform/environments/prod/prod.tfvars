@@ -19,8 +19,9 @@ rds_read_replica_instance_class = "db.t4g.medium"
 rds_deletion_protection         = true
 rds_skip_final_snapshot         = false
 
-redis_auth_token_version = 1
-redis_node_type          = "cache.t4g.medium"
-redis_num_cache_clusters = 2
+redis_auth_token_version         = 1
+redis_auth_token_update_strategy = "SET"
+redis_node_type                  = "cache.t4g.medium"
+redis_num_cache_clusters         = 2
 
 data_services_apply_immediately = false

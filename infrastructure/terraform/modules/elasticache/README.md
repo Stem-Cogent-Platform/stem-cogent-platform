@@ -18,3 +18,16 @@ is exhausted.
 ElastiCache for Redis OSS does not support AOF. A replica provides live
 availability and daily RDB snapshots provide recovery; durable pipeline work
 must use the SQS queues introduced by Task 1.3.8.
+
+## AUTH-token rotation
+
+Normal configuration uses `auth_token_update_strategy = "SET"` so only the
+Secrets Manager token is accepted. A controlled rotation is two deployments:
+
+1. Increment the environment's token version and deploy with `ROTATE`. This
+   adds the new token while retaining the previous token for running clients.
+2. After clients use the new token, deploy the same token with `SET`. This
+   removes the previous token and restores the single-token steady state.
+
+Never change the token and apply `SET` directly to an existing replication
+group. ElastiCache requires the new token to pass through `ROTATE` first.

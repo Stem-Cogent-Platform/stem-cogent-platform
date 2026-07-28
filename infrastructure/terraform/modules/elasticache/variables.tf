@@ -72,6 +72,17 @@ variable "auth_token" {
   }
 }
 
+variable "auth_token_update_strategy" {
+  description = "AUTH-token transition strategy. Use ROTATE to add a managed token to an existing group, then return to SET after clients use that token."
+  type        = string
+  default     = "SET"
+
+  validation {
+    condition     = contains(["ROTATE", "SET"], var.auth_token_update_strategy)
+    error_message = "auth_token_update_strategy must be ROTATE or SET."
+  }
+}
+
 variable "engine_version" {
   description = "ElastiCache Redis OSS engine version."
   type        = string
