@@ -19,6 +19,6 @@ output "state_kms_alias_name" {
 }
 
 output "lock_table_name" {
-  description = "DynamoDB table used for Terraform state locking."
+  description = "Legacy DynamoDB lock table retained during migration to native S3 lockfiles."
   value       = aws_dynamodb_table.terraform_locks.name
 }

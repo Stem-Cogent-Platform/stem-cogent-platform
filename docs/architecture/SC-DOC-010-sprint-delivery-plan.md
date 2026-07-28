@@ -399,9 +399,11 @@ TASK 1.3.4 — S3 Buckets
            sc-intelligence-exports-{env}, sc-audit-archives-{env},
            sc-backup-{env}
            Plus the independently bootstrapped sc-terraform-state-{env}
-           bucket, dedicated CMK, and DynamoDB state-lock table required by
+           bucket, dedicated CMK, and native S3 state lockfile required by
            SC-DOC-009 Section 3.2. Physical S3 names append the AWS account ID
-           because S3 bucket names are globally unique.
+           because S3 bucket names are globally unique. A previously created
+           DynamoDB lock table remains deletion-protected only during the
+           reviewed migration window.
   Config:  SSE-KMS, BlockPublicAccess=true, lifecycle policies
   Spec:    SC-DOC-003 Sections 6.1-6.4, SC-DOC-008 Sections 2.1 and 3.3,
            SC-DOC-009 Sections 2.3 and 3.2

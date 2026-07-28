@@ -77,3 +77,85 @@ variable "vpc_flow_log_retention_days" {
   type        = number
   default     = 90
 }
+
+variable "database_master_username" {
+  description = "PostgreSQL bootstrap administrator username."
+  type        = string
+  default     = "sc_admin"
+}
+
+variable "database_credentials_version" {
+  description = "Monotonic RDS credential revision. Increment only as part of a controlled password rotation."
+  type        = number
+  default     = 1
+
+  validation {
+    condition     = var.database_credentials_version >= 1 && floor(var.database_credentials_version) == var.database_credentials_version
+    error_message = "database_credentials_version must be a positive integer."
+  }
+}
+
+variable "database_name" {
+  description = "Initial PostgreSQL database name."
+  type        = string
+  default     = "stemcogent"
+}
+
+variable "rds_instance_class" {
+  description = "RDS primary instance class."
+  type        = string
+  default     = "db.t4g.large"
+}
+
+variable "rds_create_read_replica" {
+  description = "Whether this environment has a queryable asynchronous RDS read replica."
+  type        = bool
+  default     = true
+}
+
+variable "rds_read_replica_instance_class" {
+  description = "RDS asynchronous read-replica instance class."
+  type        = string
+  default     = "db.t4g.medium"
+}
+
+variable "rds_deletion_protection" {
+  description = "Whether RDS API deletion protection is enabled."
+  type        = bool
+  default     = true
+}
+
+variable "rds_skip_final_snapshot" {
+  description = "Whether RDS deletion may skip a final snapshot."
+  type        = bool
+  default     = false
+}
+
+variable "redis_auth_token_version" {
+  description = "Monotonic Redis AUTH token revision. Increment only as part of a controlled rotation."
+  type        = number
+  default     = 1
+
+  validation {
+    condition     = var.redis_auth_token_version >= 1 && floor(var.redis_auth_token_version) == var.redis_auth_token_version
+    error_message = "redis_auth_token_version must be a positive integer."
+  }
+}
+
+variable "redis_node_type" {
+  description = "ElastiCache Redis node type."
+  type        = string
+  default     = "cache.t4g.medium"
+}
+
+variable "redis_num_cache_clusters" {
+  description = "Number of nodes in the cluster-mode-disabled Redis replication group."
+  type        = number
+  default     = 2
+}
+
+variable "data_services_apply_immediately" {
+  description = "Whether eligible RDS and ElastiCache changes bypass their maintenance windows."
+  type        = bool
+  default     = false
+}

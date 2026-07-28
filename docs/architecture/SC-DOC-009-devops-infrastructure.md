@@ -210,7 +210,7 @@ infrastructure/
 │   │       ├── main.tf
 │   │       └── staging.tfvars  # Smaller instances, single-AZ where appropriate
 │   │
-│   └── backend.tf            # S3 remote state + DynamoDB lock table
+│   └── backend.tf            # S3 remote state + native S3 lockfile
 ```
 
 ## 3.2 Remote State Configuration
@@ -219,22 +219,30 @@ infrastructure/
 # backend.tf
 terraform {
   backend "s3" {
-    bucket         = "sc-terraform-state-prod"
-    key            = "stem-cogent/{env}/terraform.tfstate"
-    region         = "eu-west-1"
-    encrypt        = true
-    kms_key_id     = "arn:aws:kms:eu-west-1:ACCOUNT:key/sc-terraform-state-key"
-    dynamodb_table = "sc-terraform-locks"
+    bucket       = "sc-terraform-state-{env}-ACCOUNT"
+    key          = "stem-cogent/{env}/terraform.tfstate"
+    region       = "eu-west-1"
+    encrypt      = true
+    kms_key_id   = "arn:aws:kms:eu-west-1:ACCOUNT:key/KEY_ID"
+    use_lockfile = true
   }
+
+  required_version = ">= 1.11.0, < 2.0.0"
 
   required_providers {
     aws = {
       source  = "hashicorp/aws"
-      version = "~> 5.0"
+      version = ">= 5.100.0, < 6.0.0"
     }
   }
 }
 ```
+
+The backend bucket is independently bootstrapped, versioned, private, and
+SSE-KMS encrypted. Native S3 lockfiles are authoritative for active clients.
+Any previously provisioned DynamoDB lock table remains deletion-protected
+during migration and is decommissioned only through a separate reviewed
+change after every client has reinitialized with `use_lockfile=true`.
 
 ---
 

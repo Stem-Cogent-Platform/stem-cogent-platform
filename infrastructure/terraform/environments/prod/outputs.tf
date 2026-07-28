@@ -87,3 +87,48 @@ output "secret_names" {
   description = "Secrets Manager paths for the production environment, keyed by application purpose."
   value       = module.secrets.secret_names
 }
+
+output "database_primary_host" {
+  description = "Private production PostgreSQL writer hostname."
+  value       = module.rds.primary_address
+}
+
+output "database_read_replica_host" {
+  description = "Private production PostgreSQL asynchronous read hostname."
+  value       = module.rds.read_replica_address
+}
+
+output "database_port" {
+  description = "Production PostgreSQL listener port."
+  value       = module.rds.port
+}
+
+output "database_name" {
+  description = "Production PostgreSQL database name."
+  value       = module.rds.database_name
+}
+
+output "database_credentials_secret_arn" {
+  description = "Secrets Manager ARN containing the production PostgreSQL bootstrap credentials."
+  value       = module.secrets.secret_arns["database_credentials"]
+}
+
+output "redis_primary_host" {
+  description = "Private production TLS Redis writer hostname."
+  value       = module.elasticache.primary_endpoint_address
+}
+
+output "redis_reader_host" {
+  description = "Private production TLS Redis reader hostname."
+  value       = module.elasticache.reader_endpoint_address
+}
+
+output "redis_port" {
+  description = "Production Redis TLS listener port."
+  value       = module.elasticache.port
+}
+
+output "redis_auth_token_secret_arn" {
+  description = "Secrets Manager ARN containing the production Redis AUTH token."
+  value       = module.secrets.secret_arns["redis_auth_token"]
+}

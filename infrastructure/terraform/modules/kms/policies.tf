@@ -53,6 +53,7 @@ data "aws_iam_policy_document" "this" {
         variable = "kms:EncryptionContext:aws:logs:arn"
         values = [
           "arn:${data.aws_partition.current.partition}:logs:${var.aws_region}:${var.aws_account_id}:log-group:/${var.project_name}/${var.environment}/*",
+          "arn:${data.aws_partition.current.partition}:logs:${var.aws_region}:${var.aws_account_id}:log-group:/aws/rds/instance/${var.resource_prefix}-postgres-${var.environment}*",
         ]
       }
     }
