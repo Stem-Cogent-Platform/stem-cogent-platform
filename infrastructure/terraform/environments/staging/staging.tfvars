@@ -20,10 +20,10 @@ rds_deletion_protection         = false
 rds_skip_final_snapshot         = true
 
 redis_auth_token_version         = 1
-redis_auth_token_update_strategy = "ROTATE"
+redis_auth_token_update_strategy = "SET"
 redis_node_type                  = "cache.t4g.medium"
 redis_num_cache_clusters         = 1
 
-# Temporary reconciliation setting: after ROTATE applies successfully, restore
-# this to false and set redis_auth_token_update_strategy to "SET".
+# Temporary reconciliation setting: SET must apply immediately to complete the
+# accepted ROTATE transition. Restore this to false after SET succeeds.
 data_services_apply_immediately = true
