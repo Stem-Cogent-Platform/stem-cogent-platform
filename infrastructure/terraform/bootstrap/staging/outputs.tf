@@ -9,6 +9,6 @@ output "tf_state_kms_key_arn" {
 }
 
 output "tf_state_lock_table" {
-  description = "Value for the TF_STATE_LOCK_TABLE GitHub environment variable."
+  description = "Legacy DynamoDB lock table retained during migration to native S3 lockfiles."
   value       = module.terraform_backend.lock_table_name
 }

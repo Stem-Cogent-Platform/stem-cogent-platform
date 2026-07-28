@@ -35,7 +35,6 @@ jobs:
       TF_VAR_expected_account_id: ${{ vars.AWS_ACCOUNT_ID }}
       TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
       TF_STATE_KMS_KEY_ARN: ${{ vars.TF_STATE_KMS_KEY_ARN }}
-      TF_STATE_LOCK_TABLE: ${{ vars.TF_STATE_LOCK_TABLE }}
 
     steps:
       - name: Check out repository
@@ -50,8 +49,7 @@ jobs:
             AWS_ROLE_ARN \
             TF_VAR_expected_account_id \
             TF_STATE_BUCKET \
-            TF_STATE_KMS_KEY_ARN \
-            TF_STATE_LOCK_TABLE; do
+            TF_STATE_KMS_KEY_ARN; do
             test -n "${!variable}" || {
               echo "$variable is not configured in the GitHub plan environment." >&2
               exit 1
@@ -74,14 +72,25 @@ jobs:
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Set up Terraform
-        uses: hashicorp/setup-terraform@v3
+        uses: hashicorp/setup-terraform@v4
         with:
-          terraform_version: '1.7.x'
+          terraform_version: '1.15.x'
           terraform_wrapper: false
 
       - name: Terraform format check
         run: terraform fmt -check -recursive
         working-directory: infrastructure/terraform
+
+      - name: Terraform module tests
+        shell: bash
+        run: |
+          for module in rds elasticache; do
+            terraform -chdir="infrastructure/terraform/modules/$module" init \
+              -backend=false \
+              -input=false
+            terraform -chdir="infrastructure/terraform/modules/$module" test \
+              -no-color
+          done
 
       - name: Terraform init
         run: |
@@ -92,7 +101,7 @@ jobs:
             -backend-config="region=$AWS_REGION" \
             -backend-config="encrypt=true" \
             -backend-config="kms_key_id=$TF_STATE_KMS_KEY_ARN" \
-            -backend-config="dynamodb_table=$TF_STATE_LOCK_TABLE"
+            -backend-config="use_lockfile=true"
         working-directory: ${{ env.TF_ROOT }}
 
       - name: Terraform validate
@@ -188,7 +197,6 @@ jobs:
       TF_VAR_expected_account_id: ${{ vars.AWS_ACCOUNT_ID }}
       TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
       TF_STATE_KMS_KEY_ARN: ${{ vars.TF_STATE_KMS_KEY_ARN }}
-      TF_STATE_LOCK_TABLE: ${{ vars.TF_STATE_LOCK_TABLE }}
 
     steps:
       - name: Check out repository
@@ -203,8 +211,7 @@ jobs:
             AWS_ROLE_ARN \
             TF_VAR_expected_account_id \
             TF_STATE_BUCKET \
-            TF_STATE_KMS_KEY_ARN \
-            TF_STATE_LOCK_TABLE; do
+            TF_STATE_KMS_KEY_ARN; do
             test -n "${!variable}" || {
               echo "$variable is not configured in the GitHub plan environment." >&2
               exit 1
@@ -227,14 +234,25 @@ jobs:
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Set up Terraform
-        uses: hashicorp/setup-terraform@v3
+        uses: hashicorp/setup-terraform@v4
         with:
-          terraform_version: '1.7.x'
+          terraform_version: '1.15.x'
           terraform_wrapper: false
 
       - name: Terraform format check
         run: terraform fmt -check -recursive
         working-directory: infrastructure/terraform
+
+      - name: Terraform module tests
+        shell: bash
+        run: |
+          for module in rds elasticache; do
+            terraform -chdir="infrastructure/terraform/modules/$module" init \
+              -backend=false \
+              -input=false
+            terraform -chdir="infrastructure/terraform/modules/$module" test \
+              -no-color
+          done
 
       - name: Terraform init
         run: |
@@ -245,7 +263,7 @@ jobs:
             -backend-config="region=$AWS_REGION" \
             -backend-config="encrypt=true" \
             -backend-config="kms_key_id=$TF_STATE_KMS_KEY_ARN" \
-            -backend-config="dynamodb_table=$TF_STATE_LOCK_TABLE"
+            -backend-config="use_lockfile=true"
         working-directory: ${{ env.TF_ROOT }}
 
       - name: Terraform validate
@@ -289,7 +307,6 @@ jobs:
       TF_VAR_expected_account_id: ${{ vars.AWS_ACCOUNT_ID }}
       TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
       TF_STATE_KMS_KEY_ARN: ${{ vars.TF_STATE_KMS_KEY_ARN }}
-      TF_STATE_LOCK_TABLE: ${{ vars.TF_STATE_LOCK_TABLE }}
 
     steps:
       - name: Check out repository
@@ -304,8 +321,7 @@ jobs:
             AWS_ROLE_ARN \
             TF_VAR_expected_account_id \
             TF_STATE_BUCKET \
-            TF_STATE_KMS_KEY_ARN \
-            TF_STATE_LOCK_TABLE; do
+            TF_STATE_KMS_KEY_ARN; do
             test -n "${!variable}" || {
               echo "$variable is not configured in the GitHub apply environment." >&2
               exit 1
@@ -324,9 +340,9 @@ jobs:
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Set up Terraform
-        uses: hashicorp/setup-terraform@v3
+        uses: hashicorp/setup-terraform@v4
         with:
-          terraform_version: '1.7.x'
+          terraform_version: '1.15.x'
           terraform_wrapper: false
 
       - name: Terraform init
@@ -338,7 +354,7 @@ jobs:
             -backend-config="region=$AWS_REGION" \
             -backend-config="encrypt=true" \
             -backend-config="kms_key_id=$TF_STATE_KMS_KEY_ARN" \
-            -backend-config="dynamodb_table=$TF_STATE_LOCK_TABLE"
+            -backend-config="use_lockfile=true"
         working-directory: ${{ env.TF_ROOT }}
 
       - name: Download reviewed plan
