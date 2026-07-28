@@ -132,3 +132,33 @@ output "redis_auth_token_secret_arn" {
   description = "Secrets Manager ARN containing the staging Redis AUTH token."
   value       = module.secrets.secret_arns["redis_auth_token"]
 }
+
+output "sqs_queue_names" {
+  description = "Primary staging SQS queue names keyed by logical queue name."
+  value       = module.sqs.queue_names
+}
+
+output "sqs_queue_urls" {
+  description = "Primary staging SQS queue URLs keyed by logical queue name."
+  value       = module.sqs.queue_urls
+}
+
+output "sqs_queue_arns" {
+  description = "Primary staging SQS queue ARNs keyed by logical queue name."
+  value       = module.sqs.queue_arns
+}
+
+output "sqs_dlq_names" {
+  description = "Staging SQS dead-letter queue names keyed by logical source queue name."
+  value       = module.sqs.dlq_names
+}
+
+output "sqs_dlq_urls" {
+  description = "Staging SQS dead-letter queue URLs keyed by logical source queue name."
+  value       = module.sqs.dlq_urls
+}
+
+output "sqs_dlq_arns" {
+  description = "Staging SQS dead-letter queue ARNs keyed by logical source queue name."
+  value       = module.sqs.dlq_arns
+}
