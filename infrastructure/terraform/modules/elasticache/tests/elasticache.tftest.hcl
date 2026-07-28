@@ -37,6 +37,11 @@ run "creates_encrypted_authenticated_high_availability_redis" {
   }
 
   assert {
+    condition     = aws_elasticache_replication_group.this.auth_token_update_strategy == "SET"
+    error_message = "Normal operation must converge Redis onto only the Secrets Manager AUTH token."
+  }
+
+  assert {
     condition     = aws_elasticache_replication_group.this.automatic_failover_enabled && aws_elasticache_replication_group.this.multi_az_enabled
     error_message = "A multi-node production Redis group must enable Multi-AZ automatic failover."
   }
@@ -59,5 +64,23 @@ run "creates_encrypted_authenticated_high_availability_redis" {
   assert {
     condition     = length(aws_elasticache_replication_group.this.log_delivery_configuration) == 2
     error_message = "Redis engine and slow logs must both be delivered to CloudWatch."
+  }
+}
+
+run "supports_controlled_auth_token_rotation" {
+  command = plan
+
+  variables {
+    environment                = "staging"
+    private_data_subnet_ids    = ["subnet-data-a", "subnet-data-b"]
+    security_group_ids         = ["sg-data"]
+    logs_kms_key_arn           = "arn:aws:kms:eu-west-1:123456789012:key/logs"
+    auth_token                 = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+    auth_token_update_strategy = "ROTATE"
+  }
+
+  assert {
+    condition     = aws_elasticache_replication_group.this.auth_token_update_strategy == "ROTATE"
+    error_message = "The module must support AWS's ROTATE phase before a later SET convergence."
   }
 }

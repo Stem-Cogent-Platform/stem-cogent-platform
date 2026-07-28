@@ -142,6 +142,17 @@ variable "redis_auth_token_version" {
   }
 }
 
+variable "redis_auth_token_update_strategy" {
+  description = "Redis AUTH-token transition phase. ROTATE adds the managed token; SET makes it exclusive."
+  type        = string
+  default     = "SET"
+
+  validation {
+    condition     = contains(["ROTATE", "SET"], var.redis_auth_token_update_strategy)
+    error_message = "redis_auth_token_update_strategy must be ROTATE or SET."
+  }
+}
+
 variable "redis_node_type" {
   description = "ElastiCache Redis node type."
   type        = string
