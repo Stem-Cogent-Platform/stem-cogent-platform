@@ -1,7 +1,11 @@
 mock_provider "aws" {}
 
 run "creates_complete_encrypted_queue_topology" {
-  command = plan
+  # A mocked apply is required because the redrive policy embeds each DLQ's
+  # provider-computed ARN. During a plan that ARN is unknown, so Terraform
+  # cannot evaluate the pairing assertion below. The mock provider prevents
+  # this test from making any AWS calls or creating real queues.
+  command = apply
 
   variables {
     environment = "staging"
@@ -112,7 +116,10 @@ run "uses_executable_pipeline_topology_and_stage_timeouts" {
 }
 
 run "applies_safe_supported_overrides" {
-  command = plan
+  # The maxReceiveCount assertion reads the encoded redrive policy, which also
+  # contains a provider-computed DLQ ARN and therefore must be evaluated after
+  # the mocked resources have been applied.
+  command = apply
 
   variables {
     environment = "staging"
