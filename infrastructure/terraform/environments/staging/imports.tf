@@ -24,6 +24,11 @@ import {
 }
 
 import {
+  to = module.elasticache.aws_elasticache_replication_group.this
+  id = "sc-redis-staging"
+}
+
+import {
   to = module.rds.aws_db_subnet_group.this
   id = "sc-postgres-staging-subnet-group"
 }
@@ -41,4 +46,9 @@ import {
 import {
   to = module.rds.aws_cloudwatch_log_group.this["primary-upgrade"]
   id = "/aws/rds/instance/sc-postgres-staging/upgrade"
+}
+
+import {
+  to = module.rds.aws_iam_role.enhanced_monitoring
+  id = "sc-rds-monitoring-staging"
 }
