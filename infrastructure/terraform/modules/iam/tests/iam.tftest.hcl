@@ -13,6 +13,12 @@ mock_provider "aws" {
       })
     }
   }
+
+  mock_data "aws_iam_openid_connect_provider" {
+    defaults = {
+      arn = "arn:aws:iam::123456789012:oidc-provider/token.actions.githubusercontent.com"
+    }
+  }
 }
 
 variables {
@@ -73,6 +79,18 @@ variables {
     paystack_public_key     = "arn:aws:secretsmanager:eu-west-1:123456789012:secret:sc/staging/paystack/public-key-a"
     paystack_webhook_secret = "arn:aws:secretsmanager:eu-west-1:123456789012:secret:sc/staging/paystack/webhook-secret-a"
   }
+
+  ecr_repository_arns = {
+    api      = "arn:aws:ecr:eu-west-1:123456789012:repository/sc-api-service-staging"
+    worker   = "arn:aws:ecr:eu-west-1:123456789012:repository/sc-worker-staging"
+    frontend = "arn:aws:ecr:eu-west-1:123456789012:repository/sc-frontend-staging"
+  }
+
+  ecs_cluster_arn            = "arn:aws:ecs:eu-west-1:123456789012:cluster/sc-cluster-staging"
+  github_repository_id       = "1254005582"
+  github_repository_owner_id = "289108209"
+  github_environment_name    = "staging"
+  github_deployment_ref      = "refs/heads/staging"
 }
 
 run "creates_dedicated_roles_for_complete_service_catalogue" {
@@ -171,5 +189,68 @@ run "contains_no_wildcard_actions" {
       ]
     ]))
     error_message = "No execution policy may contain a wildcard IAM action."
+  }
+}
+
+run "creates_separate_application_cd_roles" {
+  command = plan
+
+  assert {
+    condition     = aws_iam_role.application_build.name == "sc-github-application-build-staging"
+    error_message = "Application CD must have a dedicated build role."
+  }
+
+  assert {
+    condition     = aws_iam_role.application_deploy.name == "sc-github-application-deploy-staging"
+    error_message = "Application CD must have a dedicated deploy role."
+  }
+
+  assert {
+    condition     = aws_iam_role.application_build.assume_role_policy == aws_iam_role.application_deploy.assume_role_policy
+    error_message = "Both roles must use the same narrowly scoped GitHub OIDC trust contract."
+  }
+
+  assert {
+    condition     = strcontains(aws_iam_role.application_build.assume_role_policy, "repo:Stem-Cogent-Platform/stem-cogent-platform:environment:staging")
+    error_message = "OIDC trust must require this repository's staging GitHub Environment subject."
+  }
+
+  assert {
+    condition     = strcontains(aws_iam_role.application_build.assume_role_policy, "refs/heads/staging") && strcontains(aws_iam_role.application_build.assume_role_policy, "Application CD")
+    error_message = "OIDC trust must restrict the deployment branch and workflow."
+  }
+
+  assert {
+    condition     = strcontains(aws_iam_role.application_build.assume_role_policy, "1254005582") && strcontains(aws_iam_role.application_build.assume_role_policy, "289108209")
+    error_message = "OIDC trust must require the immutable repository and owner IDs."
+  }
+}
+
+run "enforces_application_cd_least_privilege_boundaries" {
+  command = plan
+
+  assert {
+    condition     = strcontains(aws_iam_role_policy.application_build.policy, "ecr:PutImage")
+    error_message = "The build role must be able to push immutable images."
+  }
+
+  assert {
+    condition     = !strcontains(aws_iam_role_policy.application_build.policy, "ecs:")
+    error_message = "The build role must not be able to update ECS."
+  }
+
+  assert {
+    condition     = contains(local.application_deploy_actions, "ecs:UpdateService") && contains(local.application_deploy_actions, "iam:PassRole")
+    error_message = "The deploy role must be able to register and roll out the approved Phase 1 task definitions."
+  }
+
+  assert {
+    condition     = alltrue([for action in local.application_deploy_actions : !startswith(action, "ecr:")])
+    error_message = "The deploy role must not be able to push ECR images."
+  }
+
+  assert {
+    condition     = local.application_deploy_policy_statements[6].Condition.StringEquals["iam:PassedToService"] == "ecs-tasks.amazonaws.com"
+    error_message = "PassRole must be restricted to the ECS tasks service."
   }
 }

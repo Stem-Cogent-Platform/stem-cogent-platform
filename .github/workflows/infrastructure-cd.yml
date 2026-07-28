@@ -84,7 +84,7 @@ jobs:
       - name: Terraform module tests
         shell: bash
         run: |
-          for module in rds elasticache sqs iam; do
+          for module in rds elasticache sqs ecr iam; do
             terraform -chdir="infrastructure/terraform/modules/$module" init \
               -backend=false \
               -input=false
@@ -246,7 +246,7 @@ jobs:
       - name: Terraform module tests
         shell: bash
         run: |
-          for module in rds elasticache sqs iam; do
+          for module in rds elasticache sqs ecr iam; do
             terraform -chdir="infrastructure/terraform/modules/$module" init \
               -backend=false \
               -input=false

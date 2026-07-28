@@ -25,3 +25,6 @@ redis_node_type                  = "cache.t4g.medium"
 redis_num_cache_clusters         = 2
 
 data_services_apply_immediately = false
+
+next_public_api_url = "https://api.stem-cogent.com"
+next_public_ws_url  = "wss://api.stem-cogent.com"

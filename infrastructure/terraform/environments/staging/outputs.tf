@@ -78,6 +78,64 @@ output "ecs_cluster_arn" {
   value       = module.ecs.cluster_arn
 }
 
+output "ecr_repository_names" {
+  description = "Staging ECR repository names keyed by api, worker, and frontend."
+  value       = module.ecr.repository_names
+}
+
+output "ecr_repository_arns" {
+  description = "Staging ECR repository ARNs keyed by api, worker, and frontend."
+  value       = module.ecr.repository_arns
+}
+
+output "ecr_repository_urls" {
+  description = "Staging ECR repository URLs keyed by api, worker, and frontend."
+  value       = module.ecr.repository_urls
+}
+
+output "application_cd_build_role_arn" {
+  description = "Staging GitHub OIDC role ARN for Application CD image builds."
+  value       = module.iam.application_build_role_arn
+}
+
+output "application_cd_deploy_role_arn" {
+  description = "Staging GitHub OIDC role ARN for Application CD ECS deployments."
+  value       = module.iam.application_deploy_role_arn
+}
+
+output "application_cd_oidc_subject" {
+  description = "Exact GitHub OIDC subject trusted by the staging Application CD roles."
+  value       = module.iam.application_cd_oidc_subject
+}
+
+output "application_cd_github_environment_variables" {
+  description = "Actual Task 1.3.13 values to configure on the staging GitHub Environment."
+  value = {
+    AWS_APPLICATION_BUILD_ROLE_ARN  = module.iam.application_build_role_arn
+    AWS_APPLICATION_DEPLOY_ROLE_ARN = module.iam.application_deploy_role_arn
+    AWS_ACCOUNT_ID                  = data.aws_caller_identity.current.account_id
+    ECR_API_REPOSITORY              = module.ecr.repository_names["api"]
+    ECR_WORKER_REPOSITORY           = module.ecr.repository_names["worker"]
+    ECR_FRONTEND_REPOSITORY         = module.ecr.repository_names["frontend"]
+    NEXT_PUBLIC_API_URL             = var.next_public_api_url
+    NEXT_PUBLIC_WS_URL              = var.next_public_ws_url
+    ECS_CLUSTER_NAME                = module.ecs.cluster_name
+    API_BASE_URL                    = var.next_public_api_url
+  }
+}
+
+output "application_cd_pending_github_environment_variables" {
+  description = "Application CD contract values intentionally deferred to Tasks 1.3.14 and 1.3.15 rather than fabricated."
+  value = [
+    "ECS_MIGRATION_TASK_DEFINITION",
+    "ECS_MIGRATION_CONTAINER_NAME",
+    "ECS_MIGRATION_SUBNET_IDS",
+    "ECS_MIGRATION_SECURITY_GROUP_IDS",
+    "ECS_SERVICE_DEPLOYMENTS",
+    "AUTH_SMOKE_TEST_PATH",
+  ]
+}
+
 output "kms_key_arns" {
   description = "Customer-managed KMS key ARNs for the staging environment, keyed by purpose."
   value       = module.kms.key_arns
