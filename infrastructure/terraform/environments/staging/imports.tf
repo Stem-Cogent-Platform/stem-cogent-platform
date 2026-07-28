@@ -49,6 +49,11 @@ import {
 }
 
 import {
+  to = module.rds.aws_db_instance.primary
+  id = "sc-postgres-staging"
+}
+
+import {
   to = module.rds.aws_iam_role.enhanced_monitoring
   id = "sc-rds-monitoring-staging"
 }
