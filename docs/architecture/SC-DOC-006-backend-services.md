@@ -3289,7 +3289,7 @@ app.add_middleware(XRayMiddleware, recorder=xray_recorder)
 # 4. CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.ALLOWED_ORIGINS,  # ["https://app.stemcogent.com"]
+    allow_origins=settings.ALLOWED_ORIGINS,  # ["https://app.stem-cogent.com"]
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
     allow_headers=["Authorization", "X-Tenant-ID", "Content-Type"]
@@ -3337,7 +3337,7 @@ async def add_security_headers(request: Request, call_next):
         "script-src 'self'; "
         "style-src 'self' 'unsafe-inline'; "
         "img-src 'self' data: https:; "
-        "connect-src 'self' wss://api.stemcogent.com"
+        "connect-src 'self' wss://api.stem-cogent.com"
     )
     # Remove server fingerprint
     del response.headers["server"]

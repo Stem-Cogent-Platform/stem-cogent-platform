@@ -26,5 +26,5 @@ redis_num_cache_clusters         = 1
 
 data_services_apply_immediately = false
 
-next_public_api_url = "https://api.staging.stemcogent.com"
-next_public_ws_url  = "wss://api.staging.stemcogent.com"
+next_public_api_url = "https://api.staging.stem-cogent.com"
+next_public_ws_url  = "wss://api.staging.stem-cogent.com"
