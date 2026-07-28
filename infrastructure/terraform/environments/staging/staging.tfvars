@@ -24,6 +24,4 @@ redis_auth_token_update_strategy = "SET"
 redis_node_type                  = "cache.t4g.medium"
 redis_num_cache_clusters         = 1
 
-# Temporary reconciliation setting: SET must apply immediately to complete the
-# accepted ROTATE transition. Restore this to false after SET succeeds.
-data_services_apply_immediately = true
+data_services_apply_immediately = false
