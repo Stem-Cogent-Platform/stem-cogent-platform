@@ -348,17 +348,17 @@ check "complete_queue_inventory" {
 
 check "complete_resource_inputs" {
   assert {
-    condition     = setsubtract(local.required_bucket_names, toset(keys(var.bucket_arns))) == toset([])
+    condition     = length(setsubtract(local.required_bucket_names, toset(keys(var.bucket_arns)))) == 0
     error_message = "bucket_arns is missing one or more application buckets needed by the IAM permission map."
   }
 
   assert {
-    condition     = setsubtract(local.required_bucket_names, toset(keys(var.bucket_kms_key_arns))) == toset([])
+    condition     = length(setsubtract(local.required_bucket_names, toset(keys(var.bucket_kms_key_arns)))) == 0
     error_message = "bucket_kms_key_arns must provide the encryption key for every application bucket."
   }
 
   assert {
-    condition     = setsubtract(local.required_secret_names, toset(keys(var.secret_arns))) == toset([])
+    condition     = length(setsubtract(local.required_secret_names, toset(keys(var.secret_arns)))) == 0
     error_message = "secret_arns is missing one or more managed application secrets."
   }
 }
