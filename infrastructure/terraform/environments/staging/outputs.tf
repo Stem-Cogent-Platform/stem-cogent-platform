@@ -58,6 +58,26 @@ output "data_layer_security_group_id" {
   value       = module.vpc.data_layer_security_group_id
 }
 
+output "vpc_endpoint_ids" {
+  description = "Staging VPC endpoint IDs keyed by logical AWS service name."
+  value       = module.vpc.vpc_endpoint_ids
+}
+
+output "vpc_endpoint_security_group_id" {
+  description = "Security group ID protecting the staging AWS interface endpoints."
+  value       = module.vpc.vpc_endpoint_security_group_id
+}
+
+output "ecs_cluster_name" {
+  description = "Name of the staging ECS Fargate cluster."
+  value       = module.ecs.cluster_name
+}
+
+output "ecs_cluster_arn" {
+  description = "ARN of the staging ECS Fargate cluster."
+  value       = module.ecs.cluster_arn
+}
+
 output "kms_key_arns" {
   description = "Customer-managed KMS key ARNs for the staging environment, keyed by purpose."
   value       = module.kms.key_arns

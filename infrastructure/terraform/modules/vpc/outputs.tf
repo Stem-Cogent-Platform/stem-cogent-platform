@@ -107,3 +107,21 @@ output "data_layer_security_group_id" {
   description = "Security group ID for PostgreSQL and Redis data services."
   value       = aws_security_group.data_layer.id
 }
+
+output "vpc_endpoint_security_group_id" {
+  description = "Security group ID protecting the AWS interface endpoints."
+  value       = aws_security_group.vpc_endpoints.id
+}
+
+output "vpc_endpoint_ids" {
+  description = "VPC endpoint IDs keyed by logical AWS service name."
+  value = merge(
+    { s3 = aws_vpc_endpoint.s3.id },
+    { for service, endpoint in aws_vpc_endpoint.interface : service => endpoint.id },
+  )
+}
+
+output "interface_endpoint_dns_entries" {
+  description = "Private DNS entries returned by each AWS interface endpoint."
+  value       = { for service, endpoint in aws_vpc_endpoint.interface : service => endpoint.dns_entry }
+}
