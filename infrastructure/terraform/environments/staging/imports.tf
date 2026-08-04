@@ -57,3 +57,36 @@ import {
   to = module.rds.aws_iam_role.enhanced_monitoring
   id = "sc-rds-monitoring-staging"
 }
+
+# Adopt the staging endpoint resources that exist in AWS but were not recorded
+# in the remote state after an interrupted apply. Lookups keep opaque AWS IDs
+# out of source control while still requiring an exact VPC, name, service, and
+# endpoint type match before Terraform can import either object.
+data "aws_security_group" "existing_vpc_endpoints" {
+  name   = "sc-vpc-endpoints-sg-staging"
+  vpc_id = module.vpc.vpc_id
+}
+
+data "aws_vpc_endpoint" "existing_s3" {
+  vpc_id       = module.vpc.vpc_id
+  service_name = "com.amazonaws.${var.aws_region}.s3"
+  tags = {
+    Name    = "sc-s3-endpoint-staging"
+    Service = "s3"
+  }
+
+  filter {
+    name   = "vpc-endpoint-type"
+    values = ["Gateway"]
+  }
+}
+
+import {
+  to = module.vpc.aws_security_group.vpc_endpoints
+  id = data.aws_security_group.existing_vpc_endpoints.id
+}
+
+import {
+  to = module.vpc.aws_vpc_endpoint.s3
+  id = data.aws_vpc_endpoint.existing_s3.id
+}
