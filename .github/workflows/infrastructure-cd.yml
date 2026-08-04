@@ -33,6 +33,7 @@ jobs:
       TF_ROOT: infrastructure/terraform/environments/${{ github.base_ref == 'main' && 'prod' || 'staging' }}
       AWS_ROLE_ARN: ${{ vars.AWS_TERRAFORM_ROLE_ARN }}
       TF_VAR_expected_account_id: ${{ vars.AWS_ACCOUNT_ID }}
+      TF_VAR_ecs_bootstrap_image_tag: ${{ vars.ECS_BOOTSTRAP_IMAGE_TAG }}
       TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
       TF_STATE_KMS_KEY_ARN: ${{ vars.TF_STATE_KMS_KEY_ARN }}
 
@@ -48,6 +49,7 @@ jobs:
           for variable in \
             AWS_ROLE_ARN \
             TF_VAR_expected_account_id \
+            TF_VAR_ecs_bootstrap_image_tag \
             TF_STATE_BUCKET \
             TF_STATE_KMS_KEY_ARN; do
             test -n "${!variable}" || {
@@ -84,13 +86,19 @@ jobs:
       - name: Terraform module tests
         shell: bash
         run: |
-          for module in rds elasticache sqs ecr iam; do
+          for module in rds elasticache sqs ecr iam alb ecs; do
             terraform -chdir="infrastructure/terraform/modules/$module" init \
               -backend=false \
               -input=false
             terraform -chdir="infrastructure/terraform/modules/$module" test \
               -no-color
           done
+
+      - name: Terraform global DNS bootstrap validation
+        run: |
+          terraform init -backend=false -input=false
+          terraform validate
+        working-directory: infrastructure/terraform/bootstrap/dns
 
       - name: Terraform init
         run: |
@@ -195,6 +203,7 @@ jobs:
       TF_ROOT: infrastructure/terraform/environments/${{ github.ref_name == 'main' && 'prod' || 'staging' }}
       AWS_ROLE_ARN: ${{ vars.AWS_TERRAFORM_ROLE_ARN }}
       TF_VAR_expected_account_id: ${{ vars.AWS_ACCOUNT_ID }}
+      TF_VAR_ecs_bootstrap_image_tag: ${{ vars.ECS_BOOTSTRAP_IMAGE_TAG }}
       TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
       TF_STATE_KMS_KEY_ARN: ${{ vars.TF_STATE_KMS_KEY_ARN }}
 
@@ -210,6 +219,7 @@ jobs:
           for variable in \
             AWS_ROLE_ARN \
             TF_VAR_expected_account_id \
+            TF_VAR_ecs_bootstrap_image_tag \
             TF_STATE_BUCKET \
             TF_STATE_KMS_KEY_ARN; do
             test -n "${!variable}" || {
@@ -246,13 +256,19 @@ jobs:
       - name: Terraform module tests
         shell: bash
         run: |
-          for module in rds elasticache sqs ecr iam; do
+          for module in rds elasticache sqs ecr iam alb ecs; do
             terraform -chdir="infrastructure/terraform/modules/$module" init \
               -backend=false \
               -input=false
             terraform -chdir="infrastructure/terraform/modules/$module" test \
               -no-color
           done
+
+      - name: Terraform global DNS bootstrap validation
+        run: |
+          terraform init -backend=false -input=false
+          terraform validate
+        working-directory: infrastructure/terraform/bootstrap/dns
 
       - name: Terraform init
         run: |
@@ -305,6 +321,7 @@ jobs:
       TF_ROOT: infrastructure/terraform/environments/${{ github.ref_name == 'main' && 'prod' || 'staging' }}
       AWS_ROLE_ARN: ${{ vars.AWS_TERRAFORM_ROLE_ARN }}
       TF_VAR_expected_account_id: ${{ vars.AWS_ACCOUNT_ID }}
+      TF_VAR_ecs_bootstrap_image_tag: ${{ vars.ECS_BOOTSTRAP_IMAGE_TAG }}
       TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
       TF_STATE_KMS_KEY_ARN: ${{ vars.TF_STATE_KMS_KEY_ARN }}
 
@@ -320,6 +337,7 @@ jobs:
           for variable in \
             AWS_ROLE_ARN \
             TF_VAR_expected_account_id \
+            TF_VAR_ecs_bootstrap_image_tag \
             TF_STATE_BUCKET \
             TF_STATE_KMS_KEY_ARN; do
             test -n "${!variable}" || {

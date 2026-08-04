@@ -1,5 +1,9 @@
 locals {
   github_oidc_provider_arn = "arn:${data.aws_partition.current.partition}:iam::${var.aws_account_id}:oidc-provider/token.actions.githubusercontent.com"
+  ecs_cluster_arn = coalesce(
+    var.ecs_cluster_arn,
+    "arn:${data.aws_partition.current.partition}:ecs:${var.aws_region}:${var.aws_account_id}:cluster/${var.resource_prefix}-cluster-${var.environment}",
+  )
   github_oidc_subject = coalesce(
     var.github_oidc_subject_override,
     "repo:${var.github_repository}:environment:${var.github_environment_name}",
@@ -16,7 +20,7 @@ locals {
   ])
   application_cd_service_arns = toset([
     for service_name in local.application_cd_service_names :
-    "${replace(var.ecs_cluster_arn, ":cluster/", ":service/")}/${service_name}"
+    "${replace(local.ecs_cluster_arn, ":cluster/", ":service/")}/${service_name}"
   ])
   application_cd_task_definition_arns = toset([
     for family in local.application_cd_task_definition_families :
@@ -89,7 +93,7 @@ locals {
       Sid      = "DescribeDeploymentCluster"
       Effect   = "Allow"
       Action   = ["ecs:DescribeClusters"]
-      Resource = [var.ecs_cluster_arn]
+      Resource = [local.ecs_cluster_arn]
     },
     {
       Sid    = "ReadAndUpdatePhaseOneServices"
@@ -101,7 +105,7 @@ locals {
       Resource = sort(tolist(local.application_cd_service_arns))
       Condition = {
         ArnEquals = {
-          "ecs:cluster" = var.ecs_cluster_arn
+          "ecs:cluster" = local.ecs_cluster_arn
         }
       }
     },
@@ -124,7 +128,7 @@ locals {
       Resource = ["arn:${data.aws_partition.current.partition}:ecs:${var.aws_region}:${var.aws_account_id}:task-definition/${var.resource_prefix}-migration-task-${var.environment}:*"]
       Condition = {
         ArnEquals = {
-          "ecs:cluster" = var.ecs_cluster_arn
+          "ecs:cluster" = local.ecs_cluster_arn
         }
       }
     },
@@ -132,10 +136,10 @@ locals {
       Sid      = "DescribeMigrationTasks"
       Effect   = "Allow"
       Action   = ["ecs:DescribeTasks"]
-      Resource = ["${replace(var.ecs_cluster_arn, ":cluster/", ":task/")}/*"]
+      Resource = ["${replace(local.ecs_cluster_arn, ":cluster/", ":task/")}/*"]
       Condition = {
         ArnEquals = {
-          "ecs:cluster" = var.ecs_cluster_arn
+          "ecs:cluster" = local.ecs_cluster_arn
         }
       }
     },

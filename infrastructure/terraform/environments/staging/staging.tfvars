@@ -28,3 +28,11 @@ data_services_apply_immediately = false
 
 next_public_api_url = "https://api.staging.stem-cogent.com"
 next_public_ws_url  = "wss://api.staging.stem-cogent.com"
+frontend_public_url = "https://app.staging.stem-cogent.com"
+
+public_hosted_zone_name = "stem-cogent.com"
+alb_deletion_protection = false
+
+# ecs_bootstrap_image_tag is supplied through TF_VAR_ecs_bootstrap_image_tag
+# from the protected staging-plan/production environment variable. It must be
+# the exact full SHA proven present in ECR by the Task 1.3.12 build-only run.

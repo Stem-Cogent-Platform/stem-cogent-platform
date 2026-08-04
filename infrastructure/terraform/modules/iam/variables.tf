@@ -115,12 +115,14 @@ variable "ecr_repository_arns" {
 }
 
 variable "ecs_cluster_arn" {
-  description = "ARN of the environment ECS cluster managed by the ECS module."
+  description = "Optional ARN of the environment ECS cluster. Null derives the canonical ARN without creating a module dependency cycle."
   type        = string
+  default     = null
+  nullable    = true
 
   validation {
-    condition     = can(regex("^arn:[^:]+:ecs:[^:]+:[0-9]{12}:cluster/[A-Za-z0-9_-]+$", var.ecs_cluster_arn))
-    error_message = "ecs_cluster_arn must be a valid ECS cluster ARN."
+    condition     = var.ecs_cluster_arn == null || can(regex("^arn:[^:]+:ecs:[^:]+:[0-9]{12}:cluster/[A-Za-z0-9_-]+$", var.ecs_cluster_arn))
+    error_message = "ecs_cluster_arn must be null or a valid ECS cluster ARN."
   }
 }
 

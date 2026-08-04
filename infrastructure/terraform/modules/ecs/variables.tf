@@ -35,3 +35,169 @@ variable "tags" {
   type        = map(string)
   default     = {}
 }
+
+variable "aws_region" {
+  description = "AWS region used by ECS logging and application runtime configuration."
+  type        = string
+
+  validation {
+    condition     = can(regex("^[a-z]{2}(-gov)?-[a-z]+-[0-9]$", var.aws_region))
+    error_message = "aws_region must be a valid AWS region name."
+  }
+}
+
+variable "bootstrap_image_tag" {
+  description = "Immutable 40-character Git commit SHA already present in the Phase 1 ECR repositories."
+  type        = string
+
+  validation {
+    condition     = can(regex("^[0-9a-f]{40}$", var.bootstrap_image_tag))
+    error_message = "bootstrap_image_tag must be the full lowercase 40-character commit SHA pushed by the Application CD bootstrap run."
+  }
+}
+
+variable "ecr_repository_urls" {
+  description = "Canonical ECR repository URLs keyed by api, worker, and frontend."
+  type        = map(string)
+
+  validation {
+    condition = toset(keys(var.ecr_repository_urls)) == toset([
+      "api",
+      "worker",
+      "frontend",
+      ]) && alltrue([
+      for url in values(var.ecr_repository_urls) :
+      can(regex("^[0-9]{12}\\.dkr\\.ecr\\.[a-z0-9-]+\\.amazonaws\\.com/[A-Za-z0-9._/-]+$", url))
+    ])
+    error_message = "ecr_repository_urls must contain valid api, worker, and frontend repository URLs."
+  }
+}
+
+variable "private_app_subnet_ids" {
+  description = "Private application subnet IDs used by Phase 1 services and one-shot migrations."
+  type        = list(string)
+
+  validation {
+    condition = (
+      length(distinct(var.private_app_subnet_ids)) >= 2 &&
+      alltrue([for subnet_id in var.private_app_subnet_ids : can(regex("^subnet-[0-9a-f]+$", subnet_id))])
+    )
+    error_message = "private_app_subnet_ids must contain at least two distinct valid subnet IDs."
+  }
+}
+
+variable "api_security_group_id" {
+  description = "Security group assigned to API and migration ENIs."
+  type        = string
+
+  validation {
+    condition     = can(regex("^sg-[0-9a-f]+$", var.api_security_group_id))
+    error_message = "api_security_group_id must be a valid security group ID."
+  }
+}
+
+variable "frontend_security_group_id" {
+  description = "Security group assigned to frontend service ENIs."
+  type        = string
+
+  validation {
+    condition     = can(regex("^sg-[0-9a-f]+$", var.frontend_security_group_id))
+    error_message = "frontend_security_group_id must be a valid security group ID."
+  }
+}
+
+variable "api_target_group_arn" {
+  description = "ALB target-group ARN for API tasks."
+  type        = string
+
+  validation {
+    condition     = can(regex("^arn:[^:]+:elasticloadbalancing:[^:]+:[0-9]{12}:targetgroup/.+$", var.api_target_group_arn))
+    error_message = "api_target_group_arn must be a valid ALB target-group ARN."
+  }
+}
+
+variable "frontend_target_group_arn" {
+  description = "ALB target-group ARN for frontend tasks."
+  type        = string
+
+  validation {
+    condition     = can(regex("^arn:[^:]+:elasticloadbalancing:[^:]+:[0-9]{12}:targetgroup/.+$", var.frontend_target_group_arn))
+    error_message = "frontend_target_group_arn must be a valid ALB target-group ARN."
+  }
+}
+
+variable "task_role_arns" {
+  description = "Dedicated application task-role ARNs keyed by ECS service name."
+  type        = map(string)
+
+  validation {
+    condition = (
+      contains(keys(var.task_role_arns), "api-service") &&
+      contains(keys(var.task_role_arns), "frontend-service") &&
+      alltrue([for arn in values(var.task_role_arns) : can(regex("^arn:[^:]+:iam::[0-9]{12}:role/.+$", arn))])
+    )
+    error_message = "task_role_arns must contain valid api-service and frontend-service role ARNs."
+  }
+}
+
+variable "execution_role_arns" {
+  description = "Dedicated ECS agent execution-role ARNs keyed by ECS service name."
+  type        = map(string)
+
+  validation {
+    condition = (
+      contains(keys(var.execution_role_arns), "api-service") &&
+      contains(keys(var.execution_role_arns), "frontend-service") &&
+      alltrue([for arn in values(var.execution_role_arns) : can(regex("^arn:[^:]+:iam::[0-9]{12}:role/.+$", arn))])
+    )
+    error_message = "execution_role_arns must contain valid api-service and frontend-service role ARNs."
+  }
+}
+
+variable "logs_kms_key_arn" {
+  description = "Customer-managed KMS key ARN used to encrypt Phase 1 CloudWatch log groups."
+  type        = string
+
+  validation {
+    condition     = can(regex("^arn:[^:]+:kms:[^:]+:[0-9]{12}:key/.+$", var.logs_kms_key_arn))
+    error_message = "logs_kms_key_arn must be a valid KMS key ARN."
+  }
+}
+
+variable "api_environment_variables" {
+  description = "Non-secret API and migration runtime configuration. Secret values remain behind ARN references."
+  type        = map(string)
+
+  validation {
+    condition = length(setsubtract(toset([
+      "DATABASE_HOST",
+      "DATABASE_NAME",
+      "DATABASE_CREDENTIALS_ARN",
+      "REDIS_HOST",
+      "REDIS_AUTH_TOKEN_ARN",
+    ]), toset(keys(var.api_environment_variables)))) == 0
+    error_message = "api_environment_variables must include database and Redis endpoints plus their secret ARN references."
+  }
+}
+
+variable "api_desired_count" {
+  description = "Number of API tasks maintained before autoscaling is introduced."
+  type        = number
+  default     = 2
+
+  validation {
+    condition     = var.api_desired_count >= 2 && floor(var.api_desired_count) == var.api_desired_count
+    error_message = "api_desired_count must be an integer of at least 2 for high availability."
+  }
+}
+
+variable "frontend_desired_count" {
+  description = "Number of frontend tasks maintained before autoscaling is introduced."
+  type        = number
+  default     = 2
+
+  validation {
+    condition     = var.frontend_desired_count >= 2 && floor(var.frontend_desired_count) == var.frontend_desired_count
+    error_message = "frontend_desired_count must be an integer of at least 2 for high availability."
+  }
+}

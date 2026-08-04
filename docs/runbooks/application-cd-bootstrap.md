@@ -15,6 +15,19 @@ Keep both repository variables set to `false` until Task 1.5.6:
 This disables migrations and ECS service updates. A manual workflow dispatch
 with `deploy=false` can still seed ECR and verify both OIDC role boundaries.
 
+## Pin the ECS bootstrap image
+
+After the build-only run is green, copy the exact full SHA proven present in
+all three repositories. Configure it as the environment variable
+`ECS_BOOTSTRAP_IMAGE_TAG` in both **Settings → Environments → staging-plan**
+and **Settings → Environments → staging**. Terraform receives it as
+`TF_VAR_ecs_bootstrap_image_tag`; a branch name, short SHA, digest, or `latest`
+is rejected.
+
+Before a production plan, configure the production build-only SHA in both
+`production-plan` and `production`. Staging and production values are allowed
+to differ because their ECR repositories are independent.
+
 ## Obtain the staging contract
 
 After the reviewed staging Terraform apply succeeds:
@@ -32,13 +45,9 @@ SC-DOC-006 Section 1.2 and SC-DOC-009 Section 4.4. Task 1.3.14 makes those
 hostnames resolve; defining them now ensures the immutable frontend bootstrap
 image is compiled with its final public origins.
 
-The following variables remain intentionally unset until their owning task
-creates an actual value:
-
-- Task 1.3.15: `ECS_MIGRATION_TASK_DEFINITION`,
-  `ECS_MIGRATION_CONTAINER_NAME`, `ECS_MIGRATION_SUBNET_IDS`,
-  `ECS_MIGRATION_SECURITY_GROUP_IDS`, and `ECS_SERVICE_DEPLOYMENTS`
-- First protected endpoint: `AUTH_SMOKE_TEST_PATH`
+Tasks 1.3.14 and 1.3.15 add the migration and service deployment values to
+this output. `AUTH_SMOKE_TEST_PATH` remains intentionally unset until the
+first protected endpoint exists.
 
 ## Configure GitHub
 
