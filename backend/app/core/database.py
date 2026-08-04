@@ -3,7 +3,12 @@ import logging
 from collections.abc import AsyncIterator
 
 from sqlalchemy import URL, text
-from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import (
+    AsyncEngine,
+    AsyncSession,
+    async_sessionmaker,
+    create_async_engine,
+)
 
 from app.core.config import get_settings
 from app.core.secrets import SecretConfigurationError, get_json_secret
