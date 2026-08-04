@@ -39,7 +39,7 @@ jobs:
     name: Validate deployment definition
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 15
     permissions:
       contents: read
     steps:
@@ -50,6 +50,25 @@ jobs:
 
       - name: Verify required deployment assets
         run: bash .github/scripts/validate-application-cd.sh
+
+      - name: Build API image for hardened-runtime validation
+        run: |
+          docker build \
+            --file infrastructure/docker/backend.Dockerfile \
+            --tag "stem-cogent-api-validation:${GITHUB_SHA}" \
+            backend
+
+      - name: Verify writable temp space with a read-only root filesystem
+        shell: bash
+        run: |
+          image="stem-cogent-api-validation:${GITHUB_SHA}"
+          docker image inspect "$image" |
+            jq -e '.[0].Config.Volumes | has("/tmp")' >/dev/null
+          docker run --rm \
+            --read-only \
+            --entrypoint python \
+            "$image" \
+            -c 'import os, tempfile; fd, path = tempfile.mkstemp(prefix="wgunicorn-"); os.close(fd); os.unlink(path)'
 
   deployment-disabled:
     name: Deployment intentionally disabled
