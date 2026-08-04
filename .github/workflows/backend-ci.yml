@@ -67,6 +67,18 @@ jobs:
           POSTGRES_PORT: ${{ job.services.postgres.ports[5432] }}
           REDIS_PORT: ${{ job.services.redis.ports[6379] }}
 
+      - name: Verify database migrations
+        working-directory: backend
+        run: |
+          alembic upgrade head
+          alembic current
+          alembic history --verbose
+          alembic downgrade base
+          alembic upgrade head
+        env:
+          DATABASE_URL: postgresql://sc_test:sc_test@127.0.0.1:${{ job.services.postgres.ports[5432] }}/sc_test
+          ENVIRONMENT: test
+
       # ── Code quality ──────────────────────────────────────────────
       - name: Lint (ruff)
         run: ruff check backend/
@@ -121,6 +133,10 @@ jobs:
             -c '. /etc/os-release; printf "%s" "$ID"')"
           echo "Container base OS: $container_os"
           test "$container_os" = "alpine"
+
+      - name: Verify migrations are packaged in API image
+        run: |
+          docker run --rm --entrypoint alembic "$IMAGE_REF" history
 
       - name: Container image scan — Trivy
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0

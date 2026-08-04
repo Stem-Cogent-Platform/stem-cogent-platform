@@ -19,7 +19,7 @@ _engine: AsyncEngine | None = None
 _session_factory: async_sessionmaker[AsyncSession] | None = None
 
 
-def _database_url() -> str | None:
+def get_database_url() -> str | None:
     settings = get_settings()
     if settings.DATABASE_URL is not None:
         return settings.DATABASE_URL.replace("postgresql://", "postgresql+asyncpg://", 1)
@@ -46,11 +46,16 @@ def _database_url() -> str | None:
     ).render_as_string(hide_password=False)
 
 
+def _database_url() -> str | None:
+    """Backward-compatible alias for callers predating the migration runtime."""
+    return get_database_url()
+
+
 def get_engine() -> AsyncEngine | None:
     global _engine, _session_factory
 
     if _engine is None:
-        database_url = _database_url()
+        database_url = get_database_url()
         if database_url is None:
             return None
         _engine = create_async_engine(database_url, pool_pre_ping=True)
