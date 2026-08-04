@@ -36,7 +36,7 @@ locals {
         Sid    = "GitHubApplicationCDOnly"
         Effect = "Allow"
         Principal = {
-          Federated = data.aws_iam_openid_connect_provider.github.arn
+          Federated = local.github_oidc_provider_arn
         }
         Action = "sts:AssumeRoleWithWebIdentity"
         Condition = {
@@ -158,10 +158,6 @@ locals {
   application_deploy_actions = flatten([
     for statement in local.application_deploy_policy_statements : statement.Action
   ])
-}
-
-data "aws_iam_openid_connect_provider" "github" {
-  arn = local.github_oidc_provider_arn
 }
 
 check "application_cd_repository_contract" {
