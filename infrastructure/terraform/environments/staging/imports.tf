@@ -67,6 +67,40 @@ data "aws_security_group" "existing_vpc_endpoints" {
   vpc_id = module.vpc.vpc_id
 }
 
+data "aws_vpc_security_group_rule" "existing_vpc_endpoints_https" {
+  for_each = toset(["10.0.10.0/24", "10.0.11.0/24"])
+
+  filter {
+    name   = "group-id"
+    values = [data.aws_security_group.existing_vpc_endpoints.id]
+  }
+
+  filter {
+    name   = "is-egress"
+    values = ["false"]
+  }
+
+  filter {
+    name   = "ip-protocol"
+    values = ["tcp"]
+  }
+
+  filter {
+    name   = "from-port"
+    values = ["443"]
+  }
+
+  filter {
+    name   = "to-port"
+    values = ["443"]
+  }
+
+  filter {
+    name   = "cidr"
+    values = [each.value]
+  }
+}
+
 data "aws_vpc_endpoint" "existing_s3" {
   vpc_id       = module.vpc.vpc_id
   service_name = "com.amazonaws.${var.aws_region}.s3"
@@ -84,6 +118,13 @@ data "aws_vpc_endpoint" "existing_s3" {
 import {
   to = module.vpc.aws_security_group.vpc_endpoints
   id = data.aws_security_group.existing_vpc_endpoints.id
+}
+
+import {
+  for_each = data.aws_vpc_security_group_rule.existing_vpc_endpoints_https
+
+  to = module.vpc.aws_vpc_security_group_ingress_rule.vpc_endpoints_https[each.key]
+  id = each.value.security_group_rule_id
 }
 
 import {
