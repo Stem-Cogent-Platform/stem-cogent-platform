@@ -69,6 +69,18 @@ data "aws_security_group" "existing_vpc_endpoints" {
 
 locals {
   existing_vpc_endpoint_https_cidrs = toset(["10.0.10.0/24", "10.0.11.0/24"])
+  existing_vpc_interface_endpoint_services = {
+    sqs             = "com.amazonaws.${var.aws_region}.sqs"
+    secretsmanager  = "com.amazonaws.${var.aws_region}.secretsmanager"
+    kms             = "com.amazonaws.${var.aws_region}.kms"
+    ecr_api         = "com.amazonaws.${var.aws_region}.ecr.api"
+    ecr_dkr         = "com.amazonaws.${var.aws_region}.ecr.dkr"
+    logs            = "com.amazonaws.${var.aws_region}.logs"
+    monitoring      = "com.amazonaws.${var.aws_region}.monitoring"
+    xray            = "com.amazonaws.${var.aws_region}.xray"
+    kinesis_streams = "com.amazonaws.${var.aws_region}.kinesis-streams"
+    sns             = "com.amazonaws.${var.aws_region}.sns"
+  }
   existing_vpc_endpoint_https_rule_ids = {
     for rule in data.aws_vpc_security_group_rule.existing_vpc_endpoints :
     coalesce(rule.cidr_ipv4, "") => rule.security_group_rule_id
@@ -109,6 +121,22 @@ data "aws_vpc_endpoint" "existing_s3" {
   }
 }
 
+data "aws_vpc_endpoint" "existing_interface" {
+  for_each = local.existing_vpc_interface_endpoint_services
+
+  vpc_id       = module.vpc.vpc_id
+  service_name = each.value
+  tags = {
+    Name    = "${var.resource_prefix}-${replace(each.key, "_", "-")}-endpoint-${var.environment}"
+    Service = each.key
+  }
+
+  filter {
+    name   = "vpc-endpoint-type"
+    values = ["Interface"]
+  }
+}
+
 import {
   to = module.vpc.aws_security_group.vpc_endpoints
   id = data.aws_security_group.existing_vpc_endpoints.id
@@ -124,4 +152,11 @@ import {
 import {
   to = module.vpc.aws_vpc_endpoint.s3
   id = data.aws_vpc_endpoint.existing_s3.id
+}
+
+import {
+  for_each = data.aws_vpc_endpoint.existing_interface
+
+  to = module.vpc.aws_vpc_endpoint.interface[each.key]
+  id = each.value.id
 }
