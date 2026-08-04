@@ -190,3 +190,35 @@ variable "next_public_ws_url" {
     error_message = "next_public_ws_url must be a WSS origin without a path or trailing slash."
   }
 }
+
+variable "public_hosted_zone_name" {
+  description = "Existing public Route 53 zone used for production aliases and ACM DNS validation."
+  type        = string
+  default     = "stem-cogent.com"
+}
+
+variable "frontend_public_url" {
+  description = "Canonical public production frontend origin."
+  type        = string
+
+  validation {
+    condition     = can(regex("^https://[A-Za-z0-9.-]+$", var.frontend_public_url))
+    error_message = "frontend_public_url must be an HTTPS origin without a path or trailing slash."
+  }
+}
+
+variable "alb_deletion_protection" {
+  description = "Whether the production ALB rejects deletion through the AWS API."
+  type        = bool
+  default     = true
+}
+
+variable "ecs_bootstrap_image_tag" {
+  description = "Full immutable commit SHA pushed to all production ECR repositories by the Task 1.3.12 build-only run."
+  type        = string
+
+  validation {
+    condition     = can(regex("^[0-9a-f]{40}$", var.ecs_bootstrap_image_tag))
+    error_message = "ecs_bootstrap_image_tag must be a full lowercase 40-character Git commit SHA."
+  }
+}

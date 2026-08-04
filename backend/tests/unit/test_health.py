@@ -12,6 +12,8 @@ def test_liveness_reports_alive() -> None:
 
     assert response.status_code == 200
     assert response.json() == {"status": "alive"}
+    assert response.headers["strict-transport-security"] == "max-age=31536000; includeSubDomains; preload"
+    assert response.headers["x-content-type-options"] == "nosniff"
 
 
 def test_readiness_reports_ready_when_dependencies_are_healthy(

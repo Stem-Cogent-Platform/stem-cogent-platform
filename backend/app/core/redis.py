@@ -1,9 +1,11 @@
 import asyncio
 import logging
+from urllib.parse import quote
 
 from redis.asyncio import Redis
 
 from app.core.config import get_settings
+from app.core.secrets import get_secret_string
 
 logger = logging.getLogger(__name__)
 
@@ -16,7 +18,16 @@ def _redis_url() -> str | None:
         return settings.REDIS_URL
     if settings.REDIS_HOST is None:
         return None
-    return f"redis://{settings.REDIS_HOST}:{settings.REDIS_PORT}/0"
+
+    auth_token_arn = getattr(settings, "REDIS_AUTH_TOKEN_ARN", None)
+    if not auth_token_arn:
+        return None
+
+    auth_token = quote(get_secret_string(auth_token_arn), safe="")
+    tls_enabled = getattr(settings, "REDIS_TLS_ENABLED", True)
+    scheme = "rediss" if tls_enabled else "redis"
+    query = "?ssl_cert_reqs=required" if tls_enabled else ""
+    return f"{scheme}://:{auth_token}@{settings.REDIS_HOST}:{settings.REDIS_PORT}/0{query}"
 
 
 def get_redis_client() -> Redis | None:

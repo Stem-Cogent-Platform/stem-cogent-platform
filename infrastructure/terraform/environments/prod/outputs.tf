@@ -111,29 +111,76 @@ output "application_cd_oidc_subject" {
 output "application_cd_github_environment_variables" {
   description = "Actual Task 1.3.13 values to configure on the production GitHub Environment."
   value = {
-    AWS_APPLICATION_BUILD_ROLE_ARN  = module.iam.application_build_role_arn
-    AWS_APPLICATION_DEPLOY_ROLE_ARN = module.iam.application_deploy_role_arn
-    AWS_ACCOUNT_ID                  = data.aws_caller_identity.current.account_id
-    ECR_API_REPOSITORY              = module.ecr.repository_names["api"]
-    ECR_WORKER_REPOSITORY           = module.ecr.repository_names["worker"]
-    ECR_FRONTEND_REPOSITORY         = module.ecr.repository_names["frontend"]
-    NEXT_PUBLIC_API_URL             = var.next_public_api_url
-    NEXT_PUBLIC_WS_URL              = var.next_public_ws_url
-    ECS_CLUSTER_NAME                = module.ecs.cluster_name
-    API_BASE_URL                    = var.next_public_api_url
+    AWS_APPLICATION_BUILD_ROLE_ARN   = module.iam.application_build_role_arn
+    AWS_APPLICATION_DEPLOY_ROLE_ARN  = module.iam.application_deploy_role_arn
+    AWS_ACCOUNT_ID                   = data.aws_caller_identity.current.account_id
+    ECR_API_REPOSITORY               = module.ecr.repository_names["api"]
+    ECR_WORKER_REPOSITORY            = module.ecr.repository_names["worker"]
+    ECR_FRONTEND_REPOSITORY          = module.ecr.repository_names["frontend"]
+    NEXT_PUBLIC_API_URL              = var.next_public_api_url
+    NEXT_PUBLIC_WS_URL               = var.next_public_ws_url
+    ECS_CLUSTER_NAME                 = module.ecs.cluster_name
+    ECS_MIGRATION_TASK_DEFINITION    = module.ecs.migration_task_definition_family
+    ECS_MIGRATION_CONTAINER_NAME     = module.ecs.migration_container_name
+    ECS_MIGRATION_SUBNET_IDS         = jsonencode(module.vpc.private_app_subnet_ids)
+    ECS_MIGRATION_SECURITY_GROUP_IDS = jsonencode([module.vpc.api_service_security_group_id])
+    ECS_SERVICE_DEPLOYMENTS          = module.ecs.service_deployments_json
+    API_BASE_URL                     = var.next_public_api_url
   }
 }
 
 output "application_cd_pending_github_environment_variables" {
-  description = "Application CD contract values intentionally deferred to Tasks 1.3.14 and 1.3.15 rather than fabricated."
-  value = [
-    "ECS_MIGRATION_TASK_DEFINITION",
-    "ECS_MIGRATION_CONTAINER_NAME",
-    "ECS_MIGRATION_SUBNET_IDS",
-    "ECS_MIGRATION_SECURITY_GROUP_IDS",
-    "ECS_SERVICE_DEPLOYMENTS",
-    "AUTH_SMOKE_TEST_PATH",
-  ]
+  description = "Application CD value deferred until the first protected endpoint exists."
+  value       = ["AUTH_SMOKE_TEST_PATH"]
+}
+
+output "public_endpoints" {
+  description = "Canonical public Phase 1 HTTPS origins."
+  value = {
+    api      = module.alb.api_url
+    frontend = module.alb.frontend_url
+  }
+}
+
+output "alb_dns_name" {
+  description = "AWS-generated production ALB DNS name."
+  value       = module.alb.load_balancer_dns_name
+}
+
+output "alb_target_group_arns" {
+  description = "Production target-group ARNs keyed by Phase 1 service."
+  value = {
+    api      = module.alb.api_target_group_arn
+    frontend = module.alb.frontend_target_group_arn
+  }
+}
+
+output "alb_certificate_arn" {
+  description = "DNS-validated ACM certificate attached to the production HTTPS listener."
+  value       = module.alb.certificate_arn
+}
+
+output "alb_web_acl_arn" {
+  description = "Regional WAF web ACL protecting the production ALB."
+  value       = module.alb.web_acl_arn
+}
+
+output "ecs_phase_one_service_names" {
+  description = "Canonical production ECS service names."
+  value = {
+    api      = module.ecs.api_service_name
+    frontend = module.ecs.frontend_service_name
+  }
+}
+
+output "ecs_migration_task_definition_arn" {
+  description = "Production one-shot migration task-definition ARN."
+  value       = module.ecs.migration_task_definition_arn
+}
+
+output "ecs_service_deployments_json" {
+  description = "Exact production ECS_SERVICE_DEPLOYMENTS JSON for Application CD."
+  value       = module.ecs.service_deployments_json
 }
 
 output "kms_key_arns" {

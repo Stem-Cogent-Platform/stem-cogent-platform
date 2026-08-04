@@ -20,10 +20,12 @@ class Settings(BaseSettings):
     DATABASE_NAME: str = "stemcogent"
     DATABASE_REPLICA_HOST: str | None = None
     DATABASE_URL: str | None = None
+    DATABASE_SSL_MODE: str = "require"
 
     REDIS_HOST: str | None = None
     REDIS_PORT: int = 6379
     REDIS_URL: str | None = None
+    REDIS_TLS_ENABLED: bool = True
 
     SQS_INGESTION_PRIORITY_URL: str | None = None
     SQS_PIPELINE_RAW_SIGNALS_URL: str | None = None
@@ -38,6 +40,9 @@ class Settings(BaseSettings):
     JWT_SIGNING_SECRET_ARN: str | None = None
     OPENAI_API_KEY_ARN: str | None = None
     ANTHROPIC_API_KEY_ARN: str | None = None
+    PAYSTACK_SECRET_KEY_ARN: str | None = None
+    PAYSTACK_PUBLIC_KEY_ARN: str | None = None
+    PAYSTACK_WEBHOOK_SECRET_ARN: str | None = None
 
     SYNTHESIS_ENABLED: bool = True
     CIL_ENABLED: bool = True

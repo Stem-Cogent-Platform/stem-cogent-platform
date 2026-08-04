@@ -11,7 +11,6 @@ module "iam" {
   bucket_kms_key_arns        = module.s3.kms_key_arns
   secret_arns                = module.secrets.secret_arns
   ecr_repository_arns        = module.ecr.repository_arns
-  ecs_cluster_arn            = module.ecs.cluster_arn
   github_repository_id       = "1254005582"
   github_repository_owner_id = "289108209"
   github_environment_name    = "production"
