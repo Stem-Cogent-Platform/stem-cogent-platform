@@ -57,3 +57,71 @@ import {
   to = module.rds.aws_iam_role.enhanced_monitoring
   id = "sc-rds-monitoring-staging"
 }
+
+# Adopt the staging endpoint resources that exist in AWS but were not recorded
+# in the remote state after an interrupted apply. Lookups keep opaque AWS IDs
+# out of source control while still requiring an exact VPC, name, service, and
+# endpoint type match before Terraform can import either object.
+data "aws_security_group" "existing_vpc_endpoints" {
+  name   = "sc-vpc-endpoints-sg-staging"
+  vpc_id = module.vpc.vpc_id
+}
+
+locals {
+  existing_vpc_endpoint_https_cidrs = toset(["10.0.10.0/24", "10.0.11.0/24"])
+  existing_vpc_endpoint_https_rule_ids = {
+    for rule in data.aws_vpc_security_group_rule.existing_vpc_endpoints :
+    coalesce(rule.cidr_ipv4, "") => rule.security_group_rule_id
+    if(
+      !rule.is_egress &&
+      rule.ip_protocol == "tcp" &&
+      rule.from_port == 443 &&
+      rule.to_port == 443 &&
+      contains(local.existing_vpc_endpoint_https_cidrs, rule.cidr_ipv4)
+    )
+  }
+}
+
+data "aws_vpc_security_group_rules" "existing_vpc_endpoints" {
+  filter {
+    name   = "group-id"
+    values = [data.aws_security_group.existing_vpc_endpoints.id]
+  }
+}
+
+data "aws_vpc_security_group_rule" "existing_vpc_endpoints" {
+  for_each = toset(data.aws_vpc_security_group_rules.existing_vpc_endpoints.ids)
+
+  security_group_rule_id = each.value
+}
+
+data "aws_vpc_endpoint" "existing_s3" {
+  vpc_id       = module.vpc.vpc_id
+  service_name = "com.amazonaws.${var.aws_region}.s3"
+  tags = {
+    Name    = "sc-s3-endpoint-staging"
+    Service = "s3"
+  }
+
+  filter {
+    name   = "vpc-endpoint-type"
+    values = ["Gateway"]
+  }
+}
+
+import {
+  to = module.vpc.aws_security_group.vpc_endpoints
+  id = data.aws_security_group.existing_vpc_endpoints.id
+}
+
+import {
+  for_each = local.existing_vpc_endpoint_https_rule_ids
+
+  to = module.vpc.aws_vpc_security_group_ingress_rule.vpc_endpoints_https[each.key]
+  id = each.value
+}
+
+import {
+  to = module.vpc.aws_vpc_endpoint.s3
+  id = data.aws_vpc_endpoint.existing_s3.id
+}
