@@ -4,6 +4,18 @@ This runbook verifies SC-DOC-010 Tasks 1.3.14 and 1.3.15 after the reviewed
 staging Terraform apply. It does not enable Application CD deployment; keep
 `STAGING_APPLICATION_DEPLOY_ENABLED=false` until Task 1.5.6.
 
+## Bootstrap authoritative DNS
+
+The apex public hosted zone is a global dependency shared by staging and
+production. It is owned by `infrastructure/terraform/bootstrap/dns`, not by an
+application environment state. Apply that bootstrap root with the dedicated
+`stem-cogent/global/dns/terraform.tfstate` backend key before planning the ALB.
+
+Copy the four exact values from its `name_servers` output to the domain
+registrar. Never reuse nameservers from a deleted Route 53 zone. Confirm public
+NS and SOA queries succeed before merging the environment apply; ACM DNS
+validation cannot finish while registrar delegation is stale.
+
 ## Read the Terraform contract
 
 ```bash

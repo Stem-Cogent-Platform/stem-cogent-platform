@@ -94,6 +94,12 @@ jobs:
               -no-color
           done
 
+      - name: Terraform global DNS bootstrap validation
+        run: |
+          terraform init -backend=false -input=false
+          terraform validate
+        working-directory: infrastructure/terraform/bootstrap/dns
+
       - name: Terraform init
         run: |
           terraform init \
@@ -257,6 +263,12 @@ jobs:
             terraform -chdir="infrastructure/terraform/modules/$module" test \
               -no-color
           done
+
+      - name: Terraform global DNS bootstrap validation
+        run: |
+          terraform init -backend=false -input=false
+          terraform validate
+        working-directory: infrastructure/terraform/bootstrap/dns
 
       - name: Terraform init
         run: |
