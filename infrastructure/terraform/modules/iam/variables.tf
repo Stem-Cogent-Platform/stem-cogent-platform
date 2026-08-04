@@ -97,6 +97,96 @@ variable "secret_arns" {
   }
 }
 
+variable "ecr_repository_arns" {
+  description = "Canonical ECR repository ARNs keyed by api, worker, and frontend."
+  type        = map(string)
+
+  validation {
+    condition = toset(keys(var.ecr_repository_arns)) == toset([
+      "api",
+      "worker",
+      "frontend",
+      ]) && alltrue([
+      for arn in values(var.ecr_repository_arns) :
+      can(regex("^arn:[^:]+:ecr:[^:]+:[0-9]{12}:repository/[A-Za-z0-9._/-]+$", arn))
+    ])
+    error_message = "ecr_repository_arns must contain valid api, worker, and frontend repository ARNs."
+  }
+}
+
+variable "ecs_cluster_arn" {
+  description = "ARN of the environment ECS cluster managed by the ECS module."
+  type        = string
+
+  validation {
+    condition     = can(regex("^arn:[^:]+:ecs:[^:]+:[0-9]{12}:cluster/[A-Za-z0-9_-]+$", var.ecs_cluster_arn))
+    error_message = "ecs_cluster_arn must be a valid ECS cluster ARN."
+  }
+}
+
+variable "github_repository" {
+  description = "GitHub repository allowed to assume the Application CD roles, in owner/name form."
+  type        = string
+  default     = "Stem-Cogent-Platform/stem-cogent-platform"
+
+  validation {
+    condition     = can(regex("^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$", var.github_repository))
+    error_message = "github_repository must use owner/name format."
+  }
+}
+
+variable "github_repository_id" {
+  description = "Immutable numeric GitHub repository ID required in the OIDC token."
+  type        = string
+
+  validation {
+    condition     = can(regex("^[0-9]+$", var.github_repository_id))
+    error_message = "github_repository_id must contain only digits."
+  }
+}
+
+variable "github_repository_owner_id" {
+  description = "Immutable numeric GitHub repository owner ID required in the OIDC token."
+  type        = string
+
+  validation {
+    condition     = can(regex("^[0-9]+$", var.github_repository_owner_id))
+    error_message = "github_repository_owner_id must contain only digits."
+  }
+}
+
+variable "github_environment_name" {
+  description = "GitHub Environment attached to Application CD jobs."
+  type        = string
+
+  validation {
+    condition     = contains(["staging", "production"], var.github_environment_name)
+    error_message = "github_environment_name must be staging or production."
+  }
+}
+
+variable "github_deployment_ref" {
+  description = "Exact Git ref allowed to assume the Application CD roles."
+  type        = string
+
+  validation {
+    condition     = can(regex("^refs/heads/[A-Za-z0-9._/-]+$", var.github_deployment_ref))
+    error_message = "github_deployment_ref must be a full refs/heads/... reference."
+  }
+}
+
+variable "github_oidc_subject_override" {
+  description = "Optional exact GitHub OIDC subject, used if the repository opts into immutable/custom subject claims."
+  type        = string
+  default     = null
+  nullable    = true
+
+  validation {
+    condition     = var.github_oidc_subject_override == null || startswith(var.github_oidc_subject_override, "repo:")
+    error_message = "github_oidc_subject_override must be null or an exact GitHub repository subject beginning with repo:."
+  }
+}
+
 variable "permissions_boundary_arn" {
   description = "Optional IAM permissions boundary applied to every task and execution role."
   type        = string

@@ -2,14 +2,14 @@ locals {
   # Task 1.3.12 defines exactly three image repositories. The backend workers
   # and MLflow use the common worker image repository; each service still has
   # a dedicated execution identity.
-  ecr_repository_names = {
+  service_repository_class = {
     for service in local.services :
-    service => service == "api-service" ? "${var.resource_prefix}-api-service-${var.environment}" : service == "frontend-service" ? "${var.resource_prefix}-frontend-${var.environment}" : "${var.resource_prefix}-worker-${var.environment}"
+    service => service == "api-service" ? "api" : service == "frontend-service" ? "frontend" : "worker"
   }
 
   ecr_repository_arns = {
-    for service, repository_name in local.ecr_repository_names :
-    service => "arn:${data.aws_partition.current.partition}:ecr:${var.aws_region}:${var.aws_account_id}:repository/${repository_name}"
+    for service, repository_class in local.service_repository_class :
+    service => var.ecr_repository_arns[repository_class]
   }
 
   # Canonical groups are defined by SC-DOC-009 Section 7.2. Services that

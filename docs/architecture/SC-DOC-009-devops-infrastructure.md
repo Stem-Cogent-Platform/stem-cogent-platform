@@ -443,8 +443,8 @@ jobs:
         run: npm run build
         working-directory: frontend/
         env:
-          NEXT_PUBLIC_API_URL: https://api.staging.stemcogent.com
-          NEXT_PUBLIC_WS_URL: wss://api.staging.stemcogent.com
+          NEXT_PUBLIC_API_URL: https://api.staging.stem-cogent.com
+          NEXT_PUBLIC_WS_URL: wss://api.staging.stem-cogent.com
 
       - name: Bundle size check
         run: |

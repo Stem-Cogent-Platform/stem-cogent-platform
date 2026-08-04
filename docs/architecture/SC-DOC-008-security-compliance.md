@@ -2226,8 +2226,8 @@ PENTEST_SCHEDULE = {
         "report_retention": "7 years (required for SOC 2)"
     },
     "vulnerability_disclosure": {
-        "policy": "Responsible disclosure policy published at stemcogent.com/security",
-        "contact": "security@stemcogent.com (monitored)",
+        "policy": "Responsible disclosure policy published at stem-cogent.com/security",
+        "contact": "security@stem-cogent.com (monitored)",
         "response_time_hours": 24,
         "bug_bounty": "Considered after Series A"
     }

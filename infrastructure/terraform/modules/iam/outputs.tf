@@ -32,3 +32,28 @@ output "cloudwatch_log_group_arns" {
   description = "Canonical CloudWatch log-group ARN assigned to each service execution policy."
   value       = local.log_group_arns
 }
+
+output "application_build_role_arn" {
+  description = "GitHub OIDC role ARN for Application CD image builds and ECR pushes."
+  value       = aws_iam_role.application_build.arn
+}
+
+output "application_deploy_role_arn" {
+  description = "GitHub OIDC role ARN for Application CD ECS deployments."
+  value       = aws_iam_role.application_deploy.arn
+}
+
+output "application_build_role_name" {
+  description = "GitHub OIDC role name for Application CD image builds."
+  value       = aws_iam_role.application_build.name
+}
+
+output "application_deploy_role_name" {
+  description = "GitHub OIDC role name for Application CD ECS deployments."
+  value       = aws_iam_role.application_deploy.name
+}
+
+output "application_cd_oidc_subject" {
+  description = "Exact GitHub OIDC subject trusted by both Application CD roles."
+  value       = local.github_oidc_subject
+}

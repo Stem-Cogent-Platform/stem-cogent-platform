@@ -156,16 +156,97 @@ jobs:
             -f "${{ matrix.dockerfile }}" \
             "${build_args[@]}" \
             -t "$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" \
-            -t "$ECR_REGISTRY/$ECR_REPOSITORY:latest" \
             "${{ matrix.context }}"
 
-      - name: Push immutable and convenience tags
+      - name: Push immutable commit tag
         env:
           ECR_REGISTRY: ${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com
           IMAGE_TAG: ${{ github.sha }}
         run: |
           docker push "$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
-          docker push "$ECR_REGISTRY/$ECR_REPOSITORY:latest"
+
+  verify-role-boundaries:
+    name: Verify Application CD OIDC role boundaries
+    if: github.event_name == 'workflow_dispatch' && inputs.deploy == false
+    needs: build-images
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: ${{ inputs.environment }}
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      AWS_BUILD_ROLE_ARN: ${{ vars.AWS_APPLICATION_BUILD_ROLE_ARN }}
+      AWS_DEPLOY_ROLE_ARN: ${{ vars.AWS_APPLICATION_DEPLOY_ROLE_ARN }}
+      AWS_ACCOUNT_ID: ${{ vars.AWS_ACCOUNT_ID }}
+      ECS_CLUSTER_NAME: ${{ vars.ECS_CLUSTER_NAME }}
+      ECR_API_REPOSITORY: ${{ vars.ECR_API_REPOSITORY }}
+
+    steps:
+      - name: Verify boundary test configuration
+        shell: bash
+        run: |
+          for variable in \
+            AWS_BUILD_ROLE_ARN \
+            AWS_DEPLOY_ROLE_ARN \
+            AWS_ACCOUNT_ID \
+            ECS_CLUSTER_NAME \
+            ECR_API_REPOSITORY; do
+            test -n "${!variable}" || {
+              echo "$variable is not configured in the GitHub deployment environment." >&2
+              exit 1
+            }
+          done
+
+      - name: Assume build role through OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.AWS_BUILD_ROLE_ARN }}
+          role-session-name: sc-application-boundary-build-${{ github.run_id }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Confirm build role cannot access ECS
+        shell: bash
+        run: |
+          test "$(aws sts get-caller-identity --query Account --output text)" = "$AWS_ACCOUNT_ID"
+          set +e
+          denial="$(aws ecs describe-clusters --clusters "$ECS_CLUSTER_NAME" 2>&1)"
+          status=$?
+          set -e
+          test "$status" -ne 0 || {
+            echo "Build role unexpectedly accessed ECS." >&2
+            exit 1
+          }
+          grep -Eiq 'AccessDenied|not authorized' <<<"$denial" || {
+            echo "ECS probe failed for a reason other than least-privilege denial:" >&2
+            echo "$denial" >&2
+            exit 1
+          }
+
+      - name: Assume deploy role through OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.AWS_DEPLOY_ROLE_ARN }}
+          role-session-name: sc-application-boundary-deploy-${{ github.run_id }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Confirm deploy role cannot access ECR
+        shell: bash
+        run: |
+          test "$(aws sts get-caller-identity --query Account --output text)" = "$AWS_ACCOUNT_ID"
+          set +e
+          denial="$(aws ecr describe-repositories --repository-names "$ECR_API_REPOSITORY" 2>&1)"
+          status=$?
+          set -e
+          test "$status" -ne 0 || {
+            echo "Deploy role unexpectedly accessed ECR." >&2
+            exit 1
+          }
+          grep -Eiq 'AccessDenied|not authorized' <<<"$denial" || {
+            echo "ECR probe failed for a reason other than least-privilege denial:" >&2
+            echo "$denial" >&2
+            exit 1
+          }
 
   deploy:
     name: Deploy to ${{ github.ref_name == 'main' && 'production' || 'staging' }}

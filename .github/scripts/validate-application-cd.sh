@@ -30,4 +30,14 @@ if [ -n "$static_identity_matches" ]; then
   exit 1
 fi
 
+if grep -En '(^|[/:])latest([[:space:]"]|$)' "$workflow_file"; then
+  echo "Application CD must publish only immutable Git commit SHA tags; moving latest tags are forbidden." >&2
+  exit 1
+fi
+
+grep -F 'IMAGE_TAG: ${{ github.sha }}' "$workflow_file" >/dev/null || {
+  echo "Application CD must derive its image tag from github.sha." >&2
+  exit 1
+}
+
 echo "Application CD deployment definition is valid."

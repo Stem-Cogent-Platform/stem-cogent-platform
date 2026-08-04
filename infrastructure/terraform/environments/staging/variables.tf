@@ -170,3 +170,23 @@ variable "data_services_apply_immediately" {
   type        = bool
   default     = false
 }
+
+variable "next_public_api_url" {
+  description = "Canonical public API origin embedded in staging frontend builds."
+  type        = string
+
+  validation {
+    condition     = can(regex("^https://[A-Za-z0-9.-]+$", var.next_public_api_url))
+    error_message = "next_public_api_url must be an HTTPS origin without a path or trailing slash."
+  }
+}
+
+variable "next_public_ws_url" {
+  description = "Canonical public WebSocket origin embedded in staging frontend builds."
+  type        = string
+
+  validation {
+    condition     = can(regex("^wss://[A-Za-z0-9.-]+$", var.next_public_ws_url))
+    error_message = "next_public_ws_url must be a WSS origin without a path or trailing slash."
+  }
+}
