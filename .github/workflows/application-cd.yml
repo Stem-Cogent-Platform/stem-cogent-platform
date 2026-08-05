@@ -85,6 +85,8 @@ jobs:
           image="stem-cogent-frontend-validation:${GITHUB_SHA}"
           docker image inspect "$image" |
             jq -e '.[0].Config.Volumes | has("/tmp") and has("/app/.next/cache")' >/dev/null
+          docker image inspect "$image" |
+            jq -e '.[0].Config.Healthcheck.Test == ["CMD", "node", "/app/healthcheck.mjs"]' >/dev/null
 
           container_id=""
           cleanup() {
@@ -97,7 +99,7 @@ jobs:
           container_id="$(docker run --detach --read-only --publish 127.0.0.1:3001:3000 "$image")"
           for attempt in {1..30}; do
             if curl --fail --silent --show-error http://127.0.0.1:3001/; then
-              docker exec "$container_id" node -e 'require("http").get("http://127.0.0.1:3000/", response => process.exit(response.statusCode < 400 ? 0 : 1)).on("error", () => process.exit(1))'
+              docker exec "$container_id" node /app/healthcheck.mjs
               exit 0
             fi
             sleep 2
