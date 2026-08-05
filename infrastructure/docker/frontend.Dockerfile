@@ -28,11 +28,17 @@ RUN addgroup --system --gid 1001 nodejs \
 
 WORKDIR /app
 
-RUN mkdir -p /app/.next/cache \
-    && chown -R nextjs:nodejs /app
-
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
+
+# ECS Fargate bind mounts otherwise default to root-owned mode 0755. Define
+# these paths in the image after setting ownership so writable ephemeral mounts
+# preserve the permissions required by the non-root Next.js process.
+RUN mkdir -p /app/.next/cache \
+    && chown -R nextjs:nodejs /app \
+    && chmod 1777 /tmp
+
+VOLUME ["/tmp", "/app/.next/cache"]
 
 USER nextjs
 
