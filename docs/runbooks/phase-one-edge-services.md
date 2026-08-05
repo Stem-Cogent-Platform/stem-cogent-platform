@@ -33,6 +33,7 @@ Copy values from output; do not infer ARNs, IDs, names, or account numbers.
 curl --fail --silent --show-error https://api.staging.stem-cogent.com/health/live
 curl --fail --silent --show-error https://app.staging.stem-cogent.com/
 curl --head http://api.staging.stem-cogent.com/health/live
+curl --fail --silent --show-error --dump-header - --output /dev/null https://api.staging.stem-cogent.com/health/live
 ```
 
 The first two commands must succeed over HTTPS. The HTTP response must be a
