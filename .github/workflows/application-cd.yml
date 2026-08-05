@@ -70,6 +70,42 @@ jobs:
             "$image" \
             -c 'import os, tempfile; fd, path = tempfile.mkstemp(prefix="wgunicorn-"); os.close(fd); os.unlink(path)'
 
+      - name: Build frontend image for hardened-runtime validation
+        run: |
+          docker build \
+            --file infrastructure/docker/frontend.Dockerfile \
+            --build-arg NEXT_PUBLIC_API_URL=https://api.validation.invalid \
+            --build-arg NEXT_PUBLIC_WS_URL=wss://api.validation.invalid \
+            --tag "stem-cogent-frontend-validation:${GITHUB_SHA}" \
+            frontend
+
+      - name: Verify frontend health with a read-only root filesystem
+        shell: bash
+        run: |
+          image="stem-cogent-frontend-validation:${GITHUB_SHA}"
+          docker image inspect "$image" |
+            jq -e '.[0].Config.Volumes | has("/tmp") and has("/app/.next/cache")' >/dev/null
+
+          container_id=""
+          cleanup() {
+            if [ -n "$container_id" ]; then
+              docker rm --force "$container_id" >/dev/null 2>&1 || true
+            fi
+          }
+          trap cleanup EXIT
+
+          container_id="$(docker run --detach --read-only --publish 127.0.0.1:3001:3000 "$image")"
+          for attempt in {1..30}; do
+            if curl --fail --silent --show-error http://127.0.0.1:3001/; then
+              docker exec "$container_id" node -e 'require("http").get("http://127.0.0.1:3000/", response => process.exit(response.statusCode < 400 ? 0 : 1)).on("error", () => process.exit(1))'
+              exit 0
+            fi
+            sleep 2
+          done
+
+          docker logs "$container_id" >&2
+          exit 1
+
   deployment-disabled:
     name: Deployment intentionally disabled
     if: github.event_name == 'push' && ((github.ref_name == 'staging' && vars.STAGING_APPLICATION_DEPLOY_ENABLED != 'true') || (github.ref_name == 'main' && vars.PRODUCTION_APPLICATION_DEPLOY_ENABLED != 'true'))
