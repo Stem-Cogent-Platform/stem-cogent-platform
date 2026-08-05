@@ -200,11 +200,9 @@ resource "aws_ecs_task_definition" "frontend" {
 
       healthCheck = {
         command = [
-          # Use the shell form so Node receives its -e flag and JavaScript as
-          # one command. This is the ECS-supported representation for a probe
-          # that contains quoted code and exit-status handling.
-          "CMD-SHELL",
-          "node -e \"require('http').get('http://127.0.0.1:3000/', response => process.exit(response.statusCode < 400 ? 0 : 1)).on('error', () => process.exit(1))\"",
+          "CMD",
+          "node",
+          "/app/healthcheck.mjs",
         ]
         interval    = 30
         timeout     = 10

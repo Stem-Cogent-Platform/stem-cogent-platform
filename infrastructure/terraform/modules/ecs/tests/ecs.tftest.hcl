@@ -142,13 +142,13 @@ run "uses_immutable_images_and_hardened_task_definitions" {
 
   assert {
     condition = (
-      jsondecode(aws_ecs_task_definition.frontend.container_definitions)[0].healthCheck.command[0] == "CMD-SHELL" &&
-      can(regex(
-        "^node -e .+127\\.0\\.0\\.1:3000/",
-        jsondecode(aws_ecs_task_definition.frontend.container_definitions)[0].healthCheck.command[1],
-      ))
+      jsondecode(aws_ecs_task_definition.frontend.container_definitions)[0].healthCheck.command == [
+        "CMD",
+        "node",
+        "/app/healthcheck.mjs",
+      ]
     )
-    error_message = "The frontend health check must execute its loopback Node probe through CMD-SHELL."
+    error_message = "The frontend health check must execute the version-controlled probe baked into the image."
   }
 
 }
