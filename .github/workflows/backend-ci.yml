@@ -5,6 +5,8 @@ on:
     paths:
       - 'backend/**'
       - 'infrastructure/docker/backend.Dockerfile'
+      - 'infrastructure/docker/docker-compose.yml'
+      - 'infrastructure/scripts/**'
       - '.github/workflows/backend-ci.yml'
 
 permissions:
@@ -18,7 +20,7 @@ jobs:
     services:
       # Spin up local Postgres + Redis for integration tests.
       postgres:
-        image: postgres:16-alpine
+        image: pgvector/pgvector:0.8.5-pg16
         env:
           POSTGRES_DB: sc_test
           POSTGRES_USER: sc_test
@@ -81,7 +83,7 @@ jobs:
 
       # ── Code quality ──────────────────────────────────────────────
       - name: Lint (ruff)
-        run: ruff check backend/
+        run: ruff check backend/ infrastructure/scripts/
 
       - name: Type check (mypy)
         run: mypy backend/app --ignore-missing-imports
