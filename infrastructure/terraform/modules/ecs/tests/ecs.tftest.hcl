@@ -129,6 +129,17 @@ run "uses_immutable_images_and_hardened_task_definitions" {
     condition     = length(aws_cloudwatch_log_group.phase_one) == 2
     error_message = "The API and infrastructure log groups required to start Phase 1 tasks must exist."
   }
+
+  assert {
+    condition = alltrue([
+      for definition in [
+        jsondecode(aws_ecs_task_definition.api.container_definitions)[0],
+        jsondecode(aws_ecs_task_definition.migration.container_definitions)[0],
+      ] : one([for variable in definition.environment : variable.value if variable.name == "TMPDIR"]) == "/tmp"
+    ])
+    error_message = "The API and migration tasks must direct Python temporary files to the writable /tmp volume."
+  }
+
 }
 
 run "exports_application_cd_contract" {

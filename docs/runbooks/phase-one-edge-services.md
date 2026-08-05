@@ -60,3 +60,15 @@ Each service must show `running == desired`, `pending == 0`, and rollout
 Task 1.4.1 adds Alembic; launchability at this stage means ECS has registered
 the Fargate-compatible task definition and its Application CD network contract
 contains both private-app subnets with public IP assignment disabled.
+
+## Bootstrap task-definition ownership
+
+Until Task 1.5.6 completes live Application CD acceptance, Terraform owns the
+API and frontend service task-definition revisions. To recover or advance a
+bootstrap revision, first verify the full immutable SHA in all required ECR
+repositories, update `ECS_BOOTSTRAP_IMAGE_TAG` in both `staging-plan` and
+`staging`, and run the reviewed Infrastructure CD apply. Do not enable
+`STAGING_APPLICATION_DEPLOY_ENABLED` for this bootstrap update.
+
+After Task 1.5.6 succeeds, task-definition ownership can move to Application
+CD; retain Terraform ownership of all other ECS service configuration.
