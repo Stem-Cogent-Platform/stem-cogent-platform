@@ -33,6 +33,16 @@ RUN mkdir -p /app/.next/cache \
 
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
+COPY --chown=nextjs:nodejs healthcheck.mjs ./healthcheck.mjs
+
+# ECS Fargate bind mounts otherwise default to root-owned mode 0755. Define
+# these paths in the image after setting ownership so writable ephemeral mounts
+# preserve the permissions required by the non-root Next.js process.
+RUN mkdir -p /app/.next/cache \
+    && chown -R nextjs:nodejs /app \
+    && chmod 1777 /tmp
+
+VOLUME ["/tmp", "/app/.next/cache"]
 
 USER nextjs
 
@@ -40,5 +50,8 @@ EXPOSE 3000
 
 ENV PORT=3000 \
     HOSTNAME=0.0.0.0
+
+HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
+    CMD ["node", "/app/healthcheck.mjs"]
 
 CMD ["node", "server.js"]

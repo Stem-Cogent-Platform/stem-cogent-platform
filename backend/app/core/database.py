@@ -44,8 +44,6 @@ def get_database_url() -> str | None:
         database=getattr(settings, "DATABASE_NAME", "stemcogent"),
         query={"ssl": getattr(settings, "DATABASE_SSL_MODE", "require")},
     ).render_as_string(hide_password=False)
-
-
 def _database_url() -> str | None:
     """Backward-compatible alias for callers predating the migration runtime."""
     return get_database_url()

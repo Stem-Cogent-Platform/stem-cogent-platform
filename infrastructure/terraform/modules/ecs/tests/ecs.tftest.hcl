@@ -138,6 +138,12 @@ run "uses_immutable_images_and_hardened_task_definitions" {
     condition     = length(aws_cloudwatch_log_group.phase_one) == 2
     error_message = "The API and infrastructure log groups required to start Phase 1 tasks must exist."
   }
+
+  assert {
+    condition = jsondecode(aws_ecs_task_definition.frontend.container_definitions)[0].healthCheck.command[0] == "CMD"
+    error_message = "The frontend health check must use an ECS command probe."
+  }
+
 }
 
 run "exports_application_cd_contract" {

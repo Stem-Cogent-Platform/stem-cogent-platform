@@ -20,7 +20,14 @@ COPY alembic.ini ./alembic.ini
 COPY alembic/ ./alembic/
 COPY app/ ./app/
 
-RUN chmod -R a=rX /app
+RUN chmod -R a=rX /app \
+    && chmod 1777 /tmp
+
+# ECS Fargate bind mounts otherwise default to root:root mode 0755. Declaring
+# the same path as a Docker volume makes ECS preserve the image-defined 1777
+# permissions when it mounts writable ephemeral storage over the read-only
+# root filesystem.
+VOLUME ["/tmp"]
 
 USER 1000
 
