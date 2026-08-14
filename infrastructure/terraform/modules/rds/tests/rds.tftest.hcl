@@ -72,6 +72,11 @@ run "creates_secure_multi_az_postgresql_with_read_endpoint" {
   }
 
   assert {
+    condition     = aws_db_instance.read_replica[0].storage_encrypted && aws_db_instance.read_replica[0].max_allocated_storage == 500
+    error_message = "The read replica must preserve encryption and the primary storage-autoscaling ceiling."
+  }
+
+  assert {
     condition     = length(aws_cloudwatch_log_group.this) == 4
     error_message = "Primary and replica PostgreSQL/upgrade log groups must be pre-created and encrypted."
   }

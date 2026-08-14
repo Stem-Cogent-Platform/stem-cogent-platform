@@ -39,7 +39,8 @@ class Settings(BaseSettings):
     REDIS_AUTH_TOKEN_ARN: str | None = None
     JWT_SIGNING_SECRET_ARN: str | None = None
     OPENAI_API_KEY_ARN: str | None = None
-    ANTHROPIC_API_KEY_ARN: str | None = None
+    GROQ_API_KEY_ARN: str | None = None
+    RESEND_API_KEY_ARN: str | None = None
     PAYSTACK_SECRET_KEY_ARN: str | None = None
     PAYSTACK_PUBLIC_KEY_ARN: str | None = None
     PAYSTACK_WEBHOOK_SECRET_ARN: str | None = None

@@ -28,6 +28,9 @@ RUN addgroup --system --gid 1001 nodejs \
 
 WORKDIR /app
 
+RUN mkdir -p /app/.next/cache \
+    && chown -R nextjs:nodejs /app
+
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 COPY --chown=nextjs:nodejs healthcheck.mjs ./healthcheck.mjs

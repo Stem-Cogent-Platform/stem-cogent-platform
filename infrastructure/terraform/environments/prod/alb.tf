@@ -1,6 +1,11 @@
 module "alb" {
   source = "../../modules/alb"
 
+  providers = {
+    aws     = aws
+    aws.dns = aws.dns
+  }
+
   aws_account_id             = data.aws_caller_identity.current.account_id
   environment                = var.environment
   project_name               = var.project_name

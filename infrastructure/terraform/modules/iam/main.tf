@@ -60,8 +60,8 @@ locals {
     "redis_auth_token",
     "jwt_signing_secret",
     "openai_api_key",
-    "anthropic_api_key",
-    "sendgrid_api_key",
+    "groq_api_key",
+    "resend_api_key",
     "paystack_secret_key",
     "paystack_public_key",
     "paystack_webhook_secret",
@@ -159,14 +159,14 @@ locals {
     pdf-collector-worker    = ["database_credentials", "redis_auth_token"]
     upload-collector-worker = ["database_credentials", "redis_auth_token"]
     validation-worker       = ["database_credentials", "redis_auth_token"]
-    normalization-worker    = ["database_credentials", "redis_auth_token", "openai_api_key", "anthropic_api_key"]
+    normalization-worker    = ["database_credentials", "redis_auth_token", "openai_api_key", "groq_api_key"]
     classification-worker   = ["database_credentials", "redis_auth_token"]
     enrichment-worker       = ["database_credentials", "redis_auth_token", "openai_api_key"]
     clustering-worker       = ["database_credentials", "redis_auth_token"]
-    synthesis-worker        = ["database_credentials", "redis_auth_token", "openai_api_key", "anthropic_api_key"]
+    synthesis-worker        = ["database_credentials", "redis_auth_token", "openai_api_key", "groq_api_key"]
     alert-worker            = ["database_credentials", "redis_auth_token"]
-    delivery-worker         = ["database_credentials", "redis_auth_token", "sendgrid_api_key"]
-    digest-worker           = ["database_credentials", "redis_auth_token", "openai_api_key", "anthropic_api_key", "sendgrid_api_key"]
+    delivery-worker         = ["database_credentials", "redis_auth_token", "resend_api_key"]
+    digest-worker           = ["database_credentials", "redis_auth_token", "openai_api_key", "groq_api_key", "resend_api_key"]
     mlflow-server           = ["database_credentials"]
   }
 

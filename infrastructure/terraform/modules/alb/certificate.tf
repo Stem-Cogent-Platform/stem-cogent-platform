@@ -13,6 +13,8 @@ resource "aws_acm_certificate" "this" {
 }
 
 resource "aws_route53_record" "certificate_validation" {
+  provider = aws.dns
+
   # Instance keys come from input hostnames, not apply-time ACM attributes, so
   # a fresh environment can produce one complete plan without -target passes.
   for_each = toset([var.api_hostname, var.frontend_hostname])

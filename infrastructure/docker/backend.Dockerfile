@@ -16,6 +16,8 @@ RUN addgroup -g 1000 -S appuser \
 WORKDIR /app
 
 COPY --from=builder /install /usr/local
+COPY alembic.ini ./alembic.ini
+COPY alembic/ ./alembic/
 COPY app/ ./app/
 
 RUN chmod -R a=rX /app \

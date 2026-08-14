@@ -18,7 +18,6 @@ After Task 1.5.6 has accepted live Application CD deployments, ownership may
 move to Application CD and Terraform can ignore subsequent task-definition
 revisions. This prevents an unaccepted deployment workflow from leaving an ECS
 service pinned to a failed bootstrap revision.
-
 Only the API and frontend services are created. Pipeline workers remain absent
 until their Phase 2 code exists. The two Phase 1 runtime log groups are created
 here because ECS cannot start an `awslogs` container when its group is absent;

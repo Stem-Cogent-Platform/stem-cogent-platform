@@ -23,9 +23,7 @@ locals {
     ENVIRONMENT  = var.environment
     LOG_LEVEL    = "INFO"
     SERVICE_NAME = local.api_service_name
-    # Gunicorn and Python's tempfile module must use the ECS writable volume
-    # rather than the read-only container root filesystem.
-    TMPDIR = "/tmp"
+    TMPDIR       = "/dev/shm"
   })
 
   migration_environment_variables = merge(local.api_environment_variables, {
@@ -189,6 +187,10 @@ resource "aws_ecs_task_definition" "frontend" {
 
       environment = [
         {
+          name  = "HOSTNAME"
+          value = "0.0.0.0"
+        },
+        {
           name  = "NODE_ENV"
           value = "production"
         },
@@ -202,7 +204,8 @@ resource "aws_ecs_task_definition" "frontend" {
         command = [
           "CMD",
           "node",
-          "/app/healthcheck.mjs",
+          "-e",
+          "require('http').get('http://127.0.0.1:3000/', r => process.exit(r.statusCode < 400 ? 0 : 1)).on('error', () => process.exit(1))",
         ]
         interval    = 30
         timeout     = 10
@@ -352,10 +355,9 @@ resource "aws_ecs_service" "api" {
   }
 
   lifecycle {
-    # Terraform owns the bootstrap revision through Task 1.5.6. Application CD
-    # takes over task-definition revisions only after its live acceptance is
-    # complete; autoscaling may own the desired count before then.
-    ignore_changes = [desired_count]
+    # Application CD registers immutable revisions and autoscaling will own
+    # desired count. Terraform continues to own every other service setting.
+    ignore_changes = [task_definition, desired_count]
   }
 
   tags = merge(local.common_tags, {
@@ -409,9 +411,7 @@ resource "aws_ecs_service" "frontend" {
   }
 
   lifecycle {
-    # Keep the frontend on the Terraform-pinned bootstrap SHA until Task 1.5.6
-    # hands task-definition ownership to Application CD.
-    ignore_changes = [desired_count]
+    ignore_changes = [task_definition, desired_count]
   }
 
   tags = merge(local.common_tags, {
