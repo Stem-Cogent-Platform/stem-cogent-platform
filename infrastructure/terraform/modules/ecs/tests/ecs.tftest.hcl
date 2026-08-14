@@ -126,6 +126,15 @@ run "uses_immutable_images_and_hardened_task_definitions" {
   }
 
   assert {
+    condition = alltrue([
+      one([for item in jsondecode(aws_ecs_task_definition.api.container_definitions)[0].environment : item.value if item.name == "TMPDIR"]) == "/dev/shm",
+      one([for item in jsondecode(aws_ecs_task_definition.migration.container_definitions)[0].environment : item.value if item.name == "TMPDIR"]) == "/dev/shm",
+      one([for item in jsondecode(aws_ecs_task_definition.frontend.container_definitions)[0].environment : item.value if item.name == "HOSTNAME"]) == "0.0.0.0",
+    ])
+    error_message = "Read-only Phase 1 containers must explicitly use their writable mount and bind address."
+  }
+
+  assert {
     condition     = length(aws_cloudwatch_log_group.phase_one) == 2
     error_message = "The API and infrastructure log groups required to start Phase 1 tasks must exist."
   }

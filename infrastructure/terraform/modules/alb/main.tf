@@ -15,6 +15,7 @@ locals {
 data "aws_partition" "current" {}
 
 data "aws_route53_zone" "public" {
+  provider     = aws.dns
   name         = trimsuffix(var.hosted_zone_name, ".")
   private_zone = false
 }

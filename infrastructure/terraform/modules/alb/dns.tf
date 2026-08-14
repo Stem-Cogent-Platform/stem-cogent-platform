@@ -1,4 +1,6 @@
 resource "aws_route53_record" "api" {
+  provider = aws.dns
+
   zone_id = data.aws_route53_zone.public.zone_id
   name    = var.api_hostname
   type    = "A"
@@ -11,6 +13,8 @@ resource "aws_route53_record" "api" {
 }
 
 resource "aws_route53_record" "frontend" {
+  provider = aws.dns
+
   zone_id = data.aws_route53_zone.public.zone_id
   name    = var.frontend_hostname
   type    = "A"

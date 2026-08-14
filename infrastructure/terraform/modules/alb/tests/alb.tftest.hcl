@@ -53,6 +53,17 @@ mock_provider "aws" {
   }
 }
 
+mock_provider "aws" {
+  alias = "dns"
+
+  mock_data "aws_route53_zone" {
+    defaults = {
+      zone_id = "Z0123456789ABCDEF"
+      name    = "stem-cogent.com."
+    }
+  }
+}
+
 variables {
   aws_account_id    = "123456789012"
   environment       = "staging"

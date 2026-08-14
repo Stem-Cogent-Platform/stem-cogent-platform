@@ -160,3 +160,160 @@ import {
   to = module.vpc.aws_vpc_endpoint.interface[each.key]
   id = each.value.id
 }
+
+import {
+  to = module.ecr.aws_ecr_repository.this["api"]
+  id = "sc-api-service-staging"
+}
+
+import {
+  to = module.ecr.aws_ecr_repository.this["worker"]
+  id = "sc-worker-staging"
+}
+
+import {
+  to = module.ecr.aws_ecr_repository.this["frontend"]
+  id = "sc-frontend-staging"
+}
+
+import {
+  to = module.iam.aws_iam_role.application_build
+  id = "sc-github-application-build-staging"
+}
+
+import {
+  to = module.iam.aws_iam_role_policy.application_build
+  id = "sc-github-application-build-staging:sc-application-build-staging"
+}
+
+import {
+  to = module.iam.aws_iam_role.application_deploy
+  id = "sc-github-application-deploy-staging"
+}
+
+import {
+  to = module.iam.aws_iam_role_policy.application_deploy
+  id = "sc-github-application-deploy-staging:sc-application-deploy-staging"
+}
+
+import {
+  to = module.alb.aws_s3_bucket.access_logs
+  id = "sc-alb-logs-staging-437040615141"
+}
+
+import {
+  to = module.alb.aws_s3_bucket_ownership_controls.access_logs
+  id = "sc-alb-logs-staging-437040615141"
+}
+
+import {
+  to = module.alb.aws_s3_bucket_public_access_block.access_logs
+  id = "sc-alb-logs-staging-437040615141"
+}
+
+import {
+  to = module.alb.aws_s3_bucket_server_side_encryption_configuration.access_logs
+  id = "sc-alb-logs-staging-437040615141"
+}
+
+import {
+  to = module.alb.aws_s3_bucket_lifecycle_configuration.access_logs
+  id = "sc-alb-logs-staging-437040615141"
+}
+
+import {
+  to = module.alb.aws_s3_bucket_policy.access_logs
+  id = "sc-alb-logs-staging-437040615141"
+}
+
+import {
+  to = module.alb.aws_lb.this
+  id = "arn:aws:elasticloadbalancing:eu-west-1:437040615141:loadbalancer/app/sc-alb-staging/b2f8d0934b033e51"
+}
+
+import {
+  to = module.alb.aws_lb_target_group.api
+  id = "arn:aws:elasticloadbalancing:eu-west-1:437040615141:targetgroup/sc-api-tg-staging/e60964bdbe68b760"
+}
+
+import {
+  to = module.alb.aws_lb_target_group.frontend
+  id = "arn:aws:elasticloadbalancing:eu-west-1:437040615141:targetgroup/sc-frontend-tg-staging/21511ca1dc8eae68"
+}
+
+import {
+  to = module.alb.aws_acm_certificate.this
+  id = "arn:aws:acm:eu-west-1:437040615141:certificate/ead2fe73-895c-461a-b409-6386f3646fdd"
+}
+
+import {
+  to = module.alb.aws_route53_record.certificate_validation["api.staging.stem-cogent.com"]
+  id = "Z049652226HBJOQNSBONC__05f27068b26ac634d759dc96ee08148a.api.staging.stem-cogent.com_CNAME"
+}
+
+import {
+  to = module.alb.aws_route53_record.certificate_validation["app.staging.stem-cogent.com"]
+  id = "Z049652226HBJOQNSBONC__a0c4ab284aa8da15f35fe301f853bb97.app.staging.stem-cogent.com_CNAME"
+}
+
+import {
+  to = module.alb.aws_lb_listener.http
+  id = "arn:aws:elasticloadbalancing:eu-west-1:437040615141:listener/app/sc-alb-staging/b2f8d0934b033e51/6b05b09f483ac812"
+}
+
+import {
+  to = module.alb.aws_lb_listener.https
+  id = "arn:aws:elasticloadbalancing:eu-west-1:437040615141:listener/app/sc-alb-staging/b2f8d0934b033e51/53b43146f8770d83"
+}
+
+import {
+  to = module.alb.aws_lb_listener_rule.api
+  id = "arn:aws:elasticloadbalancing:eu-west-1:437040615141:listener-rule/app/sc-alb-staging/b2f8d0934b033e51/53b43146f8770d83/db8ed4db17e04ed2"
+}
+
+import {
+  to = module.alb.aws_lb_listener_rule.frontend
+  id = "arn:aws:elasticloadbalancing:eu-west-1:437040615141:listener-rule/app/sc-alb-staging/b2f8d0934b033e51/53b43146f8770d83/54b14a47a7bf22ac"
+}
+
+import {
+  to = module.alb.aws_route53_record.api
+  id = "Z049652226HBJOQNSBONC_api.staging.stem-cogent.com_A"
+}
+
+import {
+  to = module.alb.aws_route53_record.frontend
+  id = "Z049652226HBJOQNSBONC_app.staging.stem-cogent.com_A"
+}
+
+import {
+  to = module.alb.aws_wafv2_web_acl.this
+  id = "ea66a01d-8d8c-493e-a24c-34014e819f4c/sc-alb-staging/REGIONAL"
+}
+
+import {
+  to = module.alb.aws_wafv2_web_acl_association.this
+  id = "arn:aws:wafv2:eu-west-1:437040615141:regional/webacl/sc-alb-staging/ea66a01d-8d8c-493e-a24c-34014e819f4c,arn:aws:elasticloadbalancing:eu-west-1:437040615141:loadbalancer/app/sc-alb-staging/b2f8d0934b033e51"
+}
+
+# Adopt the Phase 1 runtime resources created during the interrupted staging
+# deployment. Production is created normally from the same ECS module.
+import {
+  to = module.ecs.aws_cloudwatch_log_group.phase_one["api"]
+  id = "/sc/api-service/staging"
+}
+
+import {
+  to = module.ecs.aws_cloudwatch_log_group.phase_one["infrastructure"]
+  id = "/sc/infrastructure/staging"
+}
+
+import {
+  to = module.ecs.aws_ecs_service.api
+  id = "sc-cluster-staging/sc-api-service-staging"
+}
+
+import {
+  to = module.ecs.aws_ecs_service.frontend
+  id = "sc-cluster-staging/sc-frontend-staging"
+}

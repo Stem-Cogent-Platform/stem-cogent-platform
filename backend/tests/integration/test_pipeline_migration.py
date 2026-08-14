@@ -44,7 +44,7 @@ async def test_pipeline_migration_is_complete_and_partition_safe() -> None:
     try:
         async with engine.connect() as connection:
             revision = await connection.scalar(text("SELECT version_num FROM alembic_version"))
-            assert revision == "0005"
+            assert revision == "0008"
 
             parent_tables = set(
                 (

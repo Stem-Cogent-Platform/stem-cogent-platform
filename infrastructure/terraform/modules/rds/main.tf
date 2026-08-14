@@ -246,6 +246,8 @@ resource "aws_db_instance" "read_replica" {
   db_subnet_group_name   = aws_db_subnet_group.this.name
   vpc_security_group_ids = var.security_group_ids
   multi_az               = false
+  storage_encrypted      = true
+  max_allocated_storage  = var.max_allocated_storage
 
   parameter_group_name                  = aws_db_parameter_group.this.name
   iam_database_authentication_enabled   = true

@@ -23,6 +23,7 @@ locals {
     ENVIRONMENT  = var.environment
     LOG_LEVEL    = "INFO"
     SERVICE_NAME = local.api_service_name
+    TMPDIR       = "/dev/shm"
   })
 
   migration_environment_variables = merge(local.api_environment_variables, {
@@ -185,6 +186,10 @@ resource "aws_ecs_task_definition" "frontend" {
       }]
 
       environment = [
+        {
+          name  = "HOSTNAME"
+          value = "0.0.0.0"
+        },
         {
           name  = "NODE_ENV"
           value = "production"

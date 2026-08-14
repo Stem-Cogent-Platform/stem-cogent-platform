@@ -20,14 +20,14 @@ locals {
       description       = "OpenAI API key used by Stem Cogent synthesis services"
       rotation_schedule = "90-days-manual"
     }
-    anthropic_api_key = {
-      path              = "llm/anthropic/api-key"
-      description       = "Anthropic API key used by Stem Cogent synthesis services"
+    groq_api_key = {
+      path              = "llm/groq/api-key"
+      description       = "Groq API key used by Stem Cogent synthesis services"
       rotation_schedule = "90-days-manual"
     }
-    sendgrid_api_key = {
-      path              = "email/sendgrid/api-key"
-      description       = "SendGrid API key used by Stem Cogent delivery services"
+    resend_api_key = {
+      path              = "email/resend/api-key"
+      description       = "Resend API key used by Stem Cogent delivery services"
       rotation_schedule = "90-days-manual"
     }
     paystack_secret_key = {

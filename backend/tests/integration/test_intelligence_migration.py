@@ -39,7 +39,7 @@ async def test_intelligence_migration_and_entity_seed_are_complete() -> None:
             revision = await connection.scalar(
                 text("SELECT version_num FROM alembic_version")
             )
-            assert revision == "0005"
+            assert revision == "0008"
 
             tables = set(
                 (

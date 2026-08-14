@@ -35,3 +35,14 @@ variable "project_name" {
   type        = string
   default     = "stem-cogent"
 }
+
+variable "production_account_id" {
+  description = "Production account whose Terraform identities may assume the shared DNS record-manager role."
+  type        = string
+  default     = "989571800682"
+
+  validation {
+    condition     = can(regex("^[0-9]{12}$", var.production_account_id))
+    error_message = "production_account_id must be a 12-digit AWS account ID."
+  }
+}
