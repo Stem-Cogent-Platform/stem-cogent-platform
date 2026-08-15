@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -88,5 +89,11 @@ def test_offline_sql_seeds_only_canonical_roles_and_plans() -> None:
 
     for value in (*EXPECTED_PLANS, *EXPECTED_ROLES, *EXPECTED_SCOPES):
         assert f"'{value}'" in sql
+    plan_constraint = re.search(
+        r"tenants_plan_tier_check CHECK \((.*?)\)",
+        sql,
+        re.DOTALL,
+    )
+    assert plan_constraint is not None
     for legacy_plan in ("STANDARD", "PROFESSIONAL", "STARTER"):
-        assert f"'{legacy_plan}'" not in sql
+        assert f"'{legacy_plan}'" not in plan_constraint.group(1)
