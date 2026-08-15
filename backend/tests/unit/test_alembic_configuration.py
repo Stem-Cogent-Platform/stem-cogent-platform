@@ -17,7 +17,7 @@ def test_alembic_configuration_has_no_database_credentials() -> None:
     assert parser["alembic"]["sqlalchemy.url"] == ""
 
 
-def test_clean_v2_migration_directory_has_no_heads_yet() -> None:
+def test_v2_migration_directory_has_one_linear_head() -> None:
     result = subprocess.run(
         [sys.executable, "-m", "alembic", "heads"],
         cwd=BACKEND_ROOT,
@@ -27,7 +27,9 @@ def test_clean_v2_migration_directory_has_no_heads_yet() -> None:
     )
 
     assert result.returncode == 0, result.stderr
-    assert result.stdout.strip() == ""
+    heads = result.stdout.strip().splitlines()
+    assert len(heads) == 1
+    assert heads[0].endswith("(head)")
 
 
 def test_alembic_environment_is_async_and_schema_aware() -> None:
