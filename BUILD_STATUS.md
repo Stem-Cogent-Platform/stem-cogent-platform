@@ -38,3 +38,9 @@
 - 1.3.13: `feat(infra): complete task 1.3.13 application CD contract`
 - 1.3.14: `feat(infra): complete task 1.3.14 shared-DNS ALB and HTTPS`
 - 1.3.15: `fix(infra): complete task 1.3.15 Phase 1 ECS services`
+
+## Stage 1.4 — Database Schema v2
+
+| Task | Done condition met | Environments | Evidence | Files touched | Test result | Commit message |
+|---|---|---|---|---|---|---|
+| 1.4.1 — Configure Alembic | Yes | Staging database; repository configuration | Both live databases were confirmed without an `alembic_version` table before the override. The eight superseded pre-v2 revisions and their old-model tests were retired. One-shot staging ECS task `8b9d9ddc404744c399b340b6cc3ab9ec` ran `alembic current` against PostgreSQL with exit code 0 and transactional-DDL initialization; temporary task definition revision 8 was deregistered afterward. | `backend/alembic.ini`, `backend/alembic/env.py`, `backend/alembic/README`, `backend/alembic/versions/*` (pre-v2 removal), superseded migration tests, `backend/tests/unit/test_alembic_configuration.py`, `BUILD_STATUS.md` | Pass — 16 focused unit tests; Ruff clean; staging `alembic current` exit 0 | `feat(db): reset and configure Stage 1.4 v2 Alembic` |
