@@ -92,7 +92,10 @@ def test_context_types_and_business_lens_roles_are_constrained() -> None:
 
 def test_user_references_cannot_cross_tenant_boundaries() -> None:
     sql = _offline_sql()
-    context_sql = sql.split("CREATE TABLE context.company_profiles", 1)[1]
+    context_sql = sql.split("CREATE TABLE context.company_profiles", 1)[1].split(
+        "CREATE TABLE decision.assessments",
+        1,
+    )[0]
 
     for constraint_name in (
         "company_profiles_created_by_tenant_fkey",
