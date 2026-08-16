@@ -8,7 +8,12 @@ from fastapi import FastAPI, Request, Response
 from app.api.v1.health import router as health_router
 from app.core.config import get_settings
 from app.core.database import close_database_connection
-from app.core.logging import bind_log_context, configure_logging, get_logger, reset_log_context
+from app.core.logging import (
+    bind_log_context,
+    configure_logging,
+    get_logger,
+    reset_log_context,
+)
 from app.core.redis import close_redis_connection
 from app.core.tracing import configure_tracing
 
