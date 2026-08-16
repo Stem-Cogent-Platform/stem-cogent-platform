@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import importlib
 import json
 import logging
 import runpy
@@ -16,7 +17,7 @@ BACKEND_ROOT = Path(__file__).resolve().parents[2]
 if str(BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(BACKEND_ROOT))
 
-from app.core.database import get_database_url  # noqa: E402
+get_database_url = importlib.import_module("app.core.database").get_database_url
 
 _DATA = runpy.run_path(
     Path(__file__).resolve().parents[1] / "data" / "launch_registry_v2.py"
