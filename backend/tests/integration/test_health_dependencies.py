@@ -1,10 +1,11 @@
 import asyncio
 
 import pytest
+from httpx import ASGITransport, AsyncClient
+
 from app.core.database import close_database_connection
 from app.core.redis import close_redis_connection
 from app.main import app
-from httpx import ASGITransport, AsyncClient
 
 
 @pytest.mark.asyncio

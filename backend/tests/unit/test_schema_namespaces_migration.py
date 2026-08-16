@@ -10,7 +10,6 @@ from unittest.mock import Mock
 
 import sqlalchemy as sa
 
-
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
 MIGRATION_PATH = (
     BACKEND_ROOT

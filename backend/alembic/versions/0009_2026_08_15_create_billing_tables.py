@@ -5,8 +5,8 @@ Revises: 0008
 Create Date: 2026-08-15
 """
 
-from collections.abc import Sequence
 import json
+from collections.abc import Sequence
 
 from alembic import op
 

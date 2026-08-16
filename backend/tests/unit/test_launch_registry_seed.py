@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-from collections import Counter
 import importlib.util
-from pathlib import Path
 import runpy
+from collections import Counter
+from pathlib import Path
 from types import ModuleType
-
 
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
 DATA_PATH = BACKEND_ROOT / "alembic" / "data" / "launch_registry_v2.py"

@@ -5,9 +5,9 @@ Revises: 0002
 Create Date: 2026-08-15
 """
 
+import runpy
 from collections.abc import Sequence
 from pathlib import Path
-import runpy
 
 from alembic import op
 

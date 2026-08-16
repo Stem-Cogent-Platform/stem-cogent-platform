@@ -8,7 +8,6 @@ and cross-border events in the same taxonomy.
 
 from typing import NamedTuple
 
-
 SEED_VERSION = "2026.08-v2"
 REGISTRY_CODE = "NIGERIA_LAUNCH"
 

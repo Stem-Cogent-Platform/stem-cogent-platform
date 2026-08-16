@@ -9,7 +9,6 @@ import sys
 from pathlib import Path
 from types import ModuleType
 
-
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
 REPOSITORY_ROOT = BACKEND_ROOT.parent
 MIGRATION_PATH = (

@@ -1,8 +1,9 @@
 from unittest.mock import AsyncMock
 
+from fastapi.testclient import TestClient
+
 from app.api.v1 import health
 from app.main import app
-from fastapi.testclient import TestClient
 
 
 def test_liveness_reports_alive() -> None:
