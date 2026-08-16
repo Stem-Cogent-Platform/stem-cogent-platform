@@ -44,8 +44,12 @@ class XRayASGIMiddleware:
             parent_id=trace_header.parent,
             sampling=sampling,
         )
-        segment.put_http_meta("request", {"method": scope.get("method"), "url": path})
-        correlation_id = correlation_id_var.get()
+        segment.put_http_meta("method", scope.get("method"))
+        segment.put_http_meta("url", path)
+        correlation_id = (
+            headers.get(b"x-correlation-id", b"").decode("latin-1")
+            or correlation_id_var.get()
+        )
         if correlation_id:
             segment.put_annotation("correlation_id", correlation_id)
         status_code = 500
@@ -62,11 +66,11 @@ class XRayASGIMiddleware:
             segment.add_exception(exc, exc.__traceback__)
             raise
         finally:
-            segment.put_http_meta("response", {"status": status_code})
-            if status_code >= 500:
-                segment.add_fault_flag()
-            elif status_code >= 400:
-                segment.add_error_flag()
+            segment.put_http_meta("status", status_code)
+            # Starlette's BaseHTTPMiddleware executes the inner application in
+            # a child task, which can clear the SDK's task-local entity. Put
+            # the original segment back before closing so it is always sent.
+            xray_recorder.context.put_segment(segment)
             xray_recorder.end_segment()
 
 
