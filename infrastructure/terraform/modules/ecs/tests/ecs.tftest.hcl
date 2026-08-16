@@ -156,6 +156,7 @@ run "uses_immutable_images_and_hardened_task_definitions" {
       length(jsondecode(aws_ecs_task_definition.api.container_definitions)) == 2,
       jsondecode(aws_ecs_task_definition.api.container_definitions)[1].name == "xray-daemon",
       jsondecode(aws_ecs_task_definition.api.container_definitions)[1].readonlyRootFilesystem,
+      jsondecode(aws_ecs_task_definition.api.container_definitions)[1].logConfiguration.options["awslogs-stream-prefix"] == "api-service",
       one([for item in jsondecode(aws_ecs_task_definition.api.container_definitions)[0].environment : item.value if item.name == "XRAY_ENABLED"]) == "true",
     ])
     error_message = "The API task must run the hardened X-Ray daemon sidecar with application tracing enabled."

@@ -154,7 +154,7 @@ resource "aws_ecs_task_definition" "api" {
         options = {
           awslogs-group         = var.phase_one_log_group_names["api"]
           awslogs-region        = var.aws_region
-          awslogs-stream-prefix = "xray-daemon"
+          awslogs-stream-prefix = "api-service"
         }
       }
     },
