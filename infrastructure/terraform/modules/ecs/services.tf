@@ -7,16 +7,22 @@ locals {
   frontend_container_name  = "frontend"
   migration_container_name = "migration"
 
-  api_environment_variables = merge(var.api_environment_variables, {
+  runtime_environment_variables = {
     AWS_REGION   = var.aws_region
     ENVIRONMENT  = var.environment
     LOG_LEVEL    = "INFO"
     SERVICE_NAME = local.api_service_name
     TMPDIR       = "/dev/shm"
+  }
+
+  api_environment_variables = merge(var.api_environment_variables, local.runtime_environment_variables, {
+    AWS_XRAY_DAEMON_ADDRESS = "127.0.0.1:2000"
+    XRAY_ENABLED            = "true"
   })
 
-  migration_environment_variables = merge(local.api_environment_variables, {
+  migration_environment_variables = merge(var.api_environment_variables, local.runtime_environment_variables, {
     SERVICE_NAME = local.migration_family
+    XRAY_ENABLED = "false"
   })
 
   bootstrap_images = {
@@ -109,6 +115,46 @@ resource "aws_ecs_task_definition" "api" {
           awslogs-group         = var.phase_one_log_group_names["api"]
           awslogs-region        = var.aws_region
           awslogs-stream-prefix = "api-service"
+        }
+      }
+    },
+    {
+      name                   = "xray-daemon"
+      image                  = "public.ecr.aws/xray/aws-xray-daemon:3.x"
+      essential              = true
+      cpu                    = 32
+      memoryReservation      = 256
+      readonlyRootFilesystem = true
+
+      command = [
+        "-t", "0.0.0.0:2000",
+        "-b", "0.0.0.0:2000",
+      ]
+
+      portMappings = [
+        {
+          containerPort = 2000
+          hostPort      = 2000
+          protocol      = "udp"
+        },
+        {
+          containerPort = 2000
+          hostPort      = 2000
+          protocol      = "tcp"
+        },
+      ]
+
+      environment = [{
+        name  = "AWS_REGION"
+        value = var.aws_region
+      }]
+
+      logConfiguration = {
+        logDriver = "awslogs"
+        options = {
+          awslogs-group         = var.phase_one_log_group_names["api"]
+          awslogs-region        = var.aws_region
+          awslogs-stream-prefix = "xray-daemon"
         }
       }
     },

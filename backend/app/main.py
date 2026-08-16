@@ -10,6 +10,7 @@ from app.core.config import get_settings
 from app.core.database import close_database_connection
 from app.core.logging import bind_log_context, configure_logging, get_logger, reset_log_context
 from app.core.redis import close_redis_connection
+from app.core.tracing import configure_tracing
 
 
 @asynccontextmanager
@@ -31,6 +32,7 @@ app = FastAPI(
     openapi_url=None if is_production else "/api/v1/openapi.json",
     lifespan=lifespan,
 )
+configure_tracing(app)
 
 
 def _request_identifier(value: str | None) -> str:
