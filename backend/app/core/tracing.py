@@ -67,11 +67,14 @@ class XRayASGIMiddleware:
             raise
         finally:
             segment.put_http_meta("status", status_code)
-            # Starlette's BaseHTTPMiddleware executes the inner application in
-            # a child task, which can clear the SDK's task-local entity. Put
-            # the original segment back before closing so it is always sent.
-            xray_recorder.context.put_segment(segment)
-            xray_recorder.end_segment()
+            # Gunicorn initializes the application before the worker event
+            # loop, so the SDK's AsyncContext cannot reliably recover this
+            # segment after Starlette's child-task boundary. Close and emit the
+            # retained request segment directly, which is the same transport
+            # path used internally by AWSXRayRecorder._send_segment().
+            segment.close()
+            if segment.sampled:
+                xray_recorder.emitter.send_entity(segment)
 
 
 def configure_tracing(app: FastAPI) -> None:
