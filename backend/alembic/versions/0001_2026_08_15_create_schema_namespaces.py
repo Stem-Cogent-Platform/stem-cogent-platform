@@ -1,12 +1,13 @@
-"""Create PostgreSQL schema namespaces.
+"""Create the Stem Cogent v2 schema namespaces.
 
 Revision ID: 0001
-Revises:
-Create Date: 2026-08-04
+Revises: None
+Create Date: 2026-08-15
 """
 
 from collections.abc import Sequence
 
+import sqlalchemy as sa
 from alembic import op
 
 revision: str = "0001"
@@ -14,11 +15,13 @@ down_revision: str | None = None
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
-SCHEMAS = (
+SCHEMA_NAMES: tuple[str, ...] = (
     "auth",
     "config",
     "pipeline",
     "intelligence",
+    "context",
+    "decision",
     "delivery",
     "cil",
     "feedback",
@@ -28,10 +31,10 @@ SCHEMAS = (
 
 
 def upgrade() -> None:
-    for schema in SCHEMAS:
-        op.execute(f'CREATE SCHEMA "{schema}"')
+    for schema_name in SCHEMA_NAMES:
+        op.execute(sa.schema.CreateSchema(schema_name))
 
 
 def downgrade() -> None:
-    for schema in reversed(SCHEMAS):
-        op.execute(f'DROP SCHEMA "{schema}"')
+    for schema_name in reversed(SCHEMA_NAMES):
+        op.execute(sa.schema.DropSchema(schema_name))

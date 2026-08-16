@@ -282,7 +282,7 @@ Create immutable audit.events partitioned table. Revoke UPDATE/DELETE for applic
 
 ### TASK 1.4.12 — Seed Launch Registry
 
-Seed Nigerian launch entities: regulators, priority fintechs, banks/infrastructure providers, legislation/product categories required by launch sources.
+Seed Nigerian launch entities: regulators, priority fintechs, banks/infrastructure providers, legislation/product categories required by launch sources [Signal Taxonomy](../intelligence/signal_taxonomy.md).
 
 Done when seed counts meet reviewed seed manifest; do not use an arbitrary entity count as the product-success metric.
 
@@ -629,7 +629,7 @@ This index is normative for coding-agent/task assignment. If repository paths di
 | 1.3.15 | `infrastructure/terraform/modules/ecs/services.tf` | API/frontend stable; migration task can start in private-app subnet |
 | 1.4.1 | `backend/alembic.ini`, `backend/alembic/env.py`, `backend/alembic/versions/` | `alembic current` succeeds |
 | 1.4.2–1.4.11 | `backend/alembic/versions/0001_*` through `0010_*` | Schemas/tables/RLS/indexes match SC-DOC-003 |
-| 1.4.12 | `infrastructure/scripts/seed_entity_registry.py` plus taxonomy/decision-rule seeds | Reviewed launch seed manifest applied |
+| 1.4.12 | `backend/alembic/data/launch_registry_v2.py`, `backend/alembic/seeds/seed_launch_registry.py` | Reviewed launch seed manifest applied |
 | 1.5.x | `backend/app/core/logging.py`, `backend/app/core/tracing.py`, Terraform observability modules | JSON logs/traces/alarms available |
 | 1.5.6 | `.github/workflows/application-cd.yml` + staging environment | Merge deploys/migrates/smoke-tests green |
 

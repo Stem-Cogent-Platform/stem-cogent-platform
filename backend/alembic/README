@@ -1,5 +1,5 @@
-Stem Cogent database migrations
-================================
+Stem Cogent v2 database migrations
+==================================
 
 Run Alembic from the backend directory so that alembic.ini is discovered:
 
@@ -8,5 +8,9 @@ Run Alembic from the backend directory so that alembic.ini is discovered:
 
 The environment reads DATABASE_URL for local development and CI. In ECS it
 uses DATABASE_HOST plus DATABASE_CREDENTIALS_ARN through the same settings and
-Secrets Manager path as the API service. Migration files are immutable after
-merge; corrections must be expressed as a new revision.
+Secrets Manager path as the API service. The resolved URL is never stored in
+alembic.ini or logged.
+
+The v2 baseline is the authoritative 0001-0010 sequence defined by
+SC-DOC-003 v2 and SC-DOC-010 Stage 1.4. Migration files are immutable after
+production application; corrections must be expressed as a new revision.
