@@ -7,17 +7,6 @@ locals {
   frontend_container_name  = "frontend"
   migration_container_name = "migration"
 
-  phase_one_log_groups = {
-    api = {
-      name           = "/${var.resource_prefix}/api-service/${var.environment}"
-      retention_days = 90
-    }
-    infrastructure = {
-      name           = "/${var.resource_prefix}/infrastructure/${var.environment}"
-      retention_days = 14
-    }
-  }
-
   api_environment_variables = merge(var.api_environment_variables, {
     AWS_REGION   = var.aws_region
     ENVIRONMENT  = var.environment
@@ -47,21 +36,6 @@ locals {
       image     = "frontend"
     },
   ]
-}
-
-# These are the two log groups without which the Phase 1 services cannot start.
-# The later observability module owns the remaining pipeline-wide inventory.
-resource "aws_cloudwatch_log_group" "phase_one" {
-  for_each = local.phase_one_log_groups
-
-  name              = each.value.name
-  retention_in_days = each.value.retention_days
-  kms_key_id        = var.logs_kms_key_arn
-
-  tags = merge(local.common_tags, {
-    Name    = each.value.name
-    Purpose = "phase-one-runtime"
-  })
 }
 
 resource "aws_ecs_task_definition" "api" {
@@ -132,7 +106,7 @@ resource "aws_ecs_task_definition" "api" {
       logConfiguration = {
         logDriver = "awslogs"
         options = {
-          awslogs-group         = aws_cloudwatch_log_group.phase_one["api"].name
+          awslogs-group         = var.phase_one_log_group_names["api"]
           awslogs-region        = var.aws_region
           awslogs-stream-prefix = "api-service"
         }
@@ -233,7 +207,7 @@ resource "aws_ecs_task_definition" "frontend" {
       logConfiguration = {
         logDriver = "awslogs"
         options = {
-          awslogs-group         = aws_cloudwatch_log_group.phase_one["infrastructure"].name
+          awslogs-group         = var.phase_one_log_group_names["infrastructure"]
           awslogs-region        = var.aws_region
           awslogs-stream-prefix = "frontend-service"
         }
@@ -298,7 +272,7 @@ resource "aws_ecs_task_definition" "migration" {
       logConfiguration = {
         logDriver = "awslogs"
         options = {
-          awslogs-group         = aws_cloudwatch_log_group.phase_one["api"].name
+          awslogs-group         = var.phase_one_log_group_names["api"]
           awslogs-region        = var.aws_region
           awslogs-stream-prefix = "api-service"
         }

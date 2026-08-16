@@ -46,6 +46,9 @@ module "ecs" {
   frontend_target_group_arn  = module.alb.frontend_target_group_arn
   task_role_arns             = module.iam.task_role_arns
   execution_role_arns        = module.iam.execution_role_arns
-  logs_kms_key_arn           = module.kms.key_arns["logs"]
-  api_environment_variables  = local.api_environment_variables
+  phase_one_log_group_names = {
+    api            = module.observability.log_group_names["api"]
+    infrastructure = module.observability.log_group_names["infrastructure"]
+  }
+  api_environment_variables = local.api_environment_variables
 }

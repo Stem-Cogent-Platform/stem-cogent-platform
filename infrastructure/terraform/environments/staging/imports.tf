@@ -299,12 +299,12 @@ import {
 # Adopt the Phase 1 runtime resources created during the interrupted staging
 # deployment. Production is created normally from the same ECS module.
 import {
-  to = module.ecs.aws_cloudwatch_log_group.phase_one["api"]
+  to = module.observability.aws_cloudwatch_log_group.this["api"]
   id = "/sc/api-service/staging"
 }
 
 import {
-  to = module.ecs.aws_cloudwatch_log_group.phase_one["infrastructure"]
+  to = module.observability.aws_cloudwatch_log_group.this["infrastructure"]
   id = "/sc/infrastructure/staging"
 }
 

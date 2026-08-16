@@ -154,13 +154,17 @@ variable "execution_role_arns" {
   }
 }
 
-variable "logs_kms_key_arn" {
-  description = "Customer-managed KMS key ARN used to encrypt Phase 1 CloudWatch log groups."
-  type        = string
+variable "phase_one_log_group_names" {
+  description = "Observability-owned CloudWatch log group names used by Phase 1 task definitions."
+  type        = map(string)
 
   validation {
-    condition     = can(regex("^arn:[^:]+:kms:[^:]+:[0-9]{12}:key/.+$", var.logs_kms_key_arn))
-    error_message = "logs_kms_key_arn must be a valid KMS key ARN."
+    condition = (
+      contains(keys(var.phase_one_log_group_names), "api") &&
+      contains(keys(var.phase_one_log_group_names), "infrastructure") &&
+      alltrue([for name in values(var.phase_one_log_group_names) : startswith(name, "/")])
+    )
+    error_message = "phase_one_log_group_names must contain absolute api and infrastructure log group names."
   }
 }
 

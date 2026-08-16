@@ -292,9 +292,47 @@ Done when seed counts meet reviewed seed manifest; do not use an arbitrary entit
 
 Preserve CloudWatch log groups, structured logging, X-Ray, core alarms. Add metric namespaces for Decision Brief processing but no data is expected until Phase 3.
 
+### TASK 1.5.1 — CloudWatch Log Groups
+
+File: `infrastructure/terraform/modules/observability/log_groups.tf`.
+
+Create every SC-DOC-009 Section 7.2 launch log group with its documented retention policy and environment logs CMK. Existing Phase 1 API/infrastructure log groups must be moved into the observability module without replacement or log loss.
+
+Done when all seven log groups exist in CloudWatch with exact names, retention, and KMS encryption.
+
+### TASK 1.5.2 — Structured Logging Setup in Backend
+
+File: `backend/app/core/logging.py`.
+
+Implement the SC-DOC-009 Section 7.2 `StructuredFormatter`, request/correlation context propagation, and stdout logger configuration. Emit the safe v2 logging fields defined by SC-DOC-009 Section 7.1.
+
+Done when backend log output is valid JSON and every request log contains a `correlation_id` field.
+
+### TASK 1.5.3 — AWS X-Ray Configuration
+
+File: `backend/app/core/tracing.py`.
+
+Configure supported FastAPI request tracing, downstream AWS instrumentation, and the ECS X-Ray daemon path while preserving request/event correlation.
+
+Done when health-check requests produce trace segments visible in AWS X-Ray.
+
+### TASK 1.5.4 — CloudWatch Dashboards (Phase 1 Subset)
+
+Create the basic Pipeline Health dashboard structure from SC-DOC-009. Phase 3 Decision Brief widgets are structural placeholders and are not expected to have data in Phase 1.
+
+Done when the dashboard exists and no alarm is firing because a future-phase metric is empty.
+
+### TASK 1.5.5 — P1 Alarms
+
+File: `infrastructure/terraform/modules/observability/alarms.tf`.
+
+Create `sc-rds-connection-saturation-{env}` from the AWS/RDS `DatabaseConnections` metric and `sc-dlq-critical-depth-{env}` from the critical SQS DLQ depth metric, with missing data treated as missing.
+
+Done when both alarms exist. Empty metrics remain `INSUFFICIENT_DATA`; live healthy native metrics may correctly settle to `OK`.
+
 ### TASK 1.5.6 — Application CD Staging Acceptance
 
-Prerequisites: TASKS 1.3.13–1.3.15 complete; all Stage 1.4 migrations applied; staging RDS/Redis reachable; required secrets populated.
+Prerequisites: TASKS 1.3.13–1.3.15 and 1.5.1–1.5.5 complete; all Stage 1.4 migrations applied; staging RDS/Redis reachable; required secrets populated.
 
 Action:
 
@@ -630,7 +668,11 @@ This index is normative for coding-agent/task assignment. If repository paths di
 | 1.4.1 | `backend/alembic.ini`, `backend/alembic/env.py`, `backend/alembic/versions/` | `alembic current` succeeds |
 | 1.4.2–1.4.11 | `backend/alembic/versions/0001_*` through `0010_*` | Schemas/tables/RLS/indexes match SC-DOC-003 |
 | 1.4.12 | `backend/alembic/data/launch_registry_v2.py`, `backend/alembic/seeds/seed_launch_registry.py` | Reviewed launch seed manifest applied |
-| 1.5.x | `backend/app/core/logging.py`, `backend/app/core/tracing.py`, Terraform observability modules | JSON logs/traces/alarms available |
+| 1.5.1 | `infrastructure/terraform/modules/observability/log_groups.tf` | Seven encrypted log groups exist with documented retention |
+| 1.5.2 | `backend/app/core/logging.py` | JSON logs contain correlation context |
+| 1.5.3 | `backend/app/core/tracing.py`, `infrastructure/terraform/modules/ecs/services.tf` | Health request trace visible in X-Ray |
+| 1.5.4 | `infrastructure/terraform/modules/observability/dashboards.tf` | Phase 1 Pipeline Health dashboard exists |
+| 1.5.5 | `infrastructure/terraform/modules/observability/alarms.tf` | RDS saturation and critical DLQ alarms exist without false firing |
 | 1.5.6 | `.github/workflows/application-cd.yml` + staging environment | Merge deploys/migrates/smoke-tests green |
 
 ## 8.2 Phase 2
