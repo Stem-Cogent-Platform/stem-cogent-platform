@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import importlib.util
 import runpy
+import subprocess
+import sys
 from collections import Counter
 from pathlib import Path
 from types import ModuleType
@@ -156,3 +158,23 @@ def test_seed_does_not_extend_the_frozen_migration_chain() -> None:
     assert len(migration_names) == 10
     assert any(name.startswith("0010_") for name in migration_names)
     assert not any(name.startswith("0011_") for name in migration_names)
+
+
+def test_seed_cli_can_import_application_from_outside_backend() -> None:
+    probe = (
+        "import importlib.util; "
+        f"p={str(SEED_PATH)!r}; "
+        "s=importlib.util.spec_from_file_location('seed_cli_probe', p); "
+        "m=importlib.util.module_from_spec(s); "
+        "s.loader.exec_module(m); "
+        "assert m.BACKEND_ROOT.name == 'backend'"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", probe],
+        cwd=BACKEND_ROOT.parent,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr

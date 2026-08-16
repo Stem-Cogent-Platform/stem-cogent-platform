@@ -6,12 +6,17 @@ import asyncio
 import json
 import logging
 import runpy
+import sys
 from pathlib import Path
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
 
-from app.core.database import get_database_url
+BACKEND_ROOT = Path(__file__).resolve().parents[2]
+if str(BACKEND_ROOT) not in sys.path:
+    sys.path.insert(0, str(BACKEND_ROOT))
+
+from app.core.database import get_database_url  # noqa: E402
 
 _DATA = runpy.run_path(
     Path(__file__).resolve().parents[1] / "data" / "launch_registry_v2.py"
