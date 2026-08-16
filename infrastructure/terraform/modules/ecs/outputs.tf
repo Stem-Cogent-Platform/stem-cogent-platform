@@ -64,6 +64,6 @@ output "service_deployments_json" {
 }
 
 output "phase_one_log_group_names" {
-  description = "CloudWatch log groups required for Phase 1 tasks to start."
-  value       = { for purpose, group in aws_cloudwatch_log_group.phase_one : purpose => group.name }
+  description = "Observability-owned CloudWatch log groups used by Phase 1 tasks."
+  value       = var.phase_one_log_group_names
 }

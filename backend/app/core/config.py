@@ -14,6 +14,8 @@ class Settings(BaseSettings):
     SERVICE_NAME: str = "sc-api-service"
     AWS_REGION: str = "eu-west-1"
     LOG_LEVEL: str = "INFO"
+    XRAY_ENABLED: bool = False
+    XRAY_DAEMON_ADDRESS: str = "127.0.0.1:2000"
 
     DATABASE_HOST: str | None = None
     DATABASE_PORT: int = 5432

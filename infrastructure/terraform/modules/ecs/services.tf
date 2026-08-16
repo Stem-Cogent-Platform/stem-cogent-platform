@@ -7,27 +7,22 @@ locals {
   frontend_container_name  = "frontend"
   migration_container_name = "migration"
 
-  phase_one_log_groups = {
-    api = {
-      name           = "/${var.resource_prefix}/api-service/${var.environment}"
-      retention_days = 90
-    }
-    infrastructure = {
-      name           = "/${var.resource_prefix}/infrastructure/${var.environment}"
-      retention_days = 14
-    }
-  }
-
-  api_environment_variables = merge(var.api_environment_variables, {
+  runtime_environment_variables = {
     AWS_REGION   = var.aws_region
     ENVIRONMENT  = var.environment
     LOG_LEVEL    = "INFO"
     SERVICE_NAME = local.api_service_name
     TMPDIR       = "/dev/shm"
+  }
+
+  api_environment_variables = merge(var.api_environment_variables, local.runtime_environment_variables, {
+    AWS_XRAY_DAEMON_ADDRESS = "127.0.0.1:2000"
+    XRAY_ENABLED            = "true"
   })
 
-  migration_environment_variables = merge(local.api_environment_variables, {
+  migration_environment_variables = merge(var.api_environment_variables, local.runtime_environment_variables, {
     SERVICE_NAME = local.migration_family
+    XRAY_ENABLED = "false"
   })
 
   bootstrap_images = {
@@ -47,21 +42,6 @@ locals {
       image     = "frontend"
     },
   ]
-}
-
-# These are the two log groups without which the Phase 1 services cannot start.
-# The later observability module owns the remaining pipeline-wide inventory.
-resource "aws_cloudwatch_log_group" "phase_one" {
-  for_each = local.phase_one_log_groups
-
-  name              = each.value.name
-  retention_in_days = each.value.retention_days
-  kms_key_id        = var.logs_kms_key_arn
-
-  tags = merge(local.common_tags, {
-    Name    = each.value.name
-    Purpose = "phase-one-runtime"
-  })
 }
 
 resource "aws_ecs_task_definition" "api" {
@@ -132,7 +112,47 @@ resource "aws_ecs_task_definition" "api" {
       logConfiguration = {
         logDriver = "awslogs"
         options = {
-          awslogs-group         = aws_cloudwatch_log_group.phase_one["api"].name
+          awslogs-group         = var.phase_one_log_group_names["api"]
+          awslogs-region        = var.aws_region
+          awslogs-stream-prefix = "api-service"
+        }
+      }
+    },
+    {
+      name                   = "xray-daemon"
+      image                  = "public.ecr.aws/xray/aws-xray-daemon:3.x"
+      essential              = true
+      cpu                    = 32
+      memoryReservation      = 256
+      readonlyRootFilesystem = true
+
+      command = [
+        "-t", "0.0.0.0:2000",
+        "-b", "0.0.0.0:2000",
+      ]
+
+      portMappings = [
+        {
+          containerPort = 2000
+          hostPort      = 2000
+          protocol      = "udp"
+        },
+        {
+          containerPort = 2000
+          hostPort      = 2000
+          protocol      = "tcp"
+        },
+      ]
+
+      environment = [{
+        name  = "AWS_REGION"
+        value = var.aws_region
+      }]
+
+      logConfiguration = {
+        logDriver = "awslogs"
+        options = {
+          awslogs-group         = var.phase_one_log_group_names["api"]
           awslogs-region        = var.aws_region
           awslogs-stream-prefix = "api-service"
         }
@@ -233,7 +253,7 @@ resource "aws_ecs_task_definition" "frontend" {
       logConfiguration = {
         logDriver = "awslogs"
         options = {
-          awslogs-group         = aws_cloudwatch_log_group.phase_one["infrastructure"].name
+          awslogs-group         = var.phase_one_log_group_names["infrastructure"]
           awslogs-region        = var.aws_region
           awslogs-stream-prefix = "frontend-service"
         }
@@ -298,7 +318,7 @@ resource "aws_ecs_task_definition" "migration" {
       logConfiguration = {
         logDriver = "awslogs"
         options = {
-          awslogs-group         = aws_cloudwatch_log_group.phase_one["api"].name
+          awslogs-group         = var.phase_one_log_group_names["api"]
           awslogs-region        = var.aws_region
           awslogs-stream-prefix = "api-service"
         }

@@ -23,7 +23,10 @@ variables {
   frontend_security_group_id = "sg-0123456789abcdef1"
   api_target_group_arn       = "arn:aws:elasticloadbalancing:eu-west-1:123456789012:targetgroup/sc-api-tg-staging/abc"
   frontend_target_group_arn  = "arn:aws:elasticloadbalancing:eu-west-1:123456789012:targetgroup/sc-frontend-tg-staging/def"
-  logs_kms_key_arn           = "arn:aws:kms:eu-west-1:123456789012:key/01234567-89ab-cdef-0123-456789abcdef"
+  phase_one_log_group_names = {
+    api            = "/sc/api-service/staging"
+    infrastructure = "/sc/infrastructure/staging"
+  }
 
   task_role_arns = {
     api-service      = "arn:aws:iam::123456789012:role/stem-cogent/sc-api-service-staging-task"
@@ -135,13 +138,28 @@ run "uses_immutable_images_and_hardened_task_definitions" {
   }
 
   assert {
-    condition     = length(aws_cloudwatch_log_group.phase_one) == 2
-    error_message = "The API and infrastructure log groups required to start Phase 1 tasks must exist."
+    condition = alltrue([
+      jsondecode(aws_ecs_task_definition.api.container_definitions)[0].logConfiguration.options["awslogs-group"] == "/sc/api-service/staging",
+      jsondecode(aws_ecs_task_definition.frontend.container_definitions)[0].logConfiguration.options["awslogs-group"] == "/sc/infrastructure/staging",
+      jsondecode(aws_ecs_task_definition.migration.container_definitions)[0].logConfiguration.options["awslogs-group"] == "/sc/api-service/staging",
+    ])
+    error_message = "Phase 1 tasks must use the observability-owned API and infrastructure log groups."
   }
 
   assert {
-    condition = jsondecode(aws_ecs_task_definition.frontend.container_definitions)[0].healthCheck.command[0] == "CMD"
+    condition     = jsondecode(aws_ecs_task_definition.frontend.container_definitions)[0].healthCheck.command[0] == "CMD"
     error_message = "The frontend health check must use an ECS command probe."
+  }
+
+  assert {
+    condition = alltrue([
+      length(jsondecode(aws_ecs_task_definition.api.container_definitions)) == 2,
+      jsondecode(aws_ecs_task_definition.api.container_definitions)[1].name == "xray-daemon",
+      jsondecode(aws_ecs_task_definition.api.container_definitions)[1].readonlyRootFilesystem,
+      jsondecode(aws_ecs_task_definition.api.container_definitions)[1].logConfiguration.options["awslogs-stream-prefix"] == "api-service",
+      one([for item in jsondecode(aws_ecs_task_definition.api.container_definitions)[0].environment : item.value if item.name == "XRAY_ENABLED"]) == "true",
+    ])
+    error_message = "The API task must run the hardened X-Ray daemon sidecar with application tracing enabled."
   }
 
 }

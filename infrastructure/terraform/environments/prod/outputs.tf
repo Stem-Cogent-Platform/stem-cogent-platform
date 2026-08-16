@@ -287,3 +287,7 @@ output "sqs_dlq_arns" {
   description = "Production SQS dead-letter queue ARNs keyed by logical source queue name."
   value       = module.sqs.dlq_arns
 }
+output "observability_log_group_names" {
+  description = "Canonical application and pipeline CloudWatch log groups."
+  value       = module.observability.log_group_names
+}
