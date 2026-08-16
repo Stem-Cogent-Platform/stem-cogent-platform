@@ -35,6 +35,16 @@ variable "logs_kms_key_arn" {
   }
 }
 
+variable "rds_instance_identifier" {
+  description = "Primary RDS instance identifier used by dashboards and alarms."
+  type        = string
+}
+
+variable "critical_dlq_name" {
+  description = "Priority-ingestion DLQ name used by the Phase 1 P1 alarm."
+  type        = string
+}
+
 variable "tags" {
   description = "Additional tags to merge onto supported observability resources."
   type        = map(string)
