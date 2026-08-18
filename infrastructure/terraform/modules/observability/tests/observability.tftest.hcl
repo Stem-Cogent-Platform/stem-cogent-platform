@@ -1,8 +1,37 @@
 mock_provider "aws" {}
 
 variables {
-  environment      = "staging"
-  logs_kms_key_arn = "arn:aws:kms:eu-west-1:123456789012:key/01234567-89ab-cdef-0123-456789abcdef"
+  environment             = "staging"
+  logs_kms_key_arn        = "arn:aws:kms:eu-west-1:123456789012:key/01234567-89ab-cdef-0123-456789abcdef"
+  rds_instance_identifier = "sc-postgres-staging"
+  critical_dlq_name       = "sc-ingestion-priority-dlq-staging"
+}
+
+run "creates_pipeline_dashboard_and_p1_alarms" {
+  command = plan
+
+  assert {
+    condition     = aws_cloudwatch_dashboard.pipeline_health.dashboard_name == "sc-pipeline-health-staging"
+    error_message = "Pipeline Health dashboard must use the canonical environment-qualified name."
+  }
+
+  assert {
+    condition     = aws_cloudwatch_metric_alarm.rds_connection_saturation.threshold == 180
+    error_message = "RDS saturation must alarm at the documented 180-connection threshold."
+  }
+
+  assert {
+    condition     = aws_cloudwatch_metric_alarm.dlq_critical_depth.threshold == 1
+    error_message = "The critical DLQ must alarm when its first message arrives."
+  }
+
+  assert {
+    condition = alltrue([
+      !aws_cloudwatch_metric_alarm.rds_connection_saturation.actions_enabled,
+      !aws_cloudwatch_metric_alarm.dlq_critical_depth.actions_enabled,
+    ])
+    error_message = "Phase 1 alarms must not invoke unconfigured paging actions."
+  }
 }
 
 run "creates_complete_encrypted_log_inventory" {

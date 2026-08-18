@@ -1,10 +1,12 @@
 module "observability" {
   source = "../../modules/observability"
 
-  environment      = var.environment
-  project_name     = var.project_name
-  resource_prefix  = var.resource_prefix
-  logs_kms_key_arn = module.kms.key_arns["logs"]
+  environment             = var.environment
+  project_name            = var.project_name
+  resource_prefix         = var.resource_prefix
+  logs_kms_key_arn        = module.kms.key_arns["logs"]
+  rds_instance_identifier = module.rds.primary_identifier
+  critical_dlq_name       = module.sqs.dlq_names["ingestion-priority"]
 }
 
 moved {
