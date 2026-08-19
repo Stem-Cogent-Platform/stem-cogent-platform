@@ -10,6 +10,8 @@ EVENT_TASKS = {
     "RAW_SIGNAL_COLLECTED": "app.workers.tasks.validation.validate_raw_signal",
     "RAW_SIGNAL_VALIDATED": "app.workers.tasks.normalization.normalize_raw_signal",
     "RAW_SIGNAL_SUSPICIOUS": "app.workers.tasks.review.review_suspicious_signal",
+    "SIGNAL_NORMALIZED": "app.workers.tasks.classification.classify_signal",
+    "ENTITY_RESOLUTION_REQUIRED": "app.workers.tasks.review.review_entity_resolution",
 }
 
 
