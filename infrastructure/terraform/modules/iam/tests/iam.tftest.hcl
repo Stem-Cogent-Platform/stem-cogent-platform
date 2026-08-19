@@ -162,6 +162,26 @@ run "maps_pipeline_permissions_to_real_transitions" {
   }
 }
 
+run "uses_tenant_scoped_private_upload_prefixes" {
+  command = plan
+
+  assert {
+    condition = alltrue([
+      for service in ["api-service", "upload-collector-worker"] :
+      strcontains(aws_iam_role_policy.task[service].policy, "enterprise-uploads-staging-123456789012/tenant/*")
+    ])
+    error_message = "Private-upload access must use the canonical tenant/{tenant_id}/uploads path hierarchy."
+  }
+
+  assert {
+    condition = alltrue([
+      for service in ["api-service", "upload-collector-worker"] :
+      !strcontains(aws_iam_role_policy.task[service].policy, "enterprise-uploads-staging-123456789012/enterprise/*")
+    ])
+    error_message = "The superseded enterprise/* upload prefix must not remain authorised."
+  }
+}
+
 run "contains_no_wildcard_actions" {
   command = plan
 

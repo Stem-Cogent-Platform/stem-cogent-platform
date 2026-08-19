@@ -9,3 +9,5 @@ celery[sqs]>=5.4,<6.0
 aws-xray-sdk>=2.15,<3.0
 redis>=5.0,<6.0
 pydantic-settings>=2.3,<3.0
+pypdf>=5.0,<7.0
+python-docx>=1.1,<2.0

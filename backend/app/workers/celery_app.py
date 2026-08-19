@@ -80,6 +80,7 @@ def create_celery_app(settings: Settings | None = None) -> Celery:
         result_serializer="json",
         result_backend=None,
         task_acks_late=True,
+        task_acks_on_failure_or_timeout=False,
         task_create_missing_queues=False,
         task_default_queue=default_queue,
         task_ignore_result=True,

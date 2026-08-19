@@ -36,6 +36,7 @@ def test_worker_transport_is_json_only_and_failure_safe() -> None:
     assert app.conf.event_serializer == "json"
     assert app.conf.result_serializer == "json"
     assert app.conf.task_acks_late is True
+    assert app.conf.task_acks_on_failure_or_timeout is False
     assert app.conf.task_reject_on_worker_lost is True
     assert app.conf.worker_prefetch_multiplier == 1
     assert app.conf.task_create_missing_queues is False

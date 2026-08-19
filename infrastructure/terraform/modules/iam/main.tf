@@ -204,13 +204,13 @@ locals {
   }
 
   s3_read_access = {
-    api-service             = { enterprise_uploads = ["enterprise/*"], intelligence_exports = ["exports/*"] }
+    api-service             = { enterprise_uploads = ["tenant/*"], intelligence_exports = ["exports/*"] }
     frontend-service        = {}
     rss-collector-worker    = {}
     api-collector-worker    = {}
     scraper-worker          = {}
     pdf-collector-worker    = {}
-    upload-collector-worker = { enterprise_uploads = ["enterprise/*"] }
+    upload-collector-worker = { enterprise_uploads = ["tenant/*"] }
     validation-worker       = { raw_signals = ["raw/*"] }
     normalization-worker    = { raw_signals = ["raw/*"] }
     classification-worker   = { ml_artefacts = ["models/classification/*"] }
@@ -224,7 +224,7 @@ locals {
   }
 
   s3_write_access = {
-    api-service             = { enterprise_uploads = ["enterprise/*"], intelligence_exports = ["exports/*"] }
+    api-service             = { enterprise_uploads = ["tenant/*"], intelligence_exports = ["exports/*"] }
     frontend-service        = {}
     rss-collector-worker    = { raw_signals = ["raw/*"] }
     api-collector-worker    = { raw_signals = ["raw/*"] }
