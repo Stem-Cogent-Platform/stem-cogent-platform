@@ -69,6 +69,12 @@ def create_celery_app(settings: Settings | None = None) -> Celery:
             "visibility_timeout": 600,
             "wait_time_seconds": 20,
         },
+        beat_schedule={
+            "source-registry-minute-tick": {
+                "task": "app.workers.tasks.scheduler.schedule_due_sources",
+                "schedule": 60.0,
+            }
+        },
         enable_utc=True,
         event_serializer="json",
         result_serializer="json",
