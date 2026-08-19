@@ -215,6 +215,17 @@ jobs:
             -t "$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" \
             "${{ matrix.context }}"
 
+      - name: Verify migration runtime is packaged
+        if: matrix.image == 'api'
+        shell: bash
+        env:
+          ECR_REGISTRY: ${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          image="$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
+          docker run --rm --entrypoint alembic "$image" heads |
+            grep -Eq '^[0-9]{4} \(head\)$'
+
       - name: Push immutable commit tag
         env:
           ECR_REGISTRY: ${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com

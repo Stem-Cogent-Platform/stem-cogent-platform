@@ -40,4 +40,9 @@ grep -F 'IMAGE_TAG: ${{ github.sha }}' "$workflow_file" >/dev/null || {
   exit 1
 }
 
+grep -F 'docker run --rm --entrypoint alembic "$image" heads' "$workflow_file" >/dev/null || {
+  echo "Application CD must prove the API image can execute the migration entrypoint." >&2
+  exit 1
+}
+
 echo "Application CD deployment definition is valid."
