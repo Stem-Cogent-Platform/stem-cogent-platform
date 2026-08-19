@@ -9,6 +9,7 @@ EVENT_TASKS = {
     "COLLECTION_JOB_ENQUEUED": "app.workers.tasks.collection.collect_source",
     "RAW_SIGNAL_COLLECTED": "app.workers.tasks.validation.validate_raw_signal",
     "RAW_SIGNAL_VALIDATED": "app.workers.tasks.normalization.normalize_raw_signal",
+    "RAW_SIGNAL_SUSPICIOUS": "app.workers.tasks.review.review_suspicious_signal",
 }
 
 
