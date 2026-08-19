@@ -30,8 +30,22 @@ class Settings(BaseSettings):
     REDIS_TLS_ENABLED: bool = True
 
     SQS_INGESTION_PRIORITY_URL: str | None = None
+    SQS_INGESTION_STANDARD_URL: str | None = None
     SQS_PIPELINE_RAW_SIGNALS_URL: str | None = None
     SQS_PIPELINE_VALIDATED_URL: str | None = None
+    SQS_PIPELINE_NORMALIZED_URL: str | None = None
+    SQS_PIPELINE_CLASSIFIED_URL: str | None = None
+    SQS_PIPELINE_ENRICHED_URL: str | None = None
+    SQS_PIPELINE_SCORED_URL: str | None = None
+    SQS_PIPELINE_CLUSTERED_URL: str | None = None
+    SQS_PIPELINE_SYNTHESIZED_URL: str | None = None
+    SQS_PIPELINE_RECOMMENDED_URL: str | None = None
+    SQS_PIPELINE_ALERTS_URL: str | None = None
+    SQS_PIPELINE_SUSPICIOUS_URL: str | None = None
+    SQS_CLASSIFICATION_REVIEW_URL: str | None = None
+    SQS_ENTITY_REVIEW_URL: str | None = None
+    SQS_FEEDBACK_EVENTS_URL: str | None = None
+    SQS_GRAPH_UPDATES_URL: str | None = None
 
     S3_RAW_SIGNALS_BUCKET: str | None = None
     S3_ENTERPRISE_UPLOADS_BUCKET: str | None = None
