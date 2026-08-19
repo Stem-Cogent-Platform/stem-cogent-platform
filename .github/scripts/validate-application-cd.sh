@@ -9,6 +9,7 @@ required_files=(
   infrastructure/docker/backend.Dockerfile
   infrastructure/docker/worker.Dockerfile
   infrastructure/docker/frontend.Dockerfile
+  .github/scripts/run-one-shot-ecs-task.sh
 )
 
 for file in "${required_files[@]}"; do

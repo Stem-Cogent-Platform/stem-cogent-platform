@@ -90,11 +90,12 @@ def _rss_documents(body: bytes, source_url: str, _: str) -> list[NormalizedDocum
     for item in items:
         title = _xml_text(item, "title")
         description = _xml_text(item, "description") or _xml_text(item, "summary")
-        link = _xml_link(item) or source_url
+        link = urljoin(source_url, _xml_link(item) or source_url)
         published = _parse_datetime(
             _xml_text(item, "pubDate")
             or _xml_text(item, "published")
             or _xml_text(item, "updated")
+            or _xml_text(item, "documentDate")
         )
         documents.append(_document("FEED_ITEM", title, description or title or "", link, published))
     return documents
@@ -235,7 +236,10 @@ def _parse_datetime(value: str | None) -> datetime | None:
         try:
             parsed = parsedate_to_datetime(value)
         except (TypeError, ValueError):
-            return None
+            try:
+                parsed = datetime.strptime(value, "%d/%m/%Y").replace(tzinfo=UTC)
+            except ValueError:
+                return None
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=UTC)
     return parsed.astimezone(UTC)

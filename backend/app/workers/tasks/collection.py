@@ -55,7 +55,7 @@ async def _load_job(session: AsyncSession, event: dict[str, Any]) -> CollectionJ
             {"collection_job_id": collection_job_id},
         )
     ).mappings().one()
-    if row["auth_type"] != "NO_AUTH":
+    if row["auth_type"] != "NO_AUTH" and row["source_type"] != "USER_UPLOAD":
         raise RuntimeError(
             f"Source {row['source_code']} requires an unconfigured auth adapter"
         )

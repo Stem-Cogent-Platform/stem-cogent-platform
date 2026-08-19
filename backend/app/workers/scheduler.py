@@ -135,44 +135,44 @@ class PostgresSourceScheduleRepository:
     async def create_or_recover_job(
         self, source: ScheduledSource, scheduled_at: datetime
     ) -> ScheduledJob:
-        async with self._session.begin():
+        row = (
+            await self._session.execute(
+                text(
+                    """
+                    SELECT id, status
+                    FROM pipeline.collection_jobs
+                    WHERE source_id = :source_id
+                      AND trigger_type = 'SCHEDULED'
+                      AND scheduled_at = :scheduled_at
+                    ORDER BY created_at DESC
+                    LIMIT 1
+                    FOR UPDATE
+                    """
+                ),
+                {"source_id": source.source_id, "scheduled_at": scheduled_at},
+            )
+        ).mappings().first()
+        if row is None:
             row = (
                 await self._session.execute(
                     text(
                         """
-                        SELECT id, status
-                        FROM pipeline.collection_jobs
-                        WHERE source_id = :source_id
-                          AND trigger_type = 'SCHEDULED'
-                          AND scheduled_at = :scheduled_at
-                        ORDER BY created_at DESC
-                        LIMIT 1
-                        FOR UPDATE
+                        INSERT INTO pipeline.collection_jobs (
+                            source_id, trigger_type, priority, status, scheduled_at
+                        ) VALUES (
+                            :source_id, 'SCHEDULED', :priority, 'ENQUEUED', :scheduled_at
+                        )
+                        RETURNING id, status
                         """
                     ),
-                    {"source_id": source.source_id, "scheduled_at": scheduled_at},
+                    {
+                        "source_id": source.source_id,
+                        "priority": source.priority_class,
+                        "scheduled_at": scheduled_at,
+                    },
                 )
-            ).mappings().first()
-            if row is None:
-                row = (
-                    await self._session.execute(
-                        text(
-                            """
-                            INSERT INTO pipeline.collection_jobs (
-                                source_id, trigger_type, priority, status, scheduled_at
-                            ) VALUES (
-                                :source_id, 'SCHEDULED', :priority, 'ENQUEUED', :scheduled_at
-                            )
-                            RETURNING id, status
-                            """
-                        ),
-                        {
-                            "source_id": source.source_id,
-                            "priority": source.priority_class,
-                            "scheduled_at": scheduled_at,
-                        },
-                    )
-                ).mappings().one()
+            ).mappings().one()
+        await self._session.commit()
         return ScheduledJob(
             collection_job_id=row["id"],
             source=source,
@@ -181,17 +181,17 @@ class PostgresSourceScheduleRepository:
         )
 
     async def mark_dispatched(self, collection_job_id: UUID) -> None:
-        async with self._session.begin():
-            await self._session.execute(
-                text(
-                    """
-                    UPDATE pipeline.collection_jobs
-                    SET status = 'DISPATCHED'
-                    WHERE id = :collection_job_id
-                    """
-                ),
-                {"collection_job_id": collection_job_id},
-            )
+        await self._session.execute(
+            text(
+                """
+                UPDATE pipeline.collection_jobs
+                SET status = 'DISPATCHED'
+                WHERE id = :collection_job_id
+                """
+            ),
+            {"collection_job_id": collection_job_id},
+        )
+        await self._session.commit()
 
 
 class SourceScheduler:

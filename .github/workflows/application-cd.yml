@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - 'infrastructure/docker/**'
+      - '.github/scripts/**'
       - '.github/workflows/application-cd.yml'
   push:
     branches: [main, staging]
@@ -11,6 +12,7 @@ on:
       - 'backend/**'
       - 'frontend/**'
       - 'infrastructure/docker/**'
+      - '.github/scripts/**'
       - '.github/workflows/application-cd.yml'
   workflow_dispatch:
     inputs:
@@ -455,61 +457,14 @@ jobs:
             --output text)"
           echo "arn=$migration_task_definition" >> "$GITHUB_OUTPUT"
 
-      - name: Run and verify database migrations
+      - name: Run migrations and seed launch sources
         shell: bash
         env:
           MIGRATION_TASK_DEFINITION: ${{ steps.migration-definition.outputs.arn }}
         run: |
-          jq -n \
-            --argjson subnets "$ECS_MIGRATION_SUBNET_IDS" \
-            --argjson security_groups "$ECS_MIGRATION_SECURITY_GROUP_IDS" '
-              {
-                awsvpcConfiguration: {
-                  subnets: $subnets,
-                  securityGroups: $security_groups,
-                  assignPublicIp: "DISABLED"
-                }
-              }
-            ' > migration-network.json
-          jq -n --arg container "$ECS_MIGRATION_CONTAINER_NAME" '
-            {
-              containerOverrides: [
-                {name: $container, command: ["alembic", "upgrade", "head"]}
-              ]
-            }
-          ' > migration-overrides.json
-
-          aws ecs run-task \
-            --cluster "$ECS_CLUSTER_NAME" \
-            --task-definition "$MIGRATION_TASK_DEFINITION" \
-            --launch-type FARGATE \
-            --count 1 \
-            --started-by "github-${GITHUB_RUN_ID}" \
-            --network-configuration file://migration-network.json \
-            --overrides file://migration-overrides.json > migration-run.json
-
-          if [ "$(jq '.failures | length' migration-run.json)" -ne 0 ]; then
-            jq '.failures' migration-run.json >&2
-            exit 1
-          fi
-          migration_task_arn="$(jq -r '.tasks[0].taskArn // empty' migration-run.json)"
-          test -n "$migration_task_arn" || {
-            echo "ECS did not return a migration task ARN." >&2
-            exit 1
-          }
-
-          aws ecs wait tasks-stopped \
-            --cluster "$ECS_CLUSTER_NAME" \
-            --tasks "$migration_task_arn"
-          aws ecs describe-tasks \
-            --cluster "$ECS_CLUSTER_NAME" \
-            --tasks "$migration_task_arn" > migration-result.json
-
-          exit_code="$(jq -r --arg container "$ECS_MIGRATION_CONTAINER_NAME" '.tasks[0].containers[] | select(.name == $container).exitCode // empty' migration-result.json)"
-          if [ "$exit_code" != "0" ]; then
-            jq '{stoppedReason: .tasks[0].stoppedReason, containers: [.tasks[0].containers[] | {name, exitCode, reason, lastStatus}]}' migration-result.json >&2
-            exit 1
-          fi
+          bash .github/scripts/run-one-shot-ecs-task.sh alembic upgrade head
+          bash .github/scripts/run-one-shot-ecs-task.sh \
+            python alembic/seeds/seed_launch_sources.py
 
       - name: Register task definitions and start rolling deployments
         shell: bash
