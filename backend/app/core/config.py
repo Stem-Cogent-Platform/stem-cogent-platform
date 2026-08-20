@@ -14,20 +14,38 @@ class Settings(BaseSettings):
     SERVICE_NAME: str = "sc-api-service"
     AWS_REGION: str = "eu-west-1"
     LOG_LEVEL: str = "INFO"
+    XRAY_ENABLED: bool = False
+    XRAY_DAEMON_ADDRESS: str = "127.0.0.1:2000"
 
     DATABASE_HOST: str | None = None
     DATABASE_PORT: int = 5432
     DATABASE_NAME: str = "stemcogent"
     DATABASE_REPLICA_HOST: str | None = None
     DATABASE_URL: str | None = None
+    DATABASE_SSL_MODE: str = "require"
 
     REDIS_HOST: str | None = None
     REDIS_PORT: int = 6379
     REDIS_URL: str | None = None
+    REDIS_TLS_ENABLED: bool = True
 
     SQS_INGESTION_PRIORITY_URL: str | None = None
+    SQS_INGESTION_STANDARD_URL: str | None = None
     SQS_PIPELINE_RAW_SIGNALS_URL: str | None = None
     SQS_PIPELINE_VALIDATED_URL: str | None = None
+    SQS_PIPELINE_NORMALIZED_URL: str | None = None
+    SQS_PIPELINE_CLASSIFIED_URL: str | None = None
+    SQS_PIPELINE_ENRICHED_URL: str | None = None
+    SQS_PIPELINE_SCORED_URL: str | None = None
+    SQS_PIPELINE_CLUSTERED_URL: str | None = None
+    SQS_PIPELINE_SYNTHESIZED_URL: str | None = None
+    SQS_PIPELINE_RECOMMENDED_URL: str | None = None
+    SQS_PIPELINE_ALERTS_URL: str | None = None
+    SQS_PIPELINE_SUSPICIOUS_URL: str | None = None
+    SQS_CLASSIFICATION_REVIEW_URL: str | None = None
+    SQS_ENTITY_REVIEW_URL: str | None = None
+    SQS_FEEDBACK_EVENTS_URL: str | None = None
+    SQS_GRAPH_UPDATES_URL: str | None = None
 
     S3_RAW_SIGNALS_BUCKET: str | None = None
     S3_ENTERPRISE_UPLOADS_BUCKET: str | None = None
@@ -37,7 +55,11 @@ class Settings(BaseSettings):
     REDIS_AUTH_TOKEN_ARN: str | None = None
     JWT_SIGNING_SECRET_ARN: str | None = None
     OPENAI_API_KEY_ARN: str | None = None
-    ANTHROPIC_API_KEY_ARN: str | None = None
+    GROQ_API_KEY_ARN: str | None = None
+    RESEND_API_KEY_ARN: str | None = None
+    PAYSTACK_SECRET_KEY_ARN: str | None = None
+    PAYSTACK_PUBLIC_KEY_ARN: str | None = None
+    PAYSTACK_WEBHOOK_SECRET_ARN: str | None = None
 
     SYNTHESIS_ENABLED: bool = True
     CIL_ENABLED: bool = True

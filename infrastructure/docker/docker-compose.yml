@@ -2,7 +2,8 @@ name: stem-cogent
 
 services:
   postgres:
-    image: postgres:16-alpine
+    # PostgreSQL 16 with the vector extension required by migration 0005.
+    image: pgvector/pgvector:0.8.5-pg16
     environment:
       POSTGRES_DB: stemcogent
       POSTGRES_USER: sc_local

@@ -5,6 +5,8 @@ on:
     paths:
       - 'backend/**'
       - 'infrastructure/docker/backend.Dockerfile'
+      - 'infrastructure/docker/docker-compose.yml'
+      - 'infrastructure/scripts/**'
       - '.github/workflows/backend-ci.yml'
 
 permissions:
@@ -18,7 +20,7 @@ jobs:
     services:
       # Spin up local Postgres + Redis for integration tests.
       postgres:
-        image: postgres:16-alpine
+        image: pgvector/pgvector:0.8.5-pg16
         env:
           POSTGRES_DB: sc_test
           POSTGRES_USER: sc_test
@@ -66,6 +68,18 @@ jobs:
         env:
           POSTGRES_PORT: ${{ job.services.postgres.ports[5432] }}
           REDIS_PORT: ${{ job.services.redis.ports[6379] }}
+
+      - name: Verify database migrations
+        working-directory: backend
+        run: |
+          alembic upgrade head
+          alembic current
+          alembic history --verbose
+          alembic downgrade base
+          alembic upgrade head
+        env:
+          DATABASE_URL: postgresql://sc_test:sc_test@127.0.0.1:${{ job.services.postgres.ports[5432] }}/sc_test
+          ENVIRONMENT: test
 
       # ── Code quality ──────────────────────────────────────────────
       - name: Lint (ruff)
@@ -121,6 +135,10 @@ jobs:
             -c '. /etc/os-release; printf "%s" "$ID"')"
           echo "Container base OS: $container_os"
           test "$container_os" = "alpine"
+
+      - name: Verify migrations are packaged in API image
+        run: |
+          docker run --rm --entrypoint alembic "$IMAGE_REF" history
 
       - name: Container image scan — Trivy
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0

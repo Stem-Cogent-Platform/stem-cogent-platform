@@ -18,19 +18,9 @@ env:
   AWS_REGION: eu-west-1
 
 jobs:
-  terraform-disabled:
-    name: Terraform intentionally disabled
-    if: (github.event_name == 'pull_request' && ((github.base_ref == 'staging' && vars.STAGING_TERRAFORM_ENABLED != 'true') || (github.base_ref == 'main' && vars.PRODUCTION_TERRAFORM_ENABLED != 'true'))) || (github.event_name == 'push' && ((github.ref_name == 'staging' && vars.STAGING_TERRAFORM_ENABLED != 'true') || (github.ref_name == 'main' && vars.PRODUCTION_TERRAFORM_ENABLED != 'true')))
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    permissions: {}
-    steps:
-      - name: Report inactive Terraform gate
-        run: echo "Terraform remains disabled until the target environment backend and OIDC roles are ready."
-
   pull-request-plan:
     name: Plan (${{ github.base_ref == 'main' && 'production' || 'staging' }})
-    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && ((github.base_ref == 'staging' && vars.STAGING_TERRAFORM_ENABLED == 'true') || (github.base_ref == 'main' && vars.PRODUCTION_TERRAFORM_ENABLED == 'true'))
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     timeout-minutes: 30
     environment: ${{ github.base_ref == 'main' && 'production-plan' || 'staging-plan' }}
@@ -43,9 +33,9 @@ jobs:
       TF_ROOT: infrastructure/terraform/environments/${{ github.base_ref == 'main' && 'prod' || 'staging' }}
       AWS_ROLE_ARN: ${{ vars.AWS_TERRAFORM_ROLE_ARN }}
       TF_VAR_expected_account_id: ${{ vars.AWS_ACCOUNT_ID }}
+      TF_VAR_ecs_bootstrap_image_tag: ${{ vars.ECS_BOOTSTRAP_IMAGE_TAG }}
       TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
       TF_STATE_KMS_KEY_ARN: ${{ vars.TF_STATE_KMS_KEY_ARN }}
-      TF_STATE_LOCK_TABLE: ${{ vars.TF_STATE_LOCK_TABLE }}
 
     steps:
       - name: Check out repository
@@ -59,9 +49,9 @@ jobs:
           for variable in \
             AWS_ROLE_ARN \
             TF_VAR_expected_account_id \
+            TF_VAR_ecs_bootstrap_image_tag \
             TF_STATE_BUCKET \
-            TF_STATE_KMS_KEY_ARN \
-            TF_STATE_LOCK_TABLE; do
+            TF_STATE_KMS_KEY_ARN; do
             test -n "${!variable}" || {
               echo "$variable is not configured in the GitHub plan environment." >&2
               exit 1
@@ -84,14 +74,31 @@ jobs:
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Set up Terraform
-        uses: hashicorp/setup-terraform@v3
+        uses: hashicorp/setup-terraform@v4
         with:
-          terraform_version: '1.7.x'
+          terraform_version: '1.15.x'
           terraform_wrapper: false
 
       - name: Terraform format check
         run: terraform fmt -check -recursive
         working-directory: infrastructure/terraform
+
+      - name: Terraform module tests
+        shell: bash
+        run: |
+          for module in rds elasticache sqs ecr iam alb ecs; do
+            terraform -chdir="infrastructure/terraform/modules/$module" init \
+              -backend=false \
+              -input=false
+            terraform -chdir="infrastructure/terraform/modules/$module" test \
+              -no-color
+          done
+
+      - name: Terraform global DNS bootstrap validation
+        run: |
+          terraform init -backend=false -input=false
+          terraform validate
+        working-directory: infrastructure/terraform/bootstrap/dns
 
       - name: Terraform init
         run: |
@@ -102,7 +109,7 @@ jobs:
             -backend-config="region=$AWS_REGION" \
             -backend-config="encrypt=true" \
             -backend-config="kms_key_id=$TF_STATE_KMS_KEY_ARN" \
-            -backend-config="dynamodb_table=$TF_STATE_LOCK_TABLE"
+            -backend-config="use_lockfile=true"
         working-directory: ${{ env.TF_ROOT }}
 
       - name: Terraform validate
@@ -184,7 +191,7 @@ jobs:
 
   deployment-plan:
     name: Deployment plan (${{ github.ref_name }})
-    if: github.event_name == 'push' && ((github.ref_name == 'staging' && vars.STAGING_TERRAFORM_ENABLED == 'true') || (github.ref_name == 'main' && vars.PRODUCTION_TERRAFORM_ENABLED == 'true'))
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     environment: ${{ github.ref_name == 'main' && 'production-plan' || 'staging-plan' }}
@@ -196,9 +203,9 @@ jobs:
       TF_ROOT: infrastructure/terraform/environments/${{ github.ref_name == 'main' && 'prod' || 'staging' }}
       AWS_ROLE_ARN: ${{ vars.AWS_TERRAFORM_ROLE_ARN }}
       TF_VAR_expected_account_id: ${{ vars.AWS_ACCOUNT_ID }}
+      TF_VAR_ecs_bootstrap_image_tag: ${{ vars.ECS_BOOTSTRAP_IMAGE_TAG }}
       TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
       TF_STATE_KMS_KEY_ARN: ${{ vars.TF_STATE_KMS_KEY_ARN }}
-      TF_STATE_LOCK_TABLE: ${{ vars.TF_STATE_LOCK_TABLE }}
 
     steps:
       - name: Check out repository
@@ -212,9 +219,9 @@ jobs:
           for variable in \
             AWS_ROLE_ARN \
             TF_VAR_expected_account_id \
+            TF_VAR_ecs_bootstrap_image_tag \
             TF_STATE_BUCKET \
-            TF_STATE_KMS_KEY_ARN \
-            TF_STATE_LOCK_TABLE; do
+            TF_STATE_KMS_KEY_ARN; do
             test -n "${!variable}" || {
               echo "$variable is not configured in the GitHub plan environment." >&2
               exit 1
@@ -237,14 +244,31 @@ jobs:
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Set up Terraform
-        uses: hashicorp/setup-terraform@v3
+        uses: hashicorp/setup-terraform@v4
         with:
-          terraform_version: '1.7.x'
+          terraform_version: '1.15.x'
           terraform_wrapper: false
 
       - name: Terraform format check
         run: terraform fmt -check -recursive
         working-directory: infrastructure/terraform
+
+      - name: Terraform module tests
+        shell: bash
+        run: |
+          for module in rds elasticache sqs ecr iam alb ecs; do
+            terraform -chdir="infrastructure/terraform/modules/$module" init \
+              -backend=false \
+              -input=false
+            terraform -chdir="infrastructure/terraform/modules/$module" test \
+              -no-color
+          done
+
+      - name: Terraform global DNS bootstrap validation
+        run: |
+          terraform init -backend=false -input=false
+          terraform validate
+        working-directory: infrastructure/terraform/bootstrap/dns
 
       - name: Terraform init
         run: |
@@ -255,7 +279,7 @@ jobs:
             -backend-config="region=$AWS_REGION" \
             -backend-config="encrypt=true" \
             -backend-config="kms_key_id=$TF_STATE_KMS_KEY_ARN" \
-            -backend-config="dynamodb_table=$TF_STATE_LOCK_TABLE"
+            -backend-config="use_lockfile=true"
         working-directory: ${{ env.TF_ROOT }}
 
       - name: Terraform validate
@@ -281,7 +305,7 @@ jobs:
 
   apply:
     name: Apply (${{ github.ref_name }})
-    if: github.event_name == 'push' && ((github.ref_name == 'staging' && vars.STAGING_TERRAFORM_ENABLED == 'true') || (github.ref_name == 'main' && vars.PRODUCTION_TERRAFORM_ENABLED == 'true'))
+    if: github.event_name == 'push'
     needs: deployment-plan
     runs-on: ubuntu-latest
     timeout-minutes: 45
@@ -297,9 +321,9 @@ jobs:
       TF_ROOT: infrastructure/terraform/environments/${{ github.ref_name == 'main' && 'prod' || 'staging' }}
       AWS_ROLE_ARN: ${{ vars.AWS_TERRAFORM_ROLE_ARN }}
       TF_VAR_expected_account_id: ${{ vars.AWS_ACCOUNT_ID }}
+      TF_VAR_ecs_bootstrap_image_tag: ${{ vars.ECS_BOOTSTRAP_IMAGE_TAG }}
       TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
       TF_STATE_KMS_KEY_ARN: ${{ vars.TF_STATE_KMS_KEY_ARN }}
-      TF_STATE_LOCK_TABLE: ${{ vars.TF_STATE_LOCK_TABLE }}
 
     steps:
       - name: Check out repository
@@ -313,9 +337,9 @@ jobs:
           for variable in \
             AWS_ROLE_ARN \
             TF_VAR_expected_account_id \
+            TF_VAR_ecs_bootstrap_image_tag \
             TF_STATE_BUCKET \
-            TF_STATE_KMS_KEY_ARN \
-            TF_STATE_LOCK_TABLE; do
+            TF_STATE_KMS_KEY_ARN; do
             test -n "${!variable}" || {
               echo "$variable is not configured in the GitHub apply environment." >&2
               exit 1
@@ -334,9 +358,9 @@ jobs:
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Set up Terraform
-        uses: hashicorp/setup-terraform@v3
+        uses: hashicorp/setup-terraform@v4
         with:
-          terraform_version: '1.7.x'
+          terraform_version: '1.15.x'
           terraform_wrapper: false
 
       - name: Terraform init
@@ -348,7 +372,7 @@ jobs:
             -backend-config="region=$AWS_REGION" \
             -backend-config="encrypt=true" \
             -backend-config="kms_key_id=$TF_STATE_KMS_KEY_ARN" \
-            -backend-config="dynamodb_table=$TF_STATE_LOCK_TABLE"
+            -backend-config="use_lockfile=true"
         working-directory: ${{ env.TF_ROOT }}
 
       - name: Download reviewed plan
