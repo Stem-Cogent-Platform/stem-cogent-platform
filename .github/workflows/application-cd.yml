@@ -565,22 +565,28 @@ jobs:
           done
 
           while IFS=$'\t' read -r service expected_task_definition; do
-            actual_task_definition="$(aws ecs describe-services \
-              --cluster "$ECS_CLUSTER_NAME" \
-              --services "$service" \
-              --query 'services[0].taskDefinition' \
-              --output text)"
-            test "$actual_task_definition" = "$expected_task_definition" || {
-              echo "ECS service $service stabilized on $actual_task_definition instead of deployed revision $expected_task_definition." >&2
-              exit 1
-            }
-            rollout_state="$(aws ecs describe-services \
-              --cluster "$ECS_CLUSTER_NAME" \
-              --services "$service" \
-              --query "services[0].deployments[?taskDefinition=='$expected_task_definition'] | [0].rolloutState" \
-              --output text)"
-            test "$rollout_state" = "COMPLETED" || {
-              echo "ECS service $service revision $expected_task_definition is not completed (state: $rollout_state)." >&2
+            revision_completed=false
+            for attempt in {1..30}; do
+              service_state="$(aws ecs describe-services \
+                --cluster "$ECS_CLUSTER_NAME" \
+                --services "$service" \
+                --output json)"
+              actual_task_definition="$(jq -r '.services[0].taskDefinition // empty' <<<"$service_state")"
+              test "$actual_task_definition" = "$expected_task_definition" || {
+                echo "ECS service $service stabilized on $actual_task_definition instead of deployed revision $expected_task_definition." >&2
+                exit 1
+              }
+              rollout_state="$(jq -r --arg expected "$expected_task_definition" \
+                '.services[0].deployments[] | select(.taskDefinition == $expected) | .rolloutState // empty' \
+                <<<"$service_state")"
+              if [ "$rollout_state" = "COMPLETED" ]; then
+                revision_completed=true
+                break
+              fi
+              sleep 10
+            done
+            test "$revision_completed" = true || {
+              echo "ECS service $service revision $expected_task_definition did not complete (last state: $rollout_state)." >&2
               exit 1
             }
           done < deployed-task-definitions.tsv
