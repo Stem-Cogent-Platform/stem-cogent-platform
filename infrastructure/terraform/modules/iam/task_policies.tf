@@ -18,6 +18,10 @@ locals {
         Sid    = "PublishAssignedQueues"
         Effect = "Allow"
         Action = [
+          # Kombu resolves and passively inspects predefined SQS queues before
+          # publishing; these metadata reads do not grant message consumption.
+          "sqs:GetQueueAttributes",
+          "sqs:GetQueueUrl",
           "sqs:SendMessage",
           "sqs:SendMessageBatch",
         ]

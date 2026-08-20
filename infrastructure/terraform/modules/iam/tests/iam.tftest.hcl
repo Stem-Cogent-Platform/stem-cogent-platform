@@ -165,6 +165,8 @@ run "maps_pipeline_permissions_to_real_transitions" {
     condition = alltrue([
       strcontains(aws_iam_role_policy.task["scheduler-worker"].policy, "sc-ingestion-priority-staging"),
       strcontains(aws_iam_role_policy.task["scheduler-worker"].policy, "sc-ingestion-standard-staging"),
+      strcontains(aws_iam_role_policy.task["scheduler-worker"].policy, "sqs:GetQueueAttributes"),
+      strcontains(aws_iam_role_policy.task["scheduler-worker"].policy, "sqs:GetQueueUrl"),
       strcontains(aws_iam_role_policy.task["collector-worker"].policy, "sc-pipeline-raw-signals-staging"),
       strcontains(aws_iam_role_policy.task["normalization-worker"].policy, "sc-entity-review-staging"),
     ])
