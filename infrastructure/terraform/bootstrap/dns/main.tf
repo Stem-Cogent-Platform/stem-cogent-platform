@@ -55,6 +55,7 @@ data "aws_iam_policy_document" "shared_dns_assume_role" {
       variable = "aws:PrincipalArn"
       values = [
         "arn:${data.aws_partition.current.partition}:iam::${var.production_account_id}:role/github-production-apply-role",
+        "arn:${data.aws_partition.current.partition}:iam::${var.production_account_id}:role/github-production-plan-role",
         "arn:${data.aws_partition.current.partition}:iam::${var.production_account_id}:role/aws-reserved/sso.amazonaws.com/*/AWSReservedSSO_AdministratorAccess_*",
       ]
     }
