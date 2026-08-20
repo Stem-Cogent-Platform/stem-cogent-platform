@@ -28,6 +28,15 @@ Before a production plan, configure the production build-only SHA in both
 `production-plan` and `production`. Staging and production values are allowed
 to differ because their ECR repositories are independent.
 
+The bootstrap-managed `github-production-plan-role` must retain read access to
+Terraform-managed IAM resources (`iam:Get*` and `iam:List*`). It must also be
+allowed to assume the exact shared DNS role
+`arn:aws:iam::<DNS_ACCOUNT_ID>:role/stem-cogent/sc-shared-dns-record-manager`.
+The DNS bootstrap trust policy admits this plan role, the production apply
+role, and the production administrator role. This lets speculative plans read
+cross-account Route 53 state without granting the plan workflow DNS mutation
+permissions of its own.
+
 ## Obtain the staging contract
 
 After the reviewed staging Terraform apply succeeds:
