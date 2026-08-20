@@ -46,4 +46,14 @@ grep -F 'docker run --rm --entrypoint alembic "$image" heads' "$workflow_file" >
   exit 1
 }
 
+grep -F 'Verify worker runtime and task registry are packaged' "$workflow_file" >/dev/null || {
+  echo "Application CD must prove the worker image can register its Phase 2 tasks." >&2
+  exit 1
+}
+
+grep -F 'deployed-task-definitions.tsv' "$workflow_file" >/dev/null || {
+  echo "Application CD must verify services stabilize on the deployed task revisions." >&2
+  exit 1
+}
+
 echo "Application CD deployment definition is valid."

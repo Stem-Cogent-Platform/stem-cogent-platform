@@ -228,6 +228,16 @@ jobs:
           docker run --rm --entrypoint alembic "$image" heads |
             grep -Eq '^[0-9]{4} \(head\)$'
 
+      - name: Verify worker runtime and task registry are packaged
+        if: matrix.image == 'worker'
+        shell: bash
+        env:
+          ECR_REGISTRY: ${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          image="$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
+          docker run --rm --entrypoint python "$image" -c "from app.workers.celery_app import TASK_MODULES, celery_app; celery_app.loader.import_default_modules(); expected = {'app.workers.tasks.collection.collect_source', 'app.workers.tasks.validation.validate_raw_signal', 'app.workers.tasks.normalization.normalize_raw_signal', 'app.workers.tasks.scheduler.schedule_due_sources'}; missing = expected.difference(celery_app.tasks); assert not missing, f'missing Celery tasks: {sorted(missing)}'; assert set(TASK_MODULES) == set(celery_app.conf.include)"
+
       - name: Push immutable commit tag
         env:
           ECR_REGISTRY: ${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com
@@ -473,6 +483,7 @@ jobs:
         run: |
           : > rollback-task-definitions.tsv
           : > deployed-services.txt
+          : > deployed-task-definitions.tsv
 
           while IFS= read -r deployment; do
             service="$(jq -r '.service' <<<"$deployment")"
@@ -532,6 +543,7 @@ jobs:
 
             printf '%s\t%s\n' "$service" "$current_task_definition" >> rollback-task-definitions.tsv
             printf '%s\n' "$service" >> deployed-services.txt
+            printf '%s\t%s\n' "$service" "$next_task_definition" >> deployed-task-definitions.tsv
             aws ecs update-service \
               --cluster "$ECS_CLUSTER_NAME" \
               --service "$service" \
@@ -551,6 +563,27 @@ jobs:
               --cluster "$ECS_CLUSTER_NAME" \
               --services "${batch[@]}"
           done
+
+          while IFS=$'\t' read -r service expected_task_definition; do
+            actual_task_definition="$(aws ecs describe-services \
+              --cluster "$ECS_CLUSTER_NAME" \
+              --services "$service" \
+              --query 'services[0].taskDefinition' \
+              --output text)"
+            test "$actual_task_definition" = "$expected_task_definition" || {
+              echo "ECS service $service stabilized on $actual_task_definition instead of deployed revision $expected_task_definition." >&2
+              exit 1
+            }
+            rollout_state="$(aws ecs describe-services \
+              --cluster "$ECS_CLUSTER_NAME" \
+              --services "$service" \
+              --query "services[0].deployments[?taskDefinition=='$expected_task_definition'] | [0].rolloutState" \
+              --output text)"
+            test "$rollout_state" = "COMPLETED" || {
+              echo "ECS service $service revision $expected_task_definition is not completed (state: $rollout_state)." >&2
+              exit 1
+            }
+          done < deployed-task-definitions.tsv
 
       - name: Smoke test deployed API
         shell: bash
