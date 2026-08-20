@@ -49,6 +49,8 @@ module "ecs" {
   phase_one_log_group_names = {
     api            = module.observability.log_group_names["api"]
     infrastructure = module.observability.log_group_names["infrastructure"]
+    ingestion      = module.observability.log_group_names["ingestion"]
+    processing     = module.observability.log_group_names["processing"]
   }
   api_environment_variables = local.api_environment_variables
 }

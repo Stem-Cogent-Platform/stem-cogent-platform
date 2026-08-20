@@ -18,6 +18,9 @@ from docx import Document
 from pypdf import PdfReader
 
 
+_API_RECORD_LIMIT = 500
+
+
 @dataclass(frozen=True)
 class NormalizedDocument:
     signal_type: str
@@ -49,6 +52,7 @@ def normalize_payload(
         "HTML": _html_documents,
         "PDF": _pdf_documents,
         "USER_UPLOAD": _upload_documents,
+        "LIVE_SEARCH": _discovery_documents,
     }
     try:
         documents = parsers[source_type](body, source_url, content_type)
@@ -120,8 +124,9 @@ def _xml_link(element: Any) -> str | None:
 def _api_documents(body: bytes, source_url: str, _: str) -> list[NormalizedDocument]:
     payload = json.loads(body)
     records = payload if isinstance(payload, list) else [payload]
+    window_limited = len(records) > _API_RECORD_LIMIT
     documents: list[NormalizedDocument] = []
-    for index, value in enumerate(records):
+    for index, value in enumerate(records[:_API_RECORD_LIMIT]):
         record = value if isinstance(value, dict) else {"value": value}
         title = str(
             record.get("title")
@@ -134,11 +139,54 @@ def _api_documents(body: bytes, source_url: str, _: str) -> list[NormalizedDocum
                 record.get("published_at")
                 or record.get("started_at")
                 or record.get("timestamp")
+                or record.get("documentDate")
                 or ""
             )
         )
+        record_url = urljoin(
+            source_url,
+            str(record.get("url") or record.get("link") or source_url),
+        )
         text = "\n".join(f"{key}: {_scalar(value)}" for key, value in sorted(record.items()))
-        documents.append(_document("API_RECORD", title, text, source_url, published))
+        documents.append(
+            _document(
+                "API_RECORD",
+                title,
+                text,
+                record_url,
+                published,
+                flags=("LATEST_RECORD_WINDOW",) if window_limited else (),
+            )
+        )
+    return documents
+
+
+def _discovery_documents(body: bytes, source_url: str, _: str) -> list[NormalizedDocument]:
+    payload = json.loads(body)
+    articles = payload.get("articles", []) if isinstance(payload, dict) else []
+    documents: list[NormalizedDocument] = []
+    for article in articles:
+        if not isinstance(article, dict) or not article.get("url"):
+            continue
+        title = str(article.get("title") or article["url"])
+        metadata = {
+            key: article[key]
+            for key in ("domain", "language", "sourcecountry")
+            if article.get(key)
+        }
+        detail = "\n".join(
+            (title, *(f"{key}: {_scalar(value)}" for key, value in sorted(metadata.items())))
+        )
+        documents.append(
+            _document(
+                "DISCOVERED_ARTICLE",
+                title,
+                detail,
+                str(article["url"]),
+                _parse_datetime(str(article.get("seendate") or "")),
+                flags=("DISCOVERY_LEAD", "REQUIRES_CORROBORATION"),
+            )
+        )
     return documents
 
 
@@ -234,7 +282,10 @@ def _parse_datetime(value: str | None) -> datetime | None:
         parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
     except ValueError:
         try:
-            parsed = parsedate_to_datetime(value)
+            if re.fullmatch(r"\d{8}T\d{6}Z", value):
+                parsed = datetime.strptime(value, "%Y%m%dT%H%M%SZ").replace(tzinfo=UTC)
+            else:
+                parsed = parsedate_to_datetime(value)
         except (TypeError, ValueError):
             try:
                 parsed = datetime.strptime(value, "%d/%m/%Y").replace(tzinfo=UTC)

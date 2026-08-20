@@ -54,8 +54,6 @@ def configured_queues(settings: Settings) -> dict[str, str]:
 def create_celery_app(settings: Settings | None = None) -> Celery:
     settings = settings or get_settings()
     queues = configured_queues(settings)
-    default_queue = next(iter(queues), None)
-
     app = Celery("stem_cogent", broker="sqs://")
     app.conf.update(
         accept_content=["json"],
@@ -69,12 +67,6 @@ def create_celery_app(settings: Settings | None = None) -> Celery:
             "visibility_timeout": 600,
             "wait_time_seconds": 20,
         },
-        beat_schedule={
-            "source-registry-minute-tick": {
-                "task": "app.workers.tasks.scheduler.schedule_due_sources",
-                "schedule": 60.0,
-            }
-        },
         enable_utc=True,
         event_serializer="json",
         result_serializer="json",
@@ -82,7 +74,7 @@ def create_celery_app(settings: Settings | None = None) -> Celery:
         task_acks_late=True,
         task_acks_on_failure_or_timeout=False,
         task_create_missing_queues=False,
-        task_default_queue=default_queue,
+        task_default_queue=None,
         task_ignore_result=True,
         task_queues=tuple(Queue(name) for name in queues),
         task_reject_on_worker_lost=True,

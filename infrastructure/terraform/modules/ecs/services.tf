@@ -7,6 +7,47 @@ locals {
   frontend_container_name  = "frontend"
   migration_container_name = "migration"
 
+  phase_two_workers = {
+    scheduler = {
+      service_name = "${var.resource_prefix}-scheduler-worker-${var.environment}"
+      role_key     = "scheduler-worker"
+      log_group    = "ingestion"
+      command = [
+        "python", "-m", "app.workers.scheduler_service",
+      ]
+    }
+    collector = {
+      service_name = "${var.resource_prefix}-collector-worker-${var.environment}"
+      role_key     = "collector-worker"
+      log_group    = "ingestion"
+      command = [
+        "celery", "-A", "app.workers.celery_app", "worker", "--loglevel=INFO",
+        "--concurrency=4",
+        "--queues=${join(",", [basename(var.api_environment_variables["SQS_INGESTION_PRIORITY_URL"]), basename(var.api_environment_variables["SQS_INGESTION_STANDARD_URL"])])}",
+      ]
+    }
+    validation = {
+      service_name = "${var.resource_prefix}-validation-worker-${var.environment}"
+      role_key     = "validation-worker"
+      log_group    = "processing"
+      command = [
+        "celery", "-A", "app.workers.celery_app", "worker", "--loglevel=INFO",
+        "--concurrency=4",
+        "--queues=${basename(var.api_environment_variables["SQS_PIPELINE_RAW_SIGNALS_URL"])}",
+      ]
+    }
+    normalization = {
+      service_name = "${var.resource_prefix}-normalization-worker-${var.environment}"
+      role_key     = "normalization-worker"
+      log_group    = "processing"
+      command = [
+        "celery", "-A", "app.workers.celery_app", "worker", "--loglevel=INFO",
+        "--concurrency=4",
+        "--queues=${basename(var.api_environment_variables["SQS_PIPELINE_VALIDATED_URL"])}",
+      ]
+    }
+  }
+
   runtime_environment_variables = {
     AWS_REGION   = var.aws_region
     ENVIRONMENT  = var.environment
@@ -25,12 +66,21 @@ locals {
     XRAY_ENABLED = "false"
   })
 
+  worker_environment_variables = merge(var.api_environment_variables, {
+    AWS_REGION   = var.aws_region
+    ENVIRONMENT  = var.environment
+    LOG_LEVEL    = "INFO"
+    SERVICE_NAME = ""
+    TMPDIR       = "/tmp"
+  })
+
   bootstrap_images = {
     api      = "${var.ecr_repository_urls["api"]}:${var.bootstrap_image_tag}"
+    worker   = "${var.ecr_repository_urls["worker"]}:${var.bootstrap_image_tag}"
     frontend = "${var.ecr_repository_urls["frontend"]}:${var.bootstrap_image_tag}"
   }
 
-  service_deployments = [
+  service_deployments = concat([
     {
       service   = local.api_service_name
       container = local.api_container_name
@@ -41,7 +91,13 @@ locals {
       container = local.frontend_container_name
       image     = "frontend"
     },
-  ]
+    ], [
+    for worker_key in ["scheduler", "collector", "validation", "normalization"] : {
+      service   = local.phase_two_workers[worker_key].service_name
+      container = local.phase_two_workers[worker_key].role_key
+      image     = "worker"
+    }
+  ])
 }
 
 resource "aws_ecs_task_definition" "api" {
@@ -332,6 +388,69 @@ resource "aws_ecs_task_definition" "migration" {
   })
 }
 
+resource "aws_ecs_task_definition" "phase_two_worker" {
+  for_each = local.phase_two_workers
+
+  family                   = each.value.service_name
+  cpu                      = "512"
+  memory                   = "1024"
+  network_mode             = "awsvpc"
+  requires_compatibilities = ["FARGATE"]
+  task_role_arn            = var.task_role_arns[each.value.role_key]
+  execution_role_arn       = var.execution_role_arns[each.value.role_key]
+
+  runtime_platform {
+    cpu_architecture        = "X86_64"
+    operating_system_family = "LINUX"
+  }
+
+  volume {
+    name = "tmp"
+  }
+
+  container_definitions = jsonencode([{
+    name                   = each.value.role_key
+    image                  = local.bootstrap_images.worker
+    command                = each.value.command
+    essential              = true
+    readonlyRootFilesystem = true
+    user                   = "1000"
+    stopTimeout            = 120
+
+    environment = [
+      for name in sort(keys(local.worker_environment_variables)) : {
+        name  = name
+        value = name == "SERVICE_NAME" ? each.value.service_name : local.worker_environment_variables[name]
+      }
+    ]
+
+    linuxParameters = {
+      initProcessEnabled = true
+    }
+
+    mountPoints = [{
+      sourceVolume  = "tmp"
+      containerPath = "/tmp"
+      readOnly      = false
+    }]
+
+    logConfiguration = {
+      logDriver = "awslogs"
+      options = {
+        awslogs-group         = var.phase_one_log_group_names[each.value.log_group]
+        awslogs-region        = var.aws_region
+        awslogs-stream-prefix = each.value.role_key
+      }
+    }
+  }])
+
+  tags = merge(local.common_tags, {
+    Name    = each.value.service_name
+    Service = each.value.role_key
+    Phase   = "2"
+  })
+}
+
 resource "aws_ecs_service" "api" {
   name            = local.api_service_name
   cluster         = aws_ecs_cluster.this.id
@@ -437,6 +556,56 @@ resource "aws_ecs_service" "frontend" {
   tags = merge(local.common_tags, {
     Name    = local.frontend_service_name
     Service = "frontend"
+  })
+
+  depends_on = [aws_ecs_cluster_capacity_providers.this]
+}
+
+resource "aws_ecs_service" "phase_two_worker" {
+  for_each = local.phase_two_workers
+
+  name            = each.value.service_name
+  cluster         = aws_ecs_cluster.this.id
+  task_definition = aws_ecs_task_definition.phase_two_worker[each.key].arn
+  desired_count   = var.phase_two_worker_desired_counts[each.key]
+
+  capacity_provider_strategy {
+    base              = 1
+    capacity_provider = "FARGATE"
+    weight            = 1
+  }
+
+  deployment_circuit_breaker {
+    enable   = true
+    rollback = true
+  }
+
+  deployment_maximum_percent         = 200
+  deployment_minimum_healthy_percent = 50
+  enable_ecs_managed_tags            = true
+  force_new_deployment               = false
+  platform_version                   = "LATEST"
+  propagate_tags                     = "SERVICE"
+  wait_for_steady_state              = true
+
+  deployment_controller {
+    type = "ECS"
+  }
+
+  network_configuration {
+    assign_public_ip = false
+    security_groups  = [var.api_security_group_id]
+    subnets          = var.private_app_subnet_ids
+  }
+
+  lifecycle {
+    ignore_changes = [task_definition, desired_count]
+  }
+
+  tags = merge(local.common_tags, {
+    Name    = each.value.service_name
+    Service = each.value.role_key
+    Phase   = "2"
   })
 
   depends_on = [aws_ecs_cluster_capacity_providers.this]

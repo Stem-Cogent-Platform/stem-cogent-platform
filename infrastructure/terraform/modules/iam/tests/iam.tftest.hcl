@@ -91,22 +91,22 @@ run "creates_dedicated_roles_for_complete_service_catalogue" {
   command = plan
 
   assert {
-    condition     = length(aws_iam_role.task) == 17
-    error_message = "All 16 backend services plus the frontend ECS service must have dedicated task roles."
+    condition     = length(aws_iam_role.task) == 19
+    error_message = "The complete catalogue and consolidated Phase 2 runtimes must have dedicated task roles."
   }
 
   assert {
-    condition     = length(aws_iam_role.execution) == 17
-    error_message = "All 16 backend services plus the frontend ECS service must have dedicated execution roles."
+    condition     = length(aws_iam_role.execution) == 19
+    error_message = "The complete catalogue and consolidated Phase 2 runtimes must have dedicated execution roles."
   }
 
   assert {
-    condition     = length(toset([for role in aws_iam_role.task : role.name])) == 17
+    condition     = length(toset([for role in aws_iam_role.task : role.name])) == 19
     error_message = "Task roles must not be shared between services."
   }
 
   assert {
-    condition     = length(aws_iam_role_policy.task) == 17 && length(aws_iam_role_policy.execution) == 17
+    condition     = length(aws_iam_role_policy.task) == 19 && length(aws_iam_role_policy.execution) == 19
     error_message = "Every task and execution role must have an attached least-privilege policy."
   }
 }
@@ -160,6 +160,16 @@ run "maps_pipeline_permissions_to_real_transitions" {
     condition     = strcontains(aws_iam_role_policy.task["enrichment-worker"].policy, "sc-graph-updates-staging")
     error_message = "Enrichment must be able to publish asynchronous entity graph updates."
   }
+
+  assert {
+    condition = alltrue([
+      strcontains(aws_iam_role_policy.task["scheduler-worker"].policy, "sc-ingestion-priority-staging"),
+      strcontains(aws_iam_role_policy.task["scheduler-worker"].policy, "sc-ingestion-standard-staging"),
+      strcontains(aws_iam_role_policy.task["collector-worker"].policy, "sc-pipeline-raw-signals-staging"),
+      strcontains(aws_iam_role_policy.task["normalization-worker"].policy, "sc-entity-review-staging"),
+    ])
+    error_message = "Consolidated Phase 2 runtimes must be authorized for every queue transition performed by their code."
+  }
 }
 
 run "uses_tenant_scoped_private_upload_prefixes" {
@@ -167,7 +177,7 @@ run "uses_tenant_scoped_private_upload_prefixes" {
 
   assert {
     condition = alltrue([
-      for service in ["api-service", "upload-collector-worker"] :
+      for service in ["api-service", "upload-collector-worker", "collector-worker"] :
       strcontains(aws_iam_role_policy.task[service].policy, "enterprise-uploads-staging-123456789012/tenant/*")
     ])
     error_message = "Private-upload access must use the canonical tenant/{tenant_id}/uploads path hierarchy."
@@ -175,7 +185,7 @@ run "uses_tenant_scoped_private_upload_prefixes" {
 
   assert {
     condition = alltrue([
-      for service in ["api-service", "upload-collector-worker"] :
+      for service in ["api-service", "upload-collector-worker", "collector-worker"] :
       !strcontains(aws_iam_role_policy.task[service].policy, "enterprise-uploads-staging-123456789012/enterprise/*")
     ])
     error_message = "The superseded enterprise/* upload prefix must not remain authorised."

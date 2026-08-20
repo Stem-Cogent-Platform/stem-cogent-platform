@@ -1,3 +1,4 @@
+from datetime import UTC, datetime
 from pathlib import Path
 from uuid import UUID
 
@@ -72,6 +73,42 @@ def test_registry_exact_and_alias_resolution_never_invents_unknown_entity() -> N
     }
     assert {item.method for item in result.resolved} == {"ALIAS_EXACT"}
     assert result.unknown_mentions == ("New Payments Authority",)
+
+
+def test_cbn_api_record_uses_document_date_and_canonical_document_link() -> None:
+    documents = normalize_payload(
+        "API",
+        b'[{"title":"Payments circular","documentDate":"19/08/2026","link":"/Out/circular.pdf"}]',
+        "https://www.cbn.gov.ng/api/GetAllCirculars",
+    )
+
+    assert documents[0].published_at == datetime(2026, 8, 19, tzinfo=UTC)
+    assert documents[0].source_url == "https://www.cbn.gov.ng/Out/circular.pdf"
+
+
+def test_discovery_results_are_provenanced_untrusted_leads() -> None:
+    documents = normalize_payload(
+        "LIVE_SEARCH",
+        b'{"articles":[{"url":"https://news.example/paystack","title":"Paystack expands","seendate":"20260819T103000Z","domain":"news.example","language":"English","sourcecountry":"Nigeria"}]}',
+        "https://api.gdeltproject.org/api/v2/doc/doc?query=Paystack",
+    )
+
+    assert documents[0].signal_type == "DISCOVERED_ARTICLE"
+    assert documents[0].source_url == "https://news.example/paystack"
+    assert documents[0].published_at == datetime(2026, 8, 19, 10, 30, tzinfo=UTC)
+    assert documents[0].processing_flags == (
+        "DISCOVERY_LEAD",
+        "REQUIRES_CORROBORATION",
+    )
+
+
+def test_large_api_snapshots_are_bounded_to_latest_record_window() -> None:
+    body = ("[" + ",".join(f'{{\"title\":\"record {index}\"}}' for index in range(501)) + "]").encode()
+
+    documents = normalize_payload("API", body, "https://example.com/records")
+
+    assert len(documents) == 500
+    assert documents[0].processing_flags == ("LATEST_RECORD_WINDOW",)
 
 
 def test_normalization_rejects_empty_or_unknown_payloads() -> None:

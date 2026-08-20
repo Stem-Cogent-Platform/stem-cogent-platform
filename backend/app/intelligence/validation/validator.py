@@ -129,7 +129,7 @@ def _signature_matches(source_type: str, body: bytes) -> bool:
     stripped = body.lstrip()
     if source_type == "RSS":
         return stripped.startswith((b"<?xml", b"<rss", b"<feed"))
-    if source_type == "API":
+    if source_type in {"API", "LIVE_SEARCH"}:
         try:
             json.loads(body)
         except (json.JSONDecodeError, UnicodeDecodeError):

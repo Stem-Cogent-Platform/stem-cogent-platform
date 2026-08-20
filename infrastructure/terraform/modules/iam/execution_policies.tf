@@ -17,6 +17,8 @@ locals {
   log_group_paths = {
     api-service             = "/${var.resource_prefix}/api-service/${var.environment}"
     frontend-service        = "/${var.resource_prefix}/infrastructure/${var.environment}"
+    scheduler-worker        = "/${var.resource_prefix}/pipeline/ingestion/${var.environment}"
+    collector-worker        = "/${var.resource_prefix}/pipeline/ingestion/${var.environment}"
     rss-collector-worker    = "/${var.resource_prefix}/pipeline/ingestion/${var.environment}"
     api-collector-worker    = "/${var.resource_prefix}/pipeline/ingestion/${var.environment}"
     scraper-worker          = "/${var.resource_prefix}/pipeline/ingestion/${var.environment}"

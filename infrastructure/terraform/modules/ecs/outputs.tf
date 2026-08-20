@@ -28,6 +28,11 @@ output "frontend_service_name" {
   value       = aws_ecs_service.frontend.name
 }
 
+output "phase_two_worker_service_names" {
+  description = "Canonical Phase 2 ECS service names keyed by runtime purpose."
+  value       = { for key, service in aws_ecs_service.phase_two_worker : key => service.name }
+}
+
 output "api_task_definition_arn" {
   description = "Terraform bootstrap API task-definition ARN."
   value       = aws_ecs_task_definition.api.arn
@@ -54,7 +59,7 @@ output "migration_container_name" {
 }
 
 output "service_deployments" {
-  description = "Phase 1 service/container/image contract consumed by Application CD."
+  description = "Application service/container/image contract consumed by Application CD."
   value       = local.service_deployments
 }
 
@@ -64,6 +69,6 @@ output "service_deployments_json" {
 }
 
 output "phase_one_log_group_names" {
-  description = "Observability-owned CloudWatch log groups used by Phase 1 tasks."
+  description = "Observability-owned CloudWatch log groups used by application tasks."
   value       = var.phase_one_log_group_names
 }

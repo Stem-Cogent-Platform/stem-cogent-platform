@@ -134,9 +134,13 @@ variable "task_role_arns" {
     condition = (
       contains(keys(var.task_role_arns), "api-service") &&
       contains(keys(var.task_role_arns), "frontend-service") &&
+      contains(keys(var.task_role_arns), "scheduler-worker") &&
+      contains(keys(var.task_role_arns), "collector-worker") &&
+      contains(keys(var.task_role_arns), "validation-worker") &&
+      contains(keys(var.task_role_arns), "normalization-worker") &&
       alltrue([for arn in values(var.task_role_arns) : can(regex("^arn:[^:]+:iam::[0-9]{12}:role/.+$", arn))])
     )
-    error_message = "task_role_arns must contain valid api-service and frontend-service role ARNs."
+    error_message = "task_role_arns must contain valid Phase 1 and Phase 2 runtime role ARNs."
   }
 }
 
@@ -148,23 +152,29 @@ variable "execution_role_arns" {
     condition = (
       contains(keys(var.execution_role_arns), "api-service") &&
       contains(keys(var.execution_role_arns), "frontend-service") &&
+      contains(keys(var.execution_role_arns), "scheduler-worker") &&
+      contains(keys(var.execution_role_arns), "collector-worker") &&
+      contains(keys(var.execution_role_arns), "validation-worker") &&
+      contains(keys(var.execution_role_arns), "normalization-worker") &&
       alltrue([for arn in values(var.execution_role_arns) : can(regex("^arn:[^:]+:iam::[0-9]{12}:role/.+$", arn))])
     )
-    error_message = "execution_role_arns must contain valid api-service and frontend-service role ARNs."
+    error_message = "execution_role_arns must contain valid Phase 1 and Phase 2 runtime role ARNs."
   }
 }
 
 variable "phase_one_log_group_names" {
-  description = "Observability-owned CloudWatch log group names used by Phase 1 task definitions."
+  description = "Observability-owned CloudWatch log group names used by application task definitions."
   type        = map(string)
 
   validation {
     condition = (
       contains(keys(var.phase_one_log_group_names), "api") &&
       contains(keys(var.phase_one_log_group_names), "infrastructure") &&
+      contains(keys(var.phase_one_log_group_names), "ingestion") &&
+      contains(keys(var.phase_one_log_group_names), "processing") &&
       alltrue([for name in values(var.phase_one_log_group_names) : startswith(name, "/")])
     )
-    error_message = "phase_one_log_group_names must contain absolute api and infrastructure log group names."
+    error_message = "phase_one_log_group_names must contain absolute API, infrastructure, ingestion, and processing log group names."
   }
 }
 
@@ -203,5 +213,30 @@ variable "frontend_desired_count" {
   validation {
     condition     = var.frontend_desired_count >= 2 && floor(var.frontend_desired_count) == var.frontend_desired_count
     error_message = "frontend_desired_count must be an integer of at least 2 for high availability."
+  }
+}
+
+variable "phase_two_worker_desired_counts" {
+  description = "Desired Fargate tasks for each Phase 2 runtime; the scheduler is intentionally singleton."
+  type        = map(number)
+  default = {
+    scheduler     = 1
+    collector     = 2
+    validation    = 2
+    normalization = 2
+  }
+
+  validation {
+    condition = (
+      toset(keys(var.phase_two_worker_desired_counts)) == toset([
+        "scheduler", "collector", "validation", "normalization"
+      ]) &&
+      var.phase_two_worker_desired_counts["scheduler"] == 1 &&
+      alltrue([
+        for count in values(var.phase_two_worker_desired_counts) :
+        count >= 1 && floor(count) == count
+      ])
+    )
+    error_message = "Phase 2 desired counts require exactly one scheduler and at least one integer task for every worker."
   }
 }

@@ -1,12 +1,14 @@
 locals {
   # SC-DOC-009 Section 5.1 lists the backend service catalogue, while the
   # later authoritative delivery tasks 1.3.14 and 1.3.15 also require an ECS
-  # frontend service. The reconciled deployable catalogue is therefore 17
-  # services. A role is intentionally created for every entry even when a
-  # service currently has no SQS permissions.
+  # frontend service. Phase 2 adds consolidated scheduler and collector
+  # runtime identities so same-queue collectors do not race under different
+  # incomplete permissions.
   services = toset([
     "api-service",
     "frontend-service",
+    "scheduler-worker",
+    "collector-worker",
     "rss-collector-worker",
     "api-collector-worker",
     "scraper-worker",
@@ -79,6 +81,14 @@ locals {
       consume = []
       publish = []
     }
+    scheduler-worker = {
+      consume = []
+      publish = ["ingestion-priority", "ingestion-standard"]
+    }
+    collector-worker = {
+      consume = ["ingestion-priority", "ingestion-standard"]
+      publish = ["pipeline-raw-signals"]
+    }
     rss-collector-worker = {
       consume = ["ingestion-priority", "ingestion-standard"]
       publish = ["pipeline-raw-signals"]
@@ -105,7 +115,7 @@ locals {
     }
     normalization-worker = {
       consume = ["pipeline-validated"]
-      publish = ["pipeline-normalized"]
+      publish = ["pipeline-normalized", "entity-review"]
     }
     classification-worker = {
       consume = ["pipeline-normalized"]
@@ -153,6 +163,8 @@ locals {
       "paystack_webhook_secret",
     ]
     frontend-service        = []
+    scheduler-worker        = ["database_credentials", "redis_auth_token"]
+    collector-worker        = ["database_credentials", "redis_auth_token"]
     rss-collector-worker    = ["database_credentials", "redis_auth_token"]
     api-collector-worker    = ["database_credentials", "redis_auth_token"]
     scraper-worker          = ["database_credentials", "redis_auth_token"]
@@ -178,6 +190,10 @@ locals {
       "arn:${data.aws_partition.current.partition}:secretsmanager:${var.aws_region}:${var.aws_account_id}:secret:${var.resource_prefix}/${var.environment}/users/*/totp-secret-*",
     ]
     frontend-service = []
+    scheduler-worker = []
+    collector-worker = [
+      "arn:${data.aws_partition.current.partition}:secretsmanager:${var.aws_region}:${var.aws_account_id}:secret:${var.resource_prefix}/${var.environment}/sources/*/auth-*",
+    ]
     rss-collector-worker = [
       "arn:${data.aws_partition.current.partition}:secretsmanager:${var.aws_region}:${var.aws_account_id}:secret:${var.resource_prefix}/${var.environment}/sources/*/auth-*",
     ]
@@ -206,6 +222,8 @@ locals {
   s3_read_access = {
     api-service             = { enterprise_uploads = ["tenant/*"], intelligence_exports = ["exports/*"] }
     frontend-service        = {}
+    scheduler-worker        = {}
+    collector-worker        = { enterprise_uploads = ["tenant/*"] }
     rss-collector-worker    = {}
     api-collector-worker    = {}
     scraper-worker          = {}
@@ -226,6 +244,8 @@ locals {
   s3_write_access = {
     api-service             = { enterprise_uploads = ["tenant/*"], intelligence_exports = ["exports/*"] }
     frontend-service        = {}
+    scheduler-worker        = {}
+    collector-worker        = { raw_signals = ["raw/*"] }
     rss-collector-worker    = { raw_signals = ["raw/*"] }
     api-collector-worker    = { raw_signals = ["raw/*"] }
     scraper-worker          = { raw_signals = ["raw/*"] }
@@ -334,8 +354,8 @@ data "aws_iam_policy_document" "ecs_tasks_assume_role" {
 
 check "complete_service_catalogue" {
   assert {
-    condition     = length(local.services) == 17 && local.services == toset(keys(local.queue_access))
-    error_message = "IAM must cover the 16 backend services in SC-DOC-009 Section 5.1 plus the frontend ECS service required by SC-DOC-010 Task 1.3.15."
+    condition     = length(local.services) == 19 && local.services == toset(keys(local.queue_access))
+    error_message = "IAM must cover the documented catalogue plus the consolidated Phase 2 scheduler and collector runtime identities."
   }
 }
 

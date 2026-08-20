@@ -18,7 +18,9 @@ if str(BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(BACKEND_ROOT))
 
 get_database_url = importlib.import_module("app.core.database").get_database_url
-_DATA = runpy.run_path(Path(__file__).resolve().parents[1] / "data" / "launch_sources_v1.py")
+_DATA = runpy.run_path(
+    Path(__file__).resolve().parents[1] / "data" / "launch_sources_v1.py"
+)
 MANIFEST_VERSION: str = _DATA["MANIFEST_VERSION"]
 LAUNCH_SOURCES: tuple = _DATA["LAUNCH_SOURCES"]
 logger = logging.getLogger(__name__)
@@ -51,6 +53,15 @@ _UPSERT = text(
     """
 )
 
+_RETIRE_SUPERSEDED = text(
+    """
+    UPDATE config.sources
+    SET health_status = 'INACTIVE', schedule_cron = NULL, updated_at = NOW()
+    WHERE retry_policy ? 'manifest_version'
+      AND NOT (source_code = ANY(CAST(:codes AS TEXT[])))
+    """
+)
+
 
 async def seed() -> dict[str, object]:
     database_url = get_database_url()
@@ -75,6 +86,7 @@ async def seed() -> dict[str, object]:
                     },
                 )
             codes = [source.source_code for source in LAUNCH_SOURCES]
+            await connection.execute(_RETIRE_SUPERSEDED, {"codes": codes})
             rows = (
                 await connection.execute(
                     text(
@@ -88,7 +100,9 @@ async def seed() -> dict[str, object]:
                     {"codes": codes},
                 )
             ).all()
-            actual = {row.source_code: (row.source_type, row.health_status) for row in rows}
+            actual = {
+                row.source_code: (row.source_type, row.health_status) for row in rows
+            }
             expected = {
                 source.source_code: (source.source_type, "ACTIVE")
                 for source in LAUNCH_SOURCES

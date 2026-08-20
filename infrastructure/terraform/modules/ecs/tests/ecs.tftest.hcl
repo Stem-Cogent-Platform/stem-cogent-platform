@@ -26,24 +26,38 @@ variables {
   phase_one_log_group_names = {
     api            = "/sc/api-service/staging"
     infrastructure = "/sc/infrastructure/staging"
+    ingestion      = "/sc/pipeline/ingestion/staging"
+    processing     = "/sc/pipeline/processing/staging"
   }
 
   task_role_arns = {
-    api-service      = "arn:aws:iam::123456789012:role/stem-cogent/sc-api-service-staging-task"
-    frontend-service = "arn:aws:iam::123456789012:role/stem-cogent/sc-frontend-service-staging-task"
+    api-service          = "arn:aws:iam::123456789012:role/stem-cogent/sc-api-service-staging-task"
+    frontend-service     = "arn:aws:iam::123456789012:role/stem-cogent/sc-frontend-service-staging-task"
+    scheduler-worker     = "arn:aws:iam::123456789012:role/stem-cogent/sc-scheduler-worker-staging-task"
+    collector-worker     = "arn:aws:iam::123456789012:role/stem-cogent/sc-collector-worker-staging-task"
+    validation-worker    = "arn:aws:iam::123456789012:role/stem-cogent/sc-validation-worker-staging-task"
+    normalization-worker = "arn:aws:iam::123456789012:role/stem-cogent/sc-normalization-worker-staging-task"
   }
 
   execution_role_arns = {
-    api-service      = "arn:aws:iam::123456789012:role/stem-cogent/sc-api-service-staging-execution"
-    frontend-service = "arn:aws:iam::123456789012:role/stem-cogent/sc-frontend-service-staging-execution"
+    api-service          = "arn:aws:iam::123456789012:role/stem-cogent/sc-api-service-staging-execution"
+    frontend-service     = "arn:aws:iam::123456789012:role/stem-cogent/sc-frontend-service-staging-execution"
+    scheduler-worker     = "arn:aws:iam::123456789012:role/stem-cogent/sc-scheduler-worker-staging-execution"
+    collector-worker     = "arn:aws:iam::123456789012:role/stem-cogent/sc-collector-worker-staging-execution"
+    validation-worker    = "arn:aws:iam::123456789012:role/stem-cogent/sc-validation-worker-staging-execution"
+    normalization-worker = "arn:aws:iam::123456789012:role/stem-cogent/sc-normalization-worker-staging-execution"
   }
 
   api_environment_variables = {
-    DATABASE_HOST            = "database.internal"
-    DATABASE_NAME            = "stemcogent"
-    DATABASE_CREDENTIALS_ARN = "arn:aws:secretsmanager:eu-west-1:123456789012:secret:database"
-    REDIS_HOST               = "redis.internal"
-    REDIS_AUTH_TOKEN_ARN     = "arn:aws:secretsmanager:eu-west-1:123456789012:secret:redis"
+    DATABASE_HOST                = "database.internal"
+    DATABASE_NAME                = "stemcogent"
+    DATABASE_CREDENTIALS_ARN     = "arn:aws:secretsmanager:eu-west-1:123456789012:secret:database"
+    REDIS_HOST                   = "redis.internal"
+    REDIS_AUTH_TOKEN_ARN         = "arn:aws:secretsmanager:eu-west-1:123456789012:secret:redis"
+    SQS_INGESTION_PRIORITY_URL   = "https://sqs.eu-west-1.amazonaws.com/123456789012/sc-ingestion-priority-queue-staging"
+    SQS_INGESTION_STANDARD_URL   = "https://sqs.eu-west-1.amazonaws.com/123456789012/sc-ingestion-standard-queue-staging"
+    SQS_PIPELINE_RAW_SIGNALS_URL = "https://sqs.eu-west-1.amazonaws.com/123456789012/sc-pipeline-raw-signals-queue-staging"
+    SQS_PIPELINE_VALIDATED_URL   = "https://sqs.eu-west-1.amazonaws.com/123456789012/sc-pipeline-validated-queue-staging"
   }
 }
 
@@ -74,18 +88,26 @@ run "creates_observable_fargate_cluster" {
   }
 }
 
-run "creates_only_phase_one_services" {
+run "creates_phase_one_and_core_phase_two_services" {
   command = plan
 
   assert {
     condition = toset([
       aws_ecs_service.api.name,
       aws_ecs_service.frontend.name,
+      aws_ecs_service.phase_two_worker["scheduler"].name,
+      aws_ecs_service.phase_two_worker["collector"].name,
+      aws_ecs_service.phase_two_worker["validation"].name,
+      aws_ecs_service.phase_two_worker["normalization"].name,
       ]) == toset([
       "sc-api-service-staging",
       "sc-frontend-staging",
+      "sc-scheduler-worker-staging",
+      "sc-collector-worker-staging",
+      "sc-validation-worker-staging",
+      "sc-normalization-worker-staging",
     ])
-    error_message = "Task 1.3.15 must create exactly the API and frontend Phase 1 services."
+    error_message = "ECS must create Phase 1 plus the four consolidated core ingestion services."
   }
 
   assert {
@@ -97,6 +119,18 @@ run "creates_only_phase_one_services" {
       one(service.deployment_circuit_breaker).rollback
     ])
     error_message = "Both services must use the required rolling percentages and circuit-breaker rollback."
+  }
+
+  assert {
+    condition = alltrue([
+      for service in values(aws_ecs_service.phase_two_worker) :
+      service.deployment_minimum_healthy_percent == 50 &&
+      service.deployment_maximum_percent == 200 &&
+      one(service.deployment_circuit_breaker).enable &&
+      one(service.deployment_circuit_breaker).rollback &&
+      !one(service.network_configuration).assign_public_ip
+    ])
+    error_message = "Phase 2 workers must be private and use circuit-breaker rollback."
   }
 
   assert {
@@ -162,6 +196,17 @@ run "uses_immutable_images_and_hardened_task_definitions" {
     error_message = "The API task must run the hardened X-Ray daemon sidecar with application tracing enabled."
   }
 
+  assert {
+    condition = alltrue([
+      for key, definition in aws_ecs_task_definition.phase_two_worker :
+      endswith(jsondecode(definition.container_definitions)[0].image, ":0123456789abcdef0123456789abcdef01234567") &&
+      jsondecode(definition.container_definitions)[0].readonlyRootFilesystem &&
+      one([for item in jsondecode(definition.container_definitions)[0].environment : item.value if item.name == "TMPDIR"]) == "/tmp" &&
+      one([for item in jsondecode(definition.container_definitions)[0].environment : item.value if item.name == "SERVICE_NAME"]) == "sc-${key}-worker-staging"
+    ])
+    error_message = "Phase 2 worker tasks must use immutable images, read-only roots, writable temp space, and exact service identity."
+  }
+
 }
 
 run "exports_application_cd_contract" {
@@ -179,7 +224,27 @@ run "exports_application_cd_contract" {
         container = "frontend"
         image     = "frontend"
       },
+      {
+        service   = "sc-scheduler-worker-staging"
+        container = "scheduler-worker"
+        image     = "worker"
+      },
+      {
+        service   = "sc-collector-worker-staging"
+        container = "collector-worker"
+        image     = "worker"
+      },
+      {
+        service   = "sc-validation-worker-staging"
+        container = "validation-worker"
+        image     = "worker"
+      },
+      {
+        service   = "sc-normalization-worker-staging"
+        container = "normalization-worker"
+        image     = "worker"
+      },
     ]
-    error_message = "ECS_SERVICE_DEPLOYMENTS must describe exactly the API and frontend containers."
+    error_message = "ECS_SERVICE_DEPLOYMENTS must describe all Phase 1 and core Phase 2 containers."
   }
 }

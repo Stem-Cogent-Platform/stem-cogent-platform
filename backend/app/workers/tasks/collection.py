@@ -19,6 +19,7 @@ from app.ingestion.base_collector import (
     PostgresRawSignalRepository,
     S3EvidenceStore,
 )
+from app.ingestion.discovery import build_rotating_discovery_url
 from app.ingestion.html_collector import HTMLCollector
 from app.ingestion.http import ApprovedHttpFetcher
 from app.ingestion.pdf_collector import PDFCollector
@@ -33,7 +34,19 @@ _HTTP_COLLECTORS = {
     "API": APICollector,
     "HTML": HTMLCollector,
     "PDF": PDFCollector,
+    "LIVE_SEARCH": APICollector,
 }
+
+
+def _assert_registered_http_url(source_url: str, base_url: str | None) -> None:
+    source = urlsplit(source_url)
+    registered = urlsplit(base_url or "")
+    if (
+        source.scheme != "https"
+        or registered.scheme != "https"
+        or source.hostname != registered.hostname
+    ):
+        raise ValueError("Collection URL must remain on the registered source host")
 
 
 async def _load_job(session: AsyncSession, event: dict[str, Any]) -> CollectionJob:
@@ -62,6 +75,14 @@ async def _load_job(session: AsyncSession, event: dict[str, Any]) -> CollectionJ
     source_url = payload.get("source_url") or row["base_url"]
     if not source_url:
         raise ValueError("Collection event does not contain a source URL")
+    if row["source_type"] != "USER_UPLOAD":
+        _assert_registered_http_url(source_url, row["base_url"])
+    if row["source_type"] == "LIVE_SEARCH":
+        source_url = await build_rotating_discovery_url(
+            session,
+            source_url,
+            row["scheduled_at"] or datetime.now(UTC),
+        )
     await session.execute(
         text(
             """
