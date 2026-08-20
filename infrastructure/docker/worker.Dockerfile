@@ -20,7 +20,10 @@ WORKDIR /app
 
 COPY --from=builder /install /usr/local
 COPY app/ ./app/
-RUN chmod -R a=rX /app
+RUN chmod -R a=rX /app \
+    && chmod 1777 /tmp
+
+VOLUME ["/tmp"]
 
 USER 1000
 

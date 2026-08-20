@@ -71,7 +71,7 @@ locals {
     ENVIRONMENT  = var.environment
     LOG_LEVEL    = "INFO"
     SERVICE_NAME = ""
-    TMPDIR       = "/tmp"
+    TMPDIR       = "/dev/shm"
   })
 
   bootstrap_images = {

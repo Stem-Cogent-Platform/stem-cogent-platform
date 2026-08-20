@@ -25,6 +25,7 @@ def test_all_canonical_launch_queues_use_predefined_sqs_urls() -> None:
     assert len(queues) == 17
     assert set(app.conf.broker_transport_options["predefined_queues"]) == set(queues)
     assert {queue.name for queue in app.conf.task_queues} == set(queues)
+    assert app.conf.task_default_queue == "sc-ingestion-priority-staging"
     assert app.conf.broker_url == "sqs://"
 
 

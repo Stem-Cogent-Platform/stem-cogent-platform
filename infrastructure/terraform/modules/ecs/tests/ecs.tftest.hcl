@@ -201,7 +201,7 @@ run "uses_immutable_images_and_hardened_task_definitions" {
       for key, definition in aws_ecs_task_definition.phase_two_worker :
       endswith(jsondecode(definition.container_definitions)[0].image, ":0123456789abcdef0123456789abcdef01234567") &&
       jsondecode(definition.container_definitions)[0].readonlyRootFilesystem &&
-      one([for item in jsondecode(definition.container_definitions)[0].environment : item.value if item.name == "TMPDIR"]) == "/tmp" &&
+      one([for item in jsondecode(definition.container_definitions)[0].environment : item.value if item.name == "TMPDIR"]) == "/dev/shm" &&
       one([for item in jsondecode(definition.container_definitions)[0].environment : item.value if item.name == "SERVICE_NAME"]) == "sc-${key}-worker-staging"
     ])
     error_message = "Phase 2 worker tasks must use immutable images, read-only roots, writable temp space, and exact service identity."

@@ -317,3 +317,26 @@ import {
   to = module.ecs.aws_ecs_service.frontend
   id = "sc-cluster-staging/sc-frontend-staging"
 }
+
+# The initial Phase 2 apply reached AWS during a provider retry but did not
+# record these four matching roles. Adopt them atomically so the ECS module's
+# complete-role-map validation remains enforced throughout reconciliation.
+import {
+  to = module.iam.aws_iam_role.task["scheduler-worker"]
+  id = "sc-scheduler-worker-staging-task"
+}
+
+import {
+  to = module.iam.aws_iam_role.execution["scheduler-worker"]
+  id = "sc-scheduler-worker-staging-execution"
+}
+
+import {
+  to = module.iam.aws_iam_role.task["collector-worker"]
+  id = "sc-collector-worker-staging-task"
+}
+
+import {
+  to = module.iam.aws_iam_role.execution["collector-worker"]
+  id = "sc-collector-worker-staging-execution"
+}
