@@ -194,10 +194,27 @@ jobs:
       - name: Verify ECR repository
         run: aws ecr describe-repositories --repository-names "$ECR_REPOSITORY" >/dev/null
 
+      - name: Check for existing immutable image
+        id: immutable-image
+        shell: bash
+        env:
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          if aws ecr describe-images \
+            --repository-name "$ECR_REPOSITORY" \
+            --image-ids "imageTag=$IMAGE_TAG" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "Reusing existing immutable image $ECR_REPOSITORY:$IMAGE_TAG."
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Log in to Amazon ECR
+        if: steps.immutable-image.outputs.exists != 'true'
         uses: aws-actions/amazon-ecr-login@v2
 
       - name: Build image
+        if: steps.immutable-image.outputs.exists != 'true'
         shell: bash
         env:
           ECR_REGISTRY: ${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com
@@ -218,7 +235,7 @@ jobs:
             "${{ matrix.context }}"
 
       - name: Verify migration runtime is packaged
-        if: matrix.image == 'api'
+        if: matrix.image == 'api' && steps.immutable-image.outputs.exists != 'true'
         shell: bash
         env:
           ECR_REGISTRY: ${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com
@@ -229,7 +246,7 @@ jobs:
             grep -Eq '^[0-9]{4} \(head\)$'
 
       - name: Verify worker runtime and task registry are packaged
-        if: matrix.image == 'worker'
+        if: matrix.image == 'worker' && steps.immutable-image.outputs.exists != 'true'
         shell: bash
         env:
           ECR_REGISTRY: ${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com
@@ -239,6 +256,7 @@ jobs:
           docker run --rm --entrypoint python "$image" -c "from app.workers.celery_app import TASK_MODULES, celery_app; celery_app.loader.import_default_modules(); expected = {'app.workers.tasks.collection.collect_source', 'app.workers.tasks.validation.validate_raw_signal', 'app.workers.tasks.normalization.normalize_raw_signal', 'app.workers.tasks.scheduler.schedule_due_sources'}; missing = expected.difference(celery_app.tasks); assert not missing, f'missing Celery tasks: {sorted(missing)}'; assert set(TASK_MODULES) == set(celery_app.conf.include)"
 
       - name: Push immutable commit tag
+        if: steps.immutable-image.outputs.exists != 'true'
         env:
           ECR_REGISTRY: ${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com
           IMAGE_TAG: ${{ github.sha }}
