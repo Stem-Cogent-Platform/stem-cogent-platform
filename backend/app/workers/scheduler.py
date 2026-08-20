@@ -35,6 +35,8 @@ class ScheduledJob:
 class SourceScheduleRepository(Protocol):
     async def active_sources(self) -> list[ScheduledSource]: ...
 
+    async def recoverable_jobs(self, limit: int = 100) -> list[ScheduledJob]: ...
+
     async def create_or_recover_job(
         self, source: ScheduledSource, scheduled_at: datetime
     ) -> ScheduledJob: ...
@@ -132,6 +134,49 @@ class PostgresSourceScheduleRepository:
             for row in rows
         ]
 
+    async def recoverable_jobs(self, limit: int = 100) -> list[ScheduledJob]:
+        """Return bounded scheduled work whose initial publish did not finish."""
+        rows = (
+            await self._session.execute(
+                text(
+                    """
+                    SELECT job.id, job.scheduled_at,
+                           source.id AS source_id, source.source_code,
+                           source.source_type, source.base_url,
+                           source.schedule_cron, source.priority_class,
+                           source.schema_version
+                    FROM pipeline.collection_jobs job
+                    JOIN config.sources source ON source.id = job.source_id
+                    WHERE job.status = 'ENQUEUED'
+                      AND job.trigger_type = 'SCHEDULED'
+                      AND job.scheduled_at IS NOT NULL
+                      AND source.health_status = 'ACTIVE'
+                      AND source.base_url IS NOT NULL
+                    ORDER BY job.scheduled_at, job.created_at
+                    LIMIT :limit
+                    """
+                ),
+                {"limit": limit},
+            )
+        ).mappings()
+        return [
+            ScheduledJob(
+                collection_job_id=row["id"],
+                source=ScheduledSource(
+                    source_id=row["source_id"],
+                    source_code=row["source_code"],
+                    source_type=row["source_type"],
+                    base_url=row["base_url"],
+                    schedule_cron=row["schedule_cron"],
+                    priority_class=row["priority_class"],
+                    schema_version=row["schema_version"],
+                ),
+                scheduled_at=row["scheduled_at"],
+                should_publish=True,
+            )
+            for row in rows
+        ]
+
     async def create_or_recover_job(
         self, source: ScheduledSource, scheduled_at: datetime
     ) -> ScheduledJob:
@@ -214,6 +259,20 @@ class SourceScheduler:
     async def run_once(self, now: datetime | None = None) -> list[UUID]:
         scheduled_at = (now or datetime.now(UTC)).astimezone(UTC).replace(second=0, microsecond=0)
         dispatched: list[UUID] = []
+        for pending_job in await self._repository.recoverable_jobs():
+            async with self._lock.hold(
+                pending_job.source.source_id, pending_job.scheduled_at
+            ) as acquired:
+                if not acquired:
+                    continue
+                # Re-read under the distributed lock so two schedulers cannot
+                # republish the same deterministic event after lock hand-off.
+                job = await self._repository.create_or_recover_job(
+                    pending_job.source, pending_job.scheduled_at
+                )
+                if job.should_publish:
+                    await self._publish(job)
+                    dispatched.append(job.collection_job_id)
         for source in await self._repository.active_sources():
             if not cron_matches(source.schedule_cron, scheduled_at):
                 continue
@@ -223,16 +282,18 @@ class SourceScheduler:
                 job = await self._repository.create_or_recover_job(source, scheduled_at)
                 if not job.should_publish:
                     continue
-                event = self._collection_event(job)
-                queue_url = (
-                    self._priority_queue_url
-                    if source.priority_class in {"CRITICAL", "HIGH"}
-                    else self._standard_queue_url
-                )
-                await self._publisher.publish(queue_url, event)
-                await self._repository.mark_dispatched(job.collection_job_id)
+                await self._publish(job)
                 dispatched.append(job.collection_job_id)
         return dispatched
+
+    async def _publish(self, job: ScheduledJob) -> None:
+        queue_url = (
+            self._priority_queue_url
+            if job.source.priority_class in {"CRITICAL", "HIGH"}
+            else self._standard_queue_url
+        )
+        await self._publisher.publish(queue_url, self._collection_event(job))
+        await self._repository.mark_dispatched(job.collection_job_id)
 
     @staticmethod
     def _collection_event(job: ScheduledJob) -> dict[str, Any]:

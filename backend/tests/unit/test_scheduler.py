@@ -24,9 +24,13 @@ class _Repository:
         self.job_id = UUID("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb")
         self.dispatched = False
         self.marked: list[UUID] = []
+        self.pending: list[ScheduledJob] = []
 
     async def active_sources(self) -> list[ScheduledSource]:
         return [SOURCE]
+
+    async def recoverable_jobs(self, limit: int = 100) -> list[ScheduledJob]:
+        return self.pending[:limit]
 
     async def create_or_recover_job(
         self, source: ScheduledSource, scheduled_at: datetime
@@ -102,3 +106,25 @@ async def test_unavailable_lock_prevents_job_creation_and_publish() -> None:
 
     assert await scheduler.run_once(NOW) == []
     assert publisher.events == []
+
+
+@pytest.mark.asyncio
+async def test_enqueued_job_is_republished_outside_its_original_cron_minute() -> None:
+    repository = _Repository()
+    repository.pending = [ScheduledJob(repository.job_id, SOURCE, NOW, True)]
+    publisher = _Publisher()
+    scheduler = SourceScheduler(
+        repository,
+        _Lock(),
+        publisher,
+        "https://sqs/priority",
+        "https://sqs/standard",
+    )
+
+    dispatched = await scheduler.run_once(NOW.replace(minute=6))
+
+    assert dispatched == [repository.job_id]
+    assert repository.marked == [repository.job_id]
+    assert publisher.events[0][1]["payload"]["collection_job_id"] == str(
+        repository.job_id
+    )
