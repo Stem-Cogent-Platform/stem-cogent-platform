@@ -265,7 +265,24 @@ run "enforces_application_cd_least_privilege_boundaries" {
 
   assert {
     condition     = contains(local.application_deploy_actions, "ecs:UpdateService") && contains(local.application_deploy_actions, "iam:PassRole")
-    error_message = "The deploy role must be able to register and roll out the approved Phase 1 task definitions."
+    error_message = "The deploy role must be able to register and roll out the approved application task definitions."
+  }
+
+  assert {
+    condition = alltrue([
+      for service in ["scheduler-worker", "collector-worker", "validation-worker", "normalization-worker"] :
+      contains(local.application_cd_service_names, "sc-${service}-staging")
+    ])
+    error_message = "The deploy role must be able to roll out every Phase 2 worker service."
+  }
+
+  assert {
+    condition = alltrue([
+      for service in ["scheduler-worker", "collector-worker", "validation-worker", "normalization-worker"] :
+      contains(local.application_cd_task_definition_families, "sc-${service}-staging") &&
+      contains(local.application_cd_pass_role_keys, service)
+    ])
+    error_message = "The deploy role must be able to register worker revisions with only the matching worker roles."
   }
 
   assert {

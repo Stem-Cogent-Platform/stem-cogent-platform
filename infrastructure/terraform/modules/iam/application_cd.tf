@@ -12,11 +12,19 @@ locals {
   application_cd_service_names = toset([
     "${var.resource_prefix}-api-service-${var.environment}",
     "${var.resource_prefix}-frontend-${var.environment}",
+    "${var.resource_prefix}-scheduler-worker-${var.environment}",
+    "${var.resource_prefix}-collector-worker-${var.environment}",
+    "${var.resource_prefix}-validation-worker-${var.environment}",
+    "${var.resource_prefix}-normalization-worker-${var.environment}",
   ])
   application_cd_task_definition_families = toset([
     "${var.resource_prefix}-api-service-${var.environment}",
     "${var.resource_prefix}-frontend-${var.environment}",
     "${var.resource_prefix}-migration-task-${var.environment}",
+    "${var.resource_prefix}-scheduler-worker-${var.environment}",
+    "${var.resource_prefix}-collector-worker-${var.environment}",
+    "${var.resource_prefix}-validation-worker-${var.environment}",
+    "${var.resource_prefix}-normalization-worker-${var.environment}",
   ])
   application_cd_service_arns = toset([
     for service_name in local.application_cd_service_names :
@@ -26,12 +34,20 @@ locals {
     for family in local.application_cd_task_definition_families :
     "arn:${data.aws_partition.current.partition}:ecs:${var.aws_region}:${var.aws_account_id}:task-definition/${family}:*"
   ])
-  application_cd_pass_role_arns = toset([
-    aws_iam_role.task["api-service"].arn,
-    aws_iam_role.execution["api-service"].arn,
-    aws_iam_role.task["frontend-service"].arn,
-    aws_iam_role.execution["frontend-service"].arn,
+  application_cd_pass_role_keys = toset([
+    "api-service",
+    "frontend-service",
+    "scheduler-worker",
+    "collector-worker",
+    "validation-worker",
+    "normalization-worker",
   ])
+  application_cd_pass_role_arns = toset(flatten([
+    for role_key in local.application_cd_pass_role_keys : [
+      aws_iam_role.task[role_key].arn,
+      aws_iam_role.execution[role_key].arn,
+    ]
+  ]))
 
   github_actions_trust_policy = jsonencode({
     Version = "2012-10-17"
@@ -96,7 +112,7 @@ locals {
       Resource = [local.ecs_cluster_arn]
     },
     {
-      Sid    = "ReadAndUpdatePhaseOneServices"
+      Sid    = "ReadAndUpdateApplicationServices"
       Effect = "Allow"
       Action = [
         "ecs:DescribeServices",
@@ -144,7 +160,7 @@ locals {
       }
     },
     {
-      Sid      = "PassOnlyPhaseOneTaskRoles"
+      Sid      = "PassOnlyApplicationTaskRoles"
       Effect   = "Allow"
       Action   = ["iam:PassRole"]
       Resource = sort(tolist(local.application_cd_pass_role_arns))
