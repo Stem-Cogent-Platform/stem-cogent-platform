@@ -7,9 +7,11 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 
-_BATCH_SIZE = 5
-_TAXONOMY_TERM_COUNT = 3
+_BATCH_SIZE = 2
+_TAXONOMY_TERM_COUNT = 1
 _ROTATION_SECONDS = 600
+_MAX_QUERY_CHARACTERS = 220
+_DISCOVERY_ANCHORS = ("fintech", "payments", "digital bank")
 
 
 def _quoted(value: str) -> str:
@@ -22,11 +24,19 @@ def build_gdelt_url(
     entity_names: tuple[str, ...],
     taxonomy_terms: tuple[str, ...],
 ) -> str:
-    terms = tuple(dict.fromkeys((*entity_names, *taxonomy_terms)))
-    if not terms:
-        raise RuntimeError("Discovery requires an entity or taxonomy term")
-    query = f"({' OR '.join(_quoted(term) for term in terms)}) (Nigeria OR Nigerian)"
-    return f"{base_url}?{urlencode({'query': query, 'mode': 'artlist', 'maxrecords': 75, 'format': 'json', 'sort': 'hybridrel', 'timespan': '1day'})}"
+    # Reserve query space for taxonomy coverage before adding rotating entities.
+    terms = tuple(dict.fromkeys((*_DISCOVERY_ANCHORS, *taxonomy_terms, *entity_names)))
+    selected: list[str] = []
+    for term in terms:
+        candidate = (*selected, term)
+        candidate_query = (
+            f"({' OR '.join(_quoted(value) for value in candidate)}) "
+            "(Nigeria OR Nigerian)"
+        )
+        if len(candidate_query) <= _MAX_QUERY_CHARACTERS:
+            selected.append(term)
+    query = f"({' OR '.join(_quoted(term) for term in selected)}) (Nigeria OR Nigerian)"
+    return f"{base_url}?{urlencode({'query': query, 'mode': 'artlist', 'maxrecords': 25, 'format': 'json', 'sort': 'hybridrel', 'timespan': '1day'})}"
 
 
 async def build_rotating_discovery_url(
