@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import ipaddress
 import socket
 from dataclasses import dataclass
@@ -29,6 +30,7 @@ class ApprovedHttpFetcher:
         max_bytes: int = 20 * 1024 * 1024,
         headers: Mapping[str, str] | None = None,
         client: httpx.AsyncClient | None = None,
+        retry_attempts: int = 3,
     ) -> None:
         self._allowed_hosts = {host.lower().rstrip(".") for host in allowed_hosts}
         self._timeout = timeout_seconds
@@ -38,30 +40,43 @@ class ApprovedHttpFetcher:
             **(headers or {}),
         }
         self._client = client
+        self._retry_attempts = max(1, retry_attempts)
 
     async def fetch(self, url: str) -> HttpPayload:
         await self._validate_url(url)
         owns_client = self._client is None
         client = self._client or httpx.AsyncClient(follow_redirects=False)
         try:
-            async with client.stream(
-                "GET", url, headers=self._headers, timeout=self._timeout
-            ) as response:
-                response.raise_for_status()
-                chunks: list[bytes] = []
-                size = 0
-                async for chunk in response.aiter_bytes():
-                    size += len(chunk)
-                    if size > self._max_bytes:
-                        raise ValueError(f"Source payload exceeds {self._max_bytes} bytes")
-                    chunks.append(chunk)
-                return HttpPayload(
-                    body=b"".join(chunks),
-                    content_type=response.headers.get(
-                        "content-type", "application/octet-stream"
-                    ).split(";", maxsplit=1)[0],
-                    final_url=str(response.url),
-                )
+            for attempt in range(self._retry_attempts):
+                retry_delay: float | None = None
+                async with client.stream(
+                    "GET", url, headers=self._headers, timeout=self._timeout
+                ) as response:
+                    if (
+                        response.status_code == 429 or response.status_code >= 500
+                    ) and attempt + 1 < self._retry_attempts:
+                        retry_delay = _retry_delay(response, attempt)
+                    else:
+                        response.raise_for_status()
+                        chunks: list[bytes] = []
+                        size = 0
+                        async for chunk in response.aiter_bytes():
+                            size += len(chunk)
+                            if size > self._max_bytes:
+                                raise ValueError(
+                                    f"Source payload exceeds {self._max_bytes} bytes"
+                                )
+                            chunks.append(chunk)
+                        return HttpPayload(
+                            body=b"".join(chunks),
+                            content_type=response.headers.get(
+                                "content-type", "application/octet-stream"
+                            ).split(";", maxsplit=1)[0],
+                            final_url=str(response.url),
+                        )
+                if retry_delay is not None:
+                    await asyncio.sleep(retry_delay)
+            raise RuntimeError("HTTP retry loop ended without a response")
         finally:
             if owns_client:
                 await client.aclose()
@@ -87,3 +102,13 @@ async def _resolve_host(host: str, port: int) -> set[str]:
 def _is_public(address: str) -> bool:
     ip = ipaddress.ip_address(address)
     return ip.is_global
+
+
+def _retry_delay(response: httpx.Response, attempt: int) -> float:
+    retry_after = response.headers.get("retry-after")
+    if retry_after is not None:
+        try:
+            return min(30.0, max(0.0, float(retry_after)))
+        except ValueError:
+            pass
+    return min(30.0, float(5 * 2**attempt))

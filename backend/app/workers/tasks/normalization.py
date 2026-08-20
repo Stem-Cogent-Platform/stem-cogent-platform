@@ -15,6 +15,7 @@ from app.intelligence.entities import EntityRecord, ResolutionResult, resolve_en
 from app.intelligence.normalization import NormalizedDocument, normalize_payload
 from app.workers.celery_app import celery_app
 from app.workers.events import CeleryEventPublisher
+from app.workers.runtime import run_async_worker
 
 
 async def run_normalization(event: dict[str, Any]) -> list[str]:
@@ -31,7 +32,7 @@ async def run_normalization(event: dict[str, Any]) -> list[str]:
         registry = await _load_registry(session)
         await session.execute(
             text("SELECT pg_advisory_xact_lock(hashtextextended(CAST(:id AS TEXT), 0))"),
-            {"id": raw_signal_id},
+            {"id": str(raw_signal_id)},
         )
         results: list[tuple[UUID, ResolutionResult]] = []
         for document in documents:
@@ -279,4 +280,4 @@ def _split_s3_uri(uri: str) -> tuple[str, str]:
     max_retries=3,
 )
 def normalize_raw_signal(event: dict[str, Any]) -> list[str]:
-    return asyncio.run(run_normalization(event))
+    return run_async_worker(lambda: run_normalization(event))

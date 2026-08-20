@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import urlsplit
@@ -27,6 +26,7 @@ from app.ingestion.rss_collector import RSSCollector
 from app.ingestion.upload_collector import UploadCollector
 from app.workers.celery_app import celery_app
 from app.workers.events import CeleryEventPublisher
+from app.workers.runtime import run_async_worker
 
 
 _HTTP_COLLECTORS = {
@@ -163,4 +163,4 @@ async def run_collection(event: dict[str, Any]) -> str:
     max_retries=3,
 )
 def collect_source(event: dict[str, Any]) -> str:
-    return asyncio.run(run_collection(event))
+    return run_async_worker(lambda: run_collection(event))

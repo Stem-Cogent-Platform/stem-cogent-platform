@@ -2,7 +2,9 @@ from datetime import UTC, datetime
 from io import BytesIO
 from pathlib import Path
 from uuid import UUID
+from unittest.mock import AsyncMock
 
+import httpx
 import pytest
 
 from app.ingestion.api_collector import APICollector
@@ -13,7 +15,7 @@ from app.ingestion.base_collector import (
     S3EvidenceStore,
 )
 from app.ingestion.html_collector import HTMLCollector
-from app.ingestion.http import HttpPayload, UnsafeSourceUrl, _is_public
+from app.ingestion.http import ApprovedHttpFetcher, HttpPayload, UnsafeSourceUrl, _is_public
 from app.ingestion.pdf_collector import PDFCollector
 from app.ingestion.rss_collector import RSSCollector
 from app.ingestion.upload_collector import UploadCollector
@@ -158,8 +160,31 @@ def test_network_policy_rejects_non_public_destinations() -> None:
 
 @pytest.mark.asyncio
 async def test_unapproved_http_host_is_rejected_before_fetch() -> None:
-    from app.ingestion.http import ApprovedHttpFetcher
-
     fetcher = ApprovedHttpFetcher({"cbn.gov.ng"})
     with pytest.raises(UnsafeSourceUrl, match="not approved"):
         await fetcher.fetch("https://169.254.169.254/latest/meta-data")
+
+
+@pytest.mark.asyncio
+async def test_http_fetcher_retries_transient_rate_limit(monkeypatch) -> None:
+    attempts = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            return httpx.Response(429, headers={"Retry-After": "0"}, request=request)
+        return httpx.Response(
+            200,
+            content=b'{"articles": []}',
+            headers={"Content-Type": "application/json"},
+            request=request,
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        fetcher = ApprovedHttpFetcher({"api.gdeltproject.org"}, client=client)
+        monkeypatch.setattr(fetcher, "_validate_url", AsyncMock())
+        payload = await fetcher.fetch("https://api.gdeltproject.org/api/v2/doc/doc")
+
+    assert attempts == 2
+    assert payload.body == b'{"articles": []}'

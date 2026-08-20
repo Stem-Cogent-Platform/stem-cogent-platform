@@ -18,6 +18,7 @@ from app.intelligence.validation import (
 )
 from app.workers.celery_app import celery_app
 from app.workers.events import CeleryEventPublisher
+from app.workers.runtime import run_async_worker
 
 
 async def run_validation(event: dict[str, Any]) -> str:
@@ -141,4 +142,4 @@ def _split_s3_uri(uri: str) -> tuple[str, str]:
     max_retries=3,
 )
 def validate_raw_signal(event: dict[str, Any]) -> str:
-    return asyncio.run(run_validation(event))
+    return run_async_worker(lambda: run_validation(event))

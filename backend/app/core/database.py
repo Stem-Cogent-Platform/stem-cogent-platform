@@ -89,7 +89,8 @@ async def check_database_connection() -> str:
 async def close_database_connection() -> None:
     global _engine, _session_factory
 
-    if _engine is not None:
-        await _engine.dispose()
+    engine = _engine
     _engine = None
     _session_factory = None
+    if engine is not None:
+        await engine.dispose()

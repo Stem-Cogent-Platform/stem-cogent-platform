@@ -1,4 +1,3 @@
-import asyncio
 from datetime import UTC, datetime
 
 from app.core.config import get_settings
@@ -11,6 +10,7 @@ from app.workers.scheduler import (
     RedisScheduleLock,
     SourceScheduler,
 )
+from app.workers.runtime import run_async_worker
 
 
 async def run_scheduler_tick(now: datetime | None = None) -> list[str]:
@@ -41,4 +41,4 @@ async def run_scheduler_tick(now: datetime | None = None) -> list[str]:
     max_retries=5,
 )
 def schedule_due_sources() -> list[str]:
-    return asyncio.run(run_scheduler_tick())
+    return run_async_worker(run_scheduler_tick)
