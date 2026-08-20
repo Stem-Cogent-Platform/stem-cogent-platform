@@ -25,6 +25,13 @@ QUEUE_SETTINGS = {
     "graph-updates": "SQS_GRAPH_UPDATES_URL",
 }
 
+TASK_MODULES = (
+    "app.workers.tasks.collection",
+    "app.workers.tasks.validation",
+    "app.workers.tasks.normalization",
+    "app.workers.tasks.scheduler",
+)
+
 
 def configured_queues(settings: Settings) -> dict[str, str]:
     """Return physical queue names mapped to their pre-provisioned URLs."""
@@ -55,7 +62,7 @@ def create_celery_app(settings: Settings | None = None) -> Celery:
     settings = settings or get_settings()
     queues = configured_queues(settings)
     default_queue = next(iter(queues), None)
-    app = Celery("stem_cogent", broker="sqs://")
+    app = Celery("stem_cogent", broker="sqs://", include=TASK_MODULES)
     app.conf.update(
         accept_content=["json"],
         broker_connection_retry_on_startup=True,
@@ -84,7 +91,6 @@ def create_celery_app(settings: Settings | None = None) -> Celery:
         worker_cancel_long_running_tasks_on_connection_loss=True,
         worker_prefetch_multiplier=1,
     )
-    app.autodiscover_tasks(["app.workers.tasks"])
     return app
 
 

@@ -5,7 +5,13 @@ import pytest
 pytest.importorskip("celery")
 
 from app.core.config import Settings
-from app.workers.celery_app import QUEUE_SETTINGS, configured_queues, create_celery_app
+from app.workers.celery_app import (
+    QUEUE_SETTINGS,
+    TASK_MODULES,
+    celery_app,
+    configured_queues,
+    create_celery_app,
+)
 
 
 def _settings_with_queues() -> Settings:
@@ -42,6 +48,18 @@ def test_worker_transport_is_json_only_and_failure_safe() -> None:
     assert app.conf.worker_prefetch_multiplier == 1
     assert app.conf.task_create_missing_queues is False
     assert app.conf.broker_transport_options["visibility_timeout"] == 600
+
+
+def test_worker_imports_every_implemented_phase_two_task() -> None:
+    celery_app.loader.import_default_modules()
+
+    assert set(TASK_MODULES) == set(celery_app.conf.include)
+    assert {
+        "app.workers.tasks.collection.collect_source",
+        "app.workers.tasks.validation.validate_raw_signal",
+        "app.workers.tasks.normalization.normalize_raw_signal",
+        "app.workers.tasks.scheduler.schedule_due_sources",
+    }.issubset(celery_app.tasks)
 
 
 def test_deployed_worker_refuses_incomplete_queue_contract() -> None:
