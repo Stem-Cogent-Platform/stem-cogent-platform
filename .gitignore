@@ -8,9 +8,10 @@ frontend/node_modules/
 frontend/.next/
 frontend/coverage/
 frontend/*.tsbuildinfo
-
 # Terraform working data and sensitive plan/state files
 **/.terraform/*
+# Reusable modules inherit provider selections from their calling root.
+infrastructure/terraform/modules/**/.terraform.lock.hcl
 *.tfstate
 *.tfstate.*
 *.tfplan

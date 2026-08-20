@@ -10,6 +10,16 @@ provider "aws" {
   }
 }
 
+provider "aws" {
+  alias  = "dns"
+  region = var.aws_region
+
+  assume_role {
+    role_arn     = "arn:aws:iam::437040615141:role/stem-cogent/sc-shared-dns-record-manager"
+    session_name = "stem-cogent-production-dns"
+  }
+}
+
 data "aws_caller_identity" "current" {
   lifecycle {
     postcondition {

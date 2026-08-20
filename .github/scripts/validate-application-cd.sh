@@ -9,6 +9,7 @@ required_files=(
   infrastructure/docker/backend.Dockerfile
   infrastructure/docker/worker.Dockerfile
   infrastructure/docker/frontend.Dockerfile
+  .github/scripts/run-one-shot-ecs-task.sh
 )
 
 for file in "${required_files[@]}"; do
@@ -29,5 +30,30 @@ if [ -n "$static_identity_matches" ]; then
   echo "$static_identity_matches" >&2
   exit 1
 fi
+
+if grep -En '(^|[/:])latest([[:space:]"]|$)' "$workflow_file"; then
+  echo "Application CD must publish only immutable Git commit SHA tags; moving latest tags are forbidden." >&2
+  exit 1
+fi
+
+grep -F 'IMAGE_TAG: ${{ github.sha }}' "$workflow_file" >/dev/null || {
+  echo "Application CD must derive its image tag from github.sha." >&2
+  exit 1
+}
+
+grep -F 'docker run --rm --entrypoint alembic "$image" heads' "$workflow_file" >/dev/null || {
+  echo "Application CD must prove the API image can execute the migration entrypoint." >&2
+  exit 1
+}
+
+grep -F 'Verify worker runtime and task registry are packaged' "$workflow_file" >/dev/null || {
+  echo "Application CD must prove the worker image can register its Phase 2 tasks." >&2
+  exit 1
+}
+
+grep -F 'deployed-task-definitions.tsv' "$workflow_file" >/dev/null || {
+  echo "Application CD must verify services stabilize on the deployed task revisions." >&2
+  exit 1
+}
 
 echo "Application CD deployment definition is valid."
