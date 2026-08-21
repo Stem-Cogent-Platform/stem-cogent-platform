@@ -180,9 +180,10 @@ variable "phase_one_log_group_names" {
       contains(keys(var.phase_one_log_group_names), "infrastructure") &&
       contains(keys(var.phase_one_log_group_names), "ingestion") &&
       contains(keys(var.phase_one_log_group_names), "processing") &&
+      contains(keys(var.phase_one_log_group_names), "synthesis") &&
       alltrue([for name in values(var.phase_one_log_group_names) : startswith(name, "/")])
     )
-    error_message = "phase_one_log_group_names must contain absolute API, infrastructure, ingestion, and processing log group names."
+    error_message = "phase_one_log_group_names must contain absolute API, infrastructure, ingestion, processing, and synthesis log group names."
   }
 }
 

@@ -86,6 +86,7 @@ locals {
       Sid    = "DescribeApplicationRepositories"
       Effect = "Allow"
       Action = [
+        "ecr:DescribeImages",
         "ecr:DescribeRepositories",
       ]
       Resource = sort(values(var.ecr_repository_arns))

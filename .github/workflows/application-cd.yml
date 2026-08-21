@@ -529,15 +529,19 @@ jobs:
               exit 1
             }
 
+            # Use the latest family revision as the deployment baseline. This
+            # preserves task-definition corrections registered by Terraform
+            # even when ECS service task_definition changes are intentionally
+            # owned by Application CD.
             aws ecs describe-task-definition \
-              --task-definition "$current_task_definition" \
+              --task-definition "$service" \
               --query taskDefinition \
-              --output json > task-definition-current.json
+              --output json > task-definition-baseline.json
             matching_containers="$(jq --arg container "$container" \
               '[.containerDefinitions[] | select(.name == $container)] | length' \
-              task-definition-current.json)"
+              task-definition-baseline.json)"
             test "$matching_containers" = "1" || {
-              echo "Expected exactly one container named $container in $current_task_definition." >&2
+              echo "Expected exactly one container named $container in the latest $service task definition." >&2
               exit 1
             }
 
@@ -553,7 +557,7 @@ jobs:
                 .deregisteredAt
               )
               | (.containerDefinitions[] | select(.name == $container).image) = $image
-            ' task-definition-current.json > task-definition-next.json
+            ' task-definition-baseline.json > task-definition-next.json
             next_task_definition="$(aws ecs register-task-definition \
               --cli-input-json file://task-definition-next.json \
               --query taskDefinition.taskDefinitionArn \

@@ -79,7 +79,7 @@ locals {
     synthesis = {
       service_name = "${var.resource_prefix}-synthesis-worker-${var.environment}"
       role_key     = "synthesis-worker"
-      log_group    = "processing"
+      log_group    = "synthesis"
       command = [
         "celery", "-A", "app.workers.celery_app", "worker", "--loglevel=INFO",
         "--concurrency=4",
