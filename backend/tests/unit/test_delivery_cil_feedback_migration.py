@@ -82,7 +82,9 @@ def test_signal_feedback_is_quality_specific_and_not_decision_action_duplication
     None
 ):
     sql = _offline_sql()
-    feedback_sql = sql.split("CREATE TABLE feedback.signal_feedback", 1)[1]
+    feedback_sql = sql.split("CREATE TABLE feedback.signal_feedback", 1)[1].split(
+        "CREATE INDEX ix_signal_feedback_signal_created", 1
+    )[0]
 
     assert "quality_dimension VARCHAR(50)" in feedback_sql
     assert "signal_feedback_idempotency_key" in feedback_sql

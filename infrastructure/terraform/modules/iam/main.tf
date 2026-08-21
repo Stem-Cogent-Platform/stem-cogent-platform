@@ -123,15 +123,15 @@ locals {
     }
     enrichment-worker = {
       consume = ["pipeline-classified"]
-      publish = ["pipeline-enriched", "entity-review", "graph-updates"]
+      publish = ["pipeline-scored"]
     }
     clustering-worker = {
-      consume = ["pipeline-enriched"]
+      consume = ["pipeline-scored"]
       publish = ["pipeline-clustered"]
     }
     synthesis-worker = {
-      consume = ["pipeline-clustered"]
-      publish = ["pipeline-synthesized"]
+      consume = ["pipeline-clustered", "pipeline-synthesized"]
+      publish = ["pipeline-synthesized", "pipeline-recommended"]
     }
     alert-worker = {
       consume = ["pipeline-synthesized"]
@@ -174,7 +174,7 @@ locals {
     normalization-worker    = ["database_credentials", "redis_auth_token", "openai_api_key", "groq_api_key"]
     classification-worker   = ["database_credentials", "redis_auth_token"]
     enrichment-worker       = ["database_credentials", "redis_auth_token", "openai_api_key"]
-    clustering-worker       = ["database_credentials", "redis_auth_token"]
+    clustering-worker       = ["database_credentials", "redis_auth_token", "openai_api_key"]
     synthesis-worker        = ["database_credentials", "redis_auth_token", "openai_api_key", "groq_api_key"]
     alert-worker            = ["database_credentials", "redis_auth_token"]
     delivery-worker         = ["database_credentials", "redis_auth_token", "resend_api_key"]

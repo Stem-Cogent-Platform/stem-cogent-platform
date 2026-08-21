@@ -28,24 +28,33 @@ variables {
     infrastructure = "/sc/infrastructure/staging"
     ingestion      = "/sc/pipeline/ingestion/staging"
     processing     = "/sc/pipeline/processing/staging"
+    synthesis      = "/sc/pipeline/synthesis/staging"
   }
 
   task_role_arns = {
-    api-service          = "arn:aws:iam::123456789012:role/stem-cogent/sc-api-service-staging-task"
-    frontend-service     = "arn:aws:iam::123456789012:role/stem-cogent/sc-frontend-service-staging-task"
-    scheduler-worker     = "arn:aws:iam::123456789012:role/stem-cogent/sc-scheduler-worker-staging-task"
-    collector-worker     = "arn:aws:iam::123456789012:role/stem-cogent/sc-collector-worker-staging-task"
-    validation-worker    = "arn:aws:iam::123456789012:role/stem-cogent/sc-validation-worker-staging-task"
-    normalization-worker = "arn:aws:iam::123456789012:role/stem-cogent/sc-normalization-worker-staging-task"
+    api-service           = "arn:aws:iam::123456789012:role/stem-cogent/sc-api-service-staging-task"
+    frontend-service      = "arn:aws:iam::123456789012:role/stem-cogent/sc-frontend-service-staging-task"
+    scheduler-worker      = "arn:aws:iam::123456789012:role/stem-cogent/sc-scheduler-worker-staging-task"
+    collector-worker      = "arn:aws:iam::123456789012:role/stem-cogent/sc-collector-worker-staging-task"
+    validation-worker     = "arn:aws:iam::123456789012:role/stem-cogent/sc-validation-worker-staging-task"
+    normalization-worker  = "arn:aws:iam::123456789012:role/stem-cogent/sc-normalization-worker-staging-task"
+    classification-worker = "arn:aws:iam::123456789012:role/stem-cogent/sc-classification-worker-staging-task"
+    enrichment-worker     = "arn:aws:iam::123456789012:role/stem-cogent/sc-enrichment-worker-staging-task"
+    clustering-worker     = "arn:aws:iam::123456789012:role/stem-cogent/sc-clustering-worker-staging-task"
+    synthesis-worker      = "arn:aws:iam::123456789012:role/stem-cogent/sc-synthesis-worker-staging-task"
   }
 
   execution_role_arns = {
-    api-service          = "arn:aws:iam::123456789012:role/stem-cogent/sc-api-service-staging-execution"
-    frontend-service     = "arn:aws:iam::123456789012:role/stem-cogent/sc-frontend-service-staging-execution"
-    scheduler-worker     = "arn:aws:iam::123456789012:role/stem-cogent/sc-scheduler-worker-staging-execution"
-    collector-worker     = "arn:aws:iam::123456789012:role/stem-cogent/sc-collector-worker-staging-execution"
-    validation-worker    = "arn:aws:iam::123456789012:role/stem-cogent/sc-validation-worker-staging-execution"
-    normalization-worker = "arn:aws:iam::123456789012:role/stem-cogent/sc-normalization-worker-staging-execution"
+    api-service           = "arn:aws:iam::123456789012:role/stem-cogent/sc-api-service-staging-execution"
+    frontend-service      = "arn:aws:iam::123456789012:role/stem-cogent/sc-frontend-service-staging-execution"
+    scheduler-worker      = "arn:aws:iam::123456789012:role/stem-cogent/sc-scheduler-worker-staging-execution"
+    collector-worker      = "arn:aws:iam::123456789012:role/stem-cogent/sc-collector-worker-staging-execution"
+    validation-worker     = "arn:aws:iam::123456789012:role/stem-cogent/sc-validation-worker-staging-execution"
+    normalization-worker  = "arn:aws:iam::123456789012:role/stem-cogent/sc-normalization-worker-staging-execution"
+    classification-worker = "arn:aws:iam::123456789012:role/stem-cogent/sc-classification-worker-staging-execution"
+    enrichment-worker     = "arn:aws:iam::123456789012:role/stem-cogent/sc-enrichment-worker-staging-execution"
+    clustering-worker     = "arn:aws:iam::123456789012:role/stem-cogent/sc-clustering-worker-staging-execution"
+    synthesis-worker      = "arn:aws:iam::123456789012:role/stem-cogent/sc-synthesis-worker-staging-execution"
   }
 
   api_environment_variables = {
@@ -58,6 +67,11 @@ variables {
     SQS_INGESTION_STANDARD_URL   = "https://sqs.eu-west-1.amazonaws.com/123456789012/sc-ingestion-standard-queue-staging"
     SQS_PIPELINE_RAW_SIGNALS_URL = "https://sqs.eu-west-1.amazonaws.com/123456789012/sc-pipeline-raw-signals-queue-staging"
     SQS_PIPELINE_VALIDATED_URL   = "https://sqs.eu-west-1.amazonaws.com/123456789012/sc-pipeline-validated-queue-staging"
+    SQS_PIPELINE_NORMALIZED_URL  = "https://sqs.eu-west-1.amazonaws.com/123456789012/sc-pipeline-normalized-queue-staging"
+    SQS_PIPELINE_CLASSIFIED_URL  = "https://sqs.eu-west-1.amazonaws.com/123456789012/sc-pipeline-classified-queue-staging"
+    SQS_PIPELINE_SCORED_URL      = "https://sqs.eu-west-1.amazonaws.com/123456789012/sc-pipeline-scored-queue-staging"
+    SQS_PIPELINE_CLUSTERED_URL   = "https://sqs.eu-west-1.amazonaws.com/123456789012/sc-pipeline-clustered-queue-staging"
+    SQS_PIPELINE_SYNTHESIZED_URL = "https://sqs.eu-west-1.amazonaws.com/123456789012/sc-pipeline-synthesized-queue-staging"
   }
 }
 
@@ -99,6 +113,10 @@ run "creates_phase_one_and_core_phase_two_services" {
       aws_ecs_service.phase_two_worker["collector"].name,
       aws_ecs_service.phase_two_worker["validation"].name,
       aws_ecs_service.phase_two_worker["normalization"].name,
+      aws_ecs_service.phase_two_worker["classification"].name,
+      aws_ecs_service.phase_two_worker["enrichment"].name,
+      aws_ecs_service.phase_two_worker["clustering"].name,
+      aws_ecs_service.phase_two_worker["synthesis"].name,
       ]) == toset([
       "sc-api-service-staging",
       "sc-frontend-staging",
@@ -106,6 +124,10 @@ run "creates_phase_one_and_core_phase_two_services" {
       "sc-collector-worker-staging",
       "sc-validation-worker-staging",
       "sc-normalization-worker-staging",
+      "sc-classification-worker-staging",
+      "sc-enrichment-worker-staging",
+      "sc-clustering-worker-staging",
+      "sc-synthesis-worker-staging",
     ])
     error_message = "ECS must create Phase 1 plus the four consolidated core ingestion services."
   }
@@ -207,6 +229,16 @@ run "uses_immutable_images_and_hardened_task_definitions" {
     error_message = "Phase 2 worker tasks must use immutable images, read-only roots, writable temp space, and exact service identity."
   }
 
+  assert {
+    condition = alltrue([
+      jsondecode(aws_ecs_task_definition.phase_two_worker["classification"].container_definitions)[0].logConfiguration.options["awslogs-group"] == "/sc/pipeline/processing/staging",
+      jsondecode(aws_ecs_task_definition.phase_two_worker["enrichment"].container_definitions)[0].logConfiguration.options["awslogs-group"] == "/sc/pipeline/processing/staging",
+      jsondecode(aws_ecs_task_definition.phase_two_worker["clustering"].container_definitions)[0].logConfiguration.options["awslogs-group"] == "/sc/pipeline/processing/staging",
+      jsondecode(aws_ecs_task_definition.phase_two_worker["synthesis"].container_definitions)[0].logConfiguration.options["awslogs-group"] == "/sc/pipeline/synthesis/staging",
+    ])
+    error_message = "Phase 3 workers must write to the log groups allowed by their execution roles."
+  }
+
 }
 
 run "exports_application_cd_contract" {
@@ -244,7 +276,27 @@ run "exports_application_cd_contract" {
         container = "normalization-worker"
         image     = "worker"
       },
+      {
+        service   = "sc-classification-worker-staging"
+        container = "classification-worker"
+        image     = "worker"
+      },
+      {
+        service   = "sc-enrichment-worker-staging"
+        container = "enrichment-worker"
+        image     = "worker"
+      },
+      {
+        service   = "sc-clustering-worker-staging"
+        container = "clustering-worker"
+        image     = "worker"
+      },
+      {
+        service   = "sc-synthesis-worker-staging"
+        container = "synthesis-worker"
+        image     = "worker"
+      },
     ]
-    error_message = "ECS_SERVICE_DEPLOYMENTS must describe all Phase 1 and core Phase 2 containers."
+    error_message = "ECS_SERVICE_DEPLOYMENTS must describe all Phase 1 through Phase 3 containers."
   }
 }

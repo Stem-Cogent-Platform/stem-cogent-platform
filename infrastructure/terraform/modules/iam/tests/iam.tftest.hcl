@@ -157,8 +157,16 @@ run "maps_pipeline_permissions_to_real_transitions" {
   }
 
   assert {
-    condition     = strcontains(aws_iam_role_policy.task["enrichment-worker"].policy, "sc-graph-updates-staging")
-    error_message = "Enrichment must be able to publish asynchronous entity graph updates."
+    condition = alltrue([
+      strcontains(aws_iam_role_policy.task["enrichment-worker"].policy, "sc-pipeline-classified-staging"),
+      strcontains(aws_iam_role_policy.task["enrichment-worker"].policy, "sc-pipeline-scored-staging"),
+      strcontains(aws_iam_role_policy.task["clustering-worker"].policy, "sc-pipeline-scored-staging"),
+      strcontains(aws_iam_role_policy.task["clustering-worker"].policy, "sc-pipeline-clustered-staging"),
+      strcontains(aws_iam_role_policy.task["synthesis-worker"].policy, "sc-pipeline-clustered-staging"),
+      strcontains(aws_iam_role_policy.task["synthesis-worker"].policy, "sc-pipeline-synthesized-staging"),
+      strcontains(aws_iam_role_policy.task["synthesis-worker"].policy, "sc-pipeline-recommended-staging"),
+    ])
+    error_message = "Phase 3 workers must have only the queues required by scoring, embedding, synthesis, and decision processing."
   }
 
   assert {
@@ -261,6 +269,11 @@ run "enforces_application_cd_least_privilege_boundaries" {
   }
 
   assert {
+    condition     = strcontains(aws_iam_role_policy.application_build.policy, "ecr:DescribeImages")
+    error_message = "The build role must be able to detect and reuse immutable images."
+  }
+
+  assert {
     condition     = !strcontains(aws_iam_role_policy.application_build.policy, "ecs:")
     error_message = "The build role must not be able to update ECS."
   }
@@ -285,6 +298,16 @@ run "enforces_application_cd_least_privilege_boundaries" {
       contains(local.application_cd_pass_role_keys, service)
     ])
     error_message = "The deploy role must be able to register worker revisions with only the matching worker roles."
+  }
+
+  assert {
+    condition = alltrue([
+      for service in ["classification-worker", "enrichment-worker", "clustering-worker", "synthesis-worker"] :
+      contains(local.application_cd_service_names, "sc-${service}-staging") &&
+      contains(local.application_cd_task_definition_families, "sc-${service}-staging") &&
+      contains(local.application_cd_pass_role_keys, service)
+    ])
+    error_message = "The deploy role must be able to roll out every Phase 3 worker with only its matching worker roles."
   }
 
   assert {

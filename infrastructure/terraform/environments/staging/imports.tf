@@ -308,6 +308,45 @@ import {
   id = "/sc/infrastructure/staging"
 }
 
+# Adopt pipeline observability and integration-secret resources that were
+# created by an earlier interrupted apply but never persisted in remote state.
+# These imports prevent duplicate-create failures while preserving the live
+# resources and bringing them under Terraform management.
+import {
+  to = module.observability.aws_cloudwatch_log_group.this["ingestion"]
+  id = "/sc/pipeline/ingestion/staging"
+}
+
+import {
+  to = module.observability.aws_cloudwatch_log_group.this["processing"]
+  id = "/sc/pipeline/processing/staging"
+}
+
+import {
+  to = module.observability.aws_cloudwatch_log_group.this["synthesis"]
+  id = "/sc/pipeline/synthesis/staging"
+}
+
+import {
+  to = module.observability.aws_cloudwatch_log_group.this["delivery"]
+  id = "/sc/pipeline/delivery/staging"
+}
+
+import {
+  to = module.observability.aws_cloudwatch_log_group.this["dlq"]
+  id = "/sc/pipeline/dlq/staging"
+}
+
+import {
+  to = module.secrets.aws_secretsmanager_secret.this["groq_api_key"]
+  id = "sc/staging/llm/groq/api-key"
+}
+
+import {
+  to = module.secrets.aws_secretsmanager_secret.this["resend_api_key"]
+  id = "sc/staging/email/resend/api-key"
+}
+
 import {
   to = module.ecs.aws_ecs_service.api
   id = "sc-cluster-staging/sc-api-service-staging"
@@ -316,6 +355,87 @@ import {
 import {
   to = module.ecs.aws_ecs_service.frontend
   id = "sc-cluster-staging/sc-frontend-staging"
+}
+
+# Application CD advances immutable images independently of Terraform. Adopt
+# the latest additive task-definition revisions so infrastructure plans do not
+# deregister previously deployed revisions merely to synchronize the baseline.
+import {
+  to = module.ecs.aws_ecs_task_definition.api
+  id = "arn:aws:ecs:eu-west-1:437040615141:task-definition/sc-api-service-staging:33"
+}
+
+import {
+  to = module.ecs.aws_ecs_task_definition.frontend
+  id = "arn:aws:ecs:eu-west-1:437040615141:task-definition/sc-frontend-staging:32"
+}
+
+import {
+  to = module.ecs.aws_ecs_task_definition.migration
+  id = "arn:aws:ecs:eu-west-1:437040615141:task-definition/sc-migration-task-staging:49"
+}
+
+import {
+  to = module.ecs.aws_ecs_task_definition.phase_two_worker["scheduler"]
+  id = "arn:aws:ecs:eu-west-1:437040615141:task-definition/sc-scheduler-worker-staging:17"
+}
+
+import {
+  to = module.ecs.aws_ecs_task_definition.phase_two_worker["collector"]
+  id = "arn:aws:ecs:eu-west-1:437040615141:task-definition/sc-collector-worker-staging:17"
+}
+
+import {
+  to = module.ecs.aws_ecs_task_definition.phase_two_worker["validation"]
+  id = "arn:aws:ecs:eu-west-1:437040615141:task-definition/sc-validation-worker-staging:17"
+}
+
+import {
+  to = module.ecs.aws_ecs_task_definition.phase_two_worker["normalization"]
+  id = "arn:aws:ecs:eu-west-1:437040615141:task-definition/sc-normalization-worker-staging:17"
+}
+
+# Adopt worker services that reached ECS during interrupted applies without a
+# corresponding remote-state write. The Phase 3 classification, enrichment,
+# and clustering services completed normally and are already in state.
+import {
+  to = module.ecs.aws_ecs_service.phase_two_worker["scheduler"]
+  id = "sc-cluster-staging/sc-scheduler-worker-staging"
+}
+
+import {
+  to = module.ecs.aws_ecs_service.phase_two_worker["collector"]
+  id = "sc-cluster-staging/sc-collector-worker-staging"
+}
+
+import {
+  to = module.ecs.aws_ecs_service.phase_two_worker["validation"]
+  id = "sc-cluster-staging/sc-validation-worker-staging"
+}
+
+import {
+  to = module.ecs.aws_ecs_service.phase_two_worker["normalization"]
+  id = "sc-cluster-staging/sc-normalization-worker-staging"
+}
+
+import {
+  to = module.ecs.aws_ecs_service.phase_two_worker["synthesis"]
+  id = "sc-cluster-staging/sc-synthesis-worker-staging"
+}
+
+import {
+  to = module.ecs.aws_ecs_service.phase_two_worker["classification"]
+  id = "sc-cluster-staging/sc-classification-worker-staging"
+}
+
+import {
+  to = module.ecs.aws_ecs_service.phase_two_worker["enrichment"]
+  id = "sc-cluster-staging/sc-enrichment-worker-staging"
+}
+
+import {
+  to = module.ecs.aws_ecs_service.phase_two_worker["clustering"]
+  id = "sc-cluster-staging/sc-clustering-worker-staging"
 }
 
 # The initial Phase 2 apply reached AWS during a provider retry but did not

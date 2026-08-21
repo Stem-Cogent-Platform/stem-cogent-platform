@@ -16,6 +16,10 @@ locals {
     "${var.resource_prefix}-collector-worker-${var.environment}",
     "${var.resource_prefix}-validation-worker-${var.environment}",
     "${var.resource_prefix}-normalization-worker-${var.environment}",
+    "${var.resource_prefix}-classification-worker-${var.environment}",
+    "${var.resource_prefix}-enrichment-worker-${var.environment}",
+    "${var.resource_prefix}-clustering-worker-${var.environment}",
+    "${var.resource_prefix}-synthesis-worker-${var.environment}",
   ])
   application_cd_task_definition_families = toset([
     "${var.resource_prefix}-api-service-${var.environment}",
@@ -25,6 +29,10 @@ locals {
     "${var.resource_prefix}-collector-worker-${var.environment}",
     "${var.resource_prefix}-validation-worker-${var.environment}",
     "${var.resource_prefix}-normalization-worker-${var.environment}",
+    "${var.resource_prefix}-classification-worker-${var.environment}",
+    "${var.resource_prefix}-enrichment-worker-${var.environment}",
+    "${var.resource_prefix}-clustering-worker-${var.environment}",
+    "${var.resource_prefix}-synthesis-worker-${var.environment}",
   ])
   application_cd_service_arns = toset([
     for service_name in local.application_cd_service_names :
@@ -41,6 +49,10 @@ locals {
     "collector-worker",
     "validation-worker",
     "normalization-worker",
+    "classification-worker",
+    "enrichment-worker",
+    "clustering-worker",
+    "synthesis-worker",
   ])
   application_cd_pass_role_arns = toset(flatten([
     for role_key in local.application_cd_pass_role_keys : [
@@ -86,6 +98,7 @@ locals {
       Sid    = "DescribeApplicationRepositories"
       Effect = "Allow"
       Action = [
+        "ecr:DescribeImages",
         "ecr:DescribeRepositories",
       ]
       Resource = sort(values(var.ecr_repository_arns))
