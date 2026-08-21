@@ -86,6 +86,22 @@ class FocusAreaPatch(BaseModel):
     active: bool | None = None
 
 
+_COMPANY_OBJECT_PATCH_COLUMNS = {
+    "name": "name",
+    "entity_id": "entity_id",
+    "importance": "importance",
+    "metadata": "metadata",
+    "active": "active",
+}
+_FOCUS_AREA_PATCH_COLUMNS = {
+    "label": "label",
+    "query_text": "query_text",
+    "weight": "weight",
+    "expires_at": "expires_at",
+    "active": "active",
+}
+
+
 @router.get("/context/company")
 async def get_company_context(
     context: RequestContext = Depends(get_request_context),
@@ -214,22 +230,19 @@ async def patch_company_object(
         "tenant_id": context.principal.tenant_id,
     }
     for key, value in changes.items():
+        column = _COMPANY_OBJECT_PATCH_COLUMNS[key]
         if key == "metadata":
-            assignments.append("metadata = CAST(:metadata AS JSONB)")
+            assignments.append(f"{column} = CAST(:metadata AS JSONB)")
             parameters[key] = json.dumps(value)
         else:
-            assignments.append(f"{key} = :{key}")
+            assignments.append(f"{column} = :{key}")
             parameters[key] = value
+    # Column fragments above come exclusively from the server-owned allowlist;
+    # every request value remains a bound parameter.
+    update_sql = f"UPDATE context.company_objects SET {', '.join(assignments)}, updated_at = NOW() WHERE id = :object_id AND tenant_id = :tenant_id RETURNING *"  # nosec B608  # noqa: E501
     row = (
         await context.session.execute(
-            text(
-                f"""
-                UPDATE context.company_objects
-                SET {', '.join(assignments)}, updated_at = NOW()
-                WHERE id = :object_id AND tenant_id = :tenant_id
-                RETURNING *
-                """
-            ),
+            text(update_sql),
             parameters,
         )
     ).mappings().one_or_none()
@@ -378,16 +391,13 @@ async def patch_focus_area(
     changes = body.model_dump(exclude_unset=True)
     if not changes:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "No changes supplied")
-    assignments = [f"{key} = :{key}" for key in changes]
+    assignments = [f"{_FOCUS_AREA_PATCH_COLUMNS[key]} = :{key}" for key in changes]
+    # Column fragments above come exclusively from the server-owned allowlist;
+    # every request value remains a bound parameter.
+    update_sql = f"UPDATE context.focus_areas SET {', '.join(assignments)} WHERE id = :focus_id AND tenant_id = :tenant_id AND user_id = :user_id RETURNING *"  # nosec B608  # noqa: E501
     row = (
         await context.session.execute(
-            text(
-                f"""
-                UPDATE context.focus_areas SET {', '.join(assignments)}
-                WHERE id = :focus_id AND tenant_id = :tenant_id AND user_id = :user_id
-                RETURNING *
-                """
-            ),
+            text(update_sql),
             {
                 **changes,
                 "focus_id": focus_id,
