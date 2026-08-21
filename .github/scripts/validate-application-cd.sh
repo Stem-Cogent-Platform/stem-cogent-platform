@@ -56,4 +56,9 @@ grep -F 'deployed-task-definitions.tsv' "$workflow_file" >/dev/null || {
   exit 1
 }
 
+grep -F -- '--task-definition "$service"' "$workflow_file" >/dev/null || {
+  echo "Application CD must roll forward from the latest infrastructure task-family baseline." >&2
+  exit 1
+}
+
 echo "Application CD deployment definition is valid."

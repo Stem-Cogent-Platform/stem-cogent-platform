@@ -51,6 +51,7 @@ module "ecs" {
     infrastructure = module.observability.log_group_names["infrastructure"]
     ingestion      = module.observability.log_group_names["ingestion"]
     processing     = module.observability.log_group_names["processing"]
+    synthesis      = module.observability.log_group_names["synthesis"]
   }
   api_environment_variables = local.api_environment_variables
 }

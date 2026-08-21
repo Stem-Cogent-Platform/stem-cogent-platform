@@ -269,6 +269,11 @@ run "enforces_application_cd_least_privilege_boundaries" {
   }
 
   assert {
+    condition     = strcontains(aws_iam_role_policy.application_build.policy, "ecr:DescribeImages")
+    error_message = "The build role must be able to detect and reuse immutable images."
+  }
+
+  assert {
     condition     = !strcontains(aws_iam_role_policy.application_build.policy, "ecs:")
     error_message = "The build role must not be able to update ECS."
   }
