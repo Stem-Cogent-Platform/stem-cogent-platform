@@ -5,7 +5,10 @@ from uuid import uuid4
 
 from fastapi import FastAPI, Request, Response
 
+from app.api.v1.cil import router as cil_router
+from app.api.v1.context import router as context_router
 from app.api.v1.health import router as health_router
+from app.api.v1.reviews import router as reviews_router
 from app.core.config import get_settings
 from app.core.database import close_database_connection
 from app.core.logging import (
@@ -98,3 +101,6 @@ async def add_security_headers(request: Request, call_next) -> Response:
 
 
 app.include_router(health_router)
+app.include_router(context_router)
+app.include_router(cil_router)
+app.include_router(reviews_router)

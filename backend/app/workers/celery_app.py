@@ -29,6 +29,11 @@ TASK_MODULES = (
     "app.workers.tasks.collection",
     "app.workers.tasks.validation",
     "app.workers.tasks.normalization",
+    "app.workers.tasks.classification",
+    "app.workers.tasks.scoring",
+    "app.workers.tasks.embedding",
+    "app.workers.tasks.synthesis",
+    "app.workers.tasks.decision",
     "app.workers.tasks.scheduler",
 )
 

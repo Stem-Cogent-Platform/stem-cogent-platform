@@ -130,8 +130,11 @@ def test_offline_sql_creates_config_tables_and_production_constraints() -> None:
 def test_offline_sql_seeds_every_event_and_only_v2_domains() -> None:
     migration = _load_migration()
     sql = _offline_sql()
+    config_seed_sql = sql.split("CREATE TABLE pipeline.collection_jobs", 1)[0]
 
-    assert sql.count("'2026.08-v2'") == 162
+    assert config_seed_sql.count("'2026.08-v2'") == len(migration.TAXONOMY_ROWS) + len(
+        migration.DECISION_RULES
+    )
     for domain in EXPECTED_DOMAINS:
         assert f"'{domain}'" in sql
     for _, event_type, _ in migration.TAXONOMY_ROWS:
