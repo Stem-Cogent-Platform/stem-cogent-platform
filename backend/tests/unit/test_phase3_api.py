@@ -191,6 +191,41 @@ async def test_context_api_validation_and_not_found_paths(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
+async def test_context_api_cache_hits_and_focus_not_found_branches(monkeypatch) -> None:
+    row_id = uuid4()
+    cached_context = make_context(FakeSession())
+    monkeypatch.setattr(
+        context,
+        "cache_get",
+        AsyncMock(side_effect=[{"profile": "cached"}, {"role": "CEO"}, [{"label": "Risk"}]]),
+    )
+    assert (await context.get_company_context(cached_context))["profile"] == "cached"
+    assert (await context.get_decision_lens(cached_context))["role"] == "CEO"
+    assert (await context.get_focus_areas(cached_context))[0]["label"] == "Risk"
+
+    allowed = make_context(
+        FakeSession(
+            FakeResult(one_or_none=None),
+            FakeResult(one_or_none=None),
+            FakeResult(scalar_one_or_none=None),
+        ),
+        "CONFIGURE_FOCUS_AREAS",
+    )
+    monkeypatch.setattr(context, "invalidate_user", AsyncMock())
+    with pytest.raises(HTTPException) as empty_patch:
+        await context.patch_focus_area(row_id, context.FocusAreaPatch(), allowed)
+    assert empty_patch.value.status_code == 422
+    with pytest.raises(HTTPException) as missing_patch:
+        await context.patch_focus_area(
+            row_id, context.FocusAreaPatch(active=False), allowed
+        )
+    assert missing_patch.value.status_code == 404
+    with pytest.raises(HTTPException) as missing_delete:
+        await context.delete_focus_area(row_id, allowed)
+    assert missing_delete.value.status_code == 404
+
+
+@pytest.mark.asyncio
 async def test_review_api_create_list_resolve_and_not_found() -> None:
     case_id = uuid4()
     row = {"id": case_id, "status": "OPEN"}
