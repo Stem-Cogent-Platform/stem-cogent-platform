@@ -157,8 +157,16 @@ run "maps_pipeline_permissions_to_real_transitions" {
   }
 
   assert {
-    condition     = strcontains(aws_iam_role_policy.task["enrichment-worker"].policy, "sc-graph-updates-staging")
-    error_message = "Enrichment must be able to publish asynchronous entity graph updates."
+    condition = alltrue([
+      strcontains(aws_iam_role_policy.task["enrichment-worker"].policy, "sc-pipeline-classified-staging"),
+      strcontains(aws_iam_role_policy.task["enrichment-worker"].policy, "sc-pipeline-scored-staging"),
+      strcontains(aws_iam_role_policy.task["clustering-worker"].policy, "sc-pipeline-scored-staging"),
+      strcontains(aws_iam_role_policy.task["clustering-worker"].policy, "sc-pipeline-clustered-staging"),
+      strcontains(aws_iam_role_policy.task["synthesis-worker"].policy, "sc-pipeline-clustered-staging"),
+      strcontains(aws_iam_role_policy.task["synthesis-worker"].policy, "sc-pipeline-synthesized-staging"),
+      strcontains(aws_iam_role_policy.task["synthesis-worker"].policy, "sc-pipeline-recommended-staging"),
+    ])
+    error_message = "Phase 3 workers must have only the queues required by scoring, embedding, synthesis, and decision processing."
   }
 
   assert {
