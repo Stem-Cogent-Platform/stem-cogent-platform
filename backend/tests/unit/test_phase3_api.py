@@ -16,6 +16,7 @@ from app.api import auth
 from app.api.auth import Principal, RequestContext
 from app.api.v1 import cil, context, reviews
 from app.cil.retrieval import CILCitation, CILRetrievalResult
+from app.context import cache
 
 
 class FakeResult:
@@ -326,3 +327,72 @@ def test_auth_token_verification_and_permissions(monkeypatch) -> None:
         auth._verify_hs256_token("not-a-token")
     with pytest.raises(HTTPException, match="Missing permission"):
         auth.require_permission(make_context(FakeSession()), "USE_CIL")
+
+
+@pytest.mark.asyncio
+async def test_context_cache_success_fallback_and_invalidation(monkeypatch) -> None:
+    monkeypatch.setattr(cache, "get_redis_client", lambda: None)
+    assert await cache.cache_get("missing") is None
+    await cache.cache_set("missing", {"ignored": True})
+    await cache.invalidate_company(uuid4())
+
+    client = SimpleNamespace(
+        get=AsyncMock(return_value=json.dumps({"cached": True})),
+        set=AsyncMock(),
+        delete=AsyncMock(),
+        publish=AsyncMock(),
+    )
+    monkeypatch.setattr(cache, "get_redis_client", lambda: client)
+    assert await cache.cache_get("company") == {"cached": True}
+    await cache.cache_set("company", {"id": uuid4()})
+    tenant_id, user_id = uuid4(), uuid4()
+    await cache.invalidate_user(tenant_id, user_id)
+    client.set.assert_awaited_once()
+    client.delete.assert_awaited_once_with(
+        f"context:lens:{tenant_id}:{user_id}",
+        f"context:focus:{tenant_id}:{user_id}",
+    )
+    client.publish.assert_awaited_once()
+
+    client.get.side_effect = RuntimeError("redis unavailable")
+    client.set.side_effect = RuntimeError("redis unavailable")
+    client.delete.side_effect = RuntimeError("redis unavailable")
+    assert await cache.cache_get("company") is None
+    await cache.cache_set("company", {})
+    await cache.invalidate_company(tenant_id)
+
+
+def test_auth_rejects_unavailable_unsupported_and_expired_tokens(monkeypatch) -> None:
+    secret = "production-test-secret"
+
+    def token(header_value: dict, claims_value: dict) -> str:
+        header = _encode(json.dumps(header_value).encode())
+        claims = _encode(json.dumps(claims_value).encode())
+        signature = _encode(
+            hmac.new(
+                secret.encode(), f"{header}.{claims}".encode(), hashlib.sha256
+            ).digest()
+        )
+        return f"{header}.{claims}.{signature}"
+
+    claims = {"sub": str(uuid4()), "tenant_id": str(uuid4()), "exp": time.time() + 60}
+    valid = token({"alg": "HS256", "typ": "JWT"}, claims)
+    monkeypatch.setattr(auth, "get_settings", lambda: SimpleNamespace(JWT_SIGNING_SECRET_ARN=""))
+    with pytest.raises(HTTPException, match="verifier is unavailable"):
+        auth._verify_hs256_token(valid)
+
+    monkeypatch.setattr(
+        auth, "get_settings", lambda: SimpleNamespace(JWT_SIGNING_SECRET_ARN="arn:test")
+    )
+    monkeypatch.setattr(auth, "get_secret_string", lambda _arn: secret)
+    with pytest.raises(HTTPException, match="Unsupported bearer token"):
+        auth._verify_hs256_token(token({"alg": "none"}, claims))
+    with pytest.raises(HTTPException, match="Expired bearer token"):
+        auth._verify_hs256_token(
+            token(
+                {"alg": "HS256", "typ": "JWT"},
+                {**claims, "exp": time.time() - 1},
+            )
+        )
+    with pytest.raises(HTTPException, match="Malformed bearer token"):
+        auth._verify_hs256_token("e30.not-json.signature")
