@@ -308,6 +308,45 @@ import {
   id = "/sc/infrastructure/staging"
 }
 
+# Adopt pipeline observability and integration-secret resources that were
+# created by an earlier interrupted apply but never persisted in remote state.
+# These imports prevent duplicate-create failures while preserving the live
+# resources and bringing them under Terraform management.
+import {
+  to = module.observability.aws_cloudwatch_log_group.this["ingestion"]
+  id = "/sc/pipeline/ingestion/staging"
+}
+
+import {
+  to = module.observability.aws_cloudwatch_log_group.this["processing"]
+  id = "/sc/pipeline/processing/staging"
+}
+
+import {
+  to = module.observability.aws_cloudwatch_log_group.this["synthesis"]
+  id = "/sc/pipeline/synthesis/staging"
+}
+
+import {
+  to = module.observability.aws_cloudwatch_log_group.this["delivery"]
+  id = "/sc/pipeline/delivery/staging"
+}
+
+import {
+  to = module.observability.aws_cloudwatch_log_group.this["dlq"]
+  id = "/sc/pipeline/dlq/staging"
+}
+
+import {
+  to = module.secrets.aws_secretsmanager_secret.this["groq_api_key"]
+  id = "sc/staging/llm/groq/api-key"
+}
+
+import {
+  to = module.secrets.aws_secretsmanager_secret.this["resend_api_key"]
+  id = "sc/staging/email/resend/api-key"
+}
+
 import {
   to = module.ecs.aws_ecs_service.api
   id = "sc-cluster-staging/sc-api-service-staging"
