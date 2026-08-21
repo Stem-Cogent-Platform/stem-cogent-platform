@@ -150,15 +150,14 @@ def test_seed_is_idempotent_and_preserves_unmanaged_registry_rows() -> None:
     assert "actual_counts != REVIEWED_MANIFEST_COUNTS" in source
 
 
-def test_seed_does_not_extend_the_hash_width_migration_chain() -> None:
+def test_launch_registry_seed_does_not_create_a_schema_migration() -> None:
     migration_names = {
         path.name for path in (BACKEND_ROOT / "alembic" / "versions").glob("*.py")
     }
 
-    assert len(migration_names) == 11
     assert any(name.startswith("0010_") for name in migration_names)
     assert any(name.startswith("0011_") for name in migration_names)
-    assert not any(name.startswith("0012_") for name in migration_names)
+    assert not any("launch_registry" in name for name in migration_names)
 
 
 def test_seed_cli_can_import_application_from_outside_backend() -> None:

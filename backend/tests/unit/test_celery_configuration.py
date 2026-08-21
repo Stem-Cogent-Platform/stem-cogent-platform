@@ -58,6 +58,11 @@ def test_worker_imports_every_implemented_phase_two_task() -> None:
         "app.workers.tasks.collection.collect_source",
         "app.workers.tasks.validation.validate_raw_signal",
         "app.workers.tasks.normalization.normalize_raw_signal",
+        "app.workers.tasks.classification.classify_signal",
+        "app.workers.tasks.scoring.score_signal",
+        "app.workers.tasks.embedding.embed_signal",
+        "app.workers.tasks.synthesis.synthesize_global_output",
+        "app.workers.tasks.decision.create_decision_briefs",
         "app.workers.tasks.scheduler.schedule_due_sources",
     }.issubset(celery_app.tasks)
 

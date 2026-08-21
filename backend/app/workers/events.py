@@ -11,6 +11,12 @@ EVENT_TASKS = {
     "RAW_SIGNAL_VALIDATED": "app.workers.tasks.normalization.normalize_raw_signal",
     "RAW_SIGNAL_SUSPICIOUS": "app.workers.tasks.review.review_suspicious_signal",
     "SIGNAL_NORMALIZED": "app.workers.tasks.classification.classify_signal",
+    "SIGNAL_CLASSIFIED": "app.workers.tasks.scoring.score_signal",
+    "SIGNAL_SCORED": "app.workers.tasks.embedding.embed_signal",
+    "SIGNAL_CONTEXT_READY": "app.workers.tasks.synthesis.synthesize_global_output",
+    "INTELLIGENCE_SYNTHESIZED": "app.workers.tasks.decision.create_decision_briefs",
+    "DECISION_BRIEF_READY": "app.workers.tasks.delivery.handle_decision_brief_ready",
+    "CLASSIFICATION_REVIEW_REQUIRED": "app.workers.tasks.review.review_classification",
     "ENTITY_RESOLUTION_REQUIRED": "app.workers.tasks.review.review_entity_resolution",
 }
 
