@@ -138,9 +138,13 @@ variable "task_role_arns" {
       contains(keys(var.task_role_arns), "collector-worker") &&
       contains(keys(var.task_role_arns), "validation-worker") &&
       contains(keys(var.task_role_arns), "normalization-worker") &&
+      contains(keys(var.task_role_arns), "classification-worker") &&
+      contains(keys(var.task_role_arns), "enrichment-worker") &&
+      contains(keys(var.task_role_arns), "clustering-worker") &&
+      contains(keys(var.task_role_arns), "synthesis-worker") &&
       alltrue([for arn in values(var.task_role_arns) : can(regex("^arn:[^:]+:iam::[0-9]{12}:role/.+$", arn))])
     )
-    error_message = "task_role_arns must contain valid Phase 1 and Phase 2 runtime role ARNs."
+    error_message = "task_role_arns must contain valid Phase 1 through Phase 3 runtime role ARNs."
   }
 }
 
@@ -156,9 +160,13 @@ variable "execution_role_arns" {
       contains(keys(var.execution_role_arns), "collector-worker") &&
       contains(keys(var.execution_role_arns), "validation-worker") &&
       contains(keys(var.execution_role_arns), "normalization-worker") &&
+      contains(keys(var.execution_role_arns), "classification-worker") &&
+      contains(keys(var.execution_role_arns), "enrichment-worker") &&
+      contains(keys(var.execution_role_arns), "clustering-worker") &&
+      contains(keys(var.execution_role_arns), "synthesis-worker") &&
       alltrue([for arn in values(var.execution_role_arns) : can(regex("^arn:[^:]+:iam::[0-9]{12}:role/.+$", arn))])
     )
-    error_message = "execution_role_arns must contain valid Phase 1 and Phase 2 runtime role ARNs."
+    error_message = "execution_role_arns must contain valid Phase 1 through Phase 3 runtime role ARNs."
   }
 }
 
@@ -220,16 +228,21 @@ variable "phase_two_worker_desired_counts" {
   description = "Desired Fargate tasks for each Phase 2 runtime; the scheduler is intentionally singleton."
   type        = map(number)
   default = {
-    scheduler     = 1
-    collector     = 2
-    validation    = 2
-    normalization = 2
+    scheduler      = 1
+    collector      = 2
+    validation     = 2
+    normalization  = 2
+    classification = 2
+    enrichment     = 2
+    clustering     = 2
+    synthesis      = 2
   }
 
   validation {
     condition = (
       toset(keys(var.phase_two_worker_desired_counts)) == toset([
-        "scheduler", "collector", "validation", "normalization"
+        "scheduler", "collector", "validation", "normalization",
+        "classification", "enrichment", "clustering", "synthesis"
       ]) &&
       var.phase_two_worker_desired_counts["scheduler"] == 1 &&
       alltrue([
@@ -237,6 +250,6 @@ variable "phase_two_worker_desired_counts" {
         count >= 1 && floor(count) == count
       ])
     )
-    error_message = "Phase 2 desired counts require exactly one scheduler and at least one integer task for every worker."
+    error_message = "Worker desired counts require exactly one scheduler and at least one integer task for every Phase 2 and Phase 3 worker."
   }
 }

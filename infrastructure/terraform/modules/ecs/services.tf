@@ -46,6 +46,46 @@ locals {
         "--queues=${basename(var.api_environment_variables["SQS_PIPELINE_VALIDATED_URL"])}",
       ]
     }
+    classification = {
+      service_name = "${var.resource_prefix}-classification-worker-${var.environment}"
+      role_key     = "classification-worker"
+      log_group    = "processing"
+      command = [
+        "celery", "-A", "app.workers.celery_app", "worker", "--loglevel=INFO",
+        "--concurrency=4",
+        "--queues=${basename(var.api_environment_variables["SQS_PIPELINE_NORMALIZED_URL"])}",
+      ]
+    }
+    enrichment = {
+      service_name = "${var.resource_prefix}-enrichment-worker-${var.environment}"
+      role_key     = "enrichment-worker"
+      log_group    = "processing"
+      command = [
+        "celery", "-A", "app.workers.celery_app", "worker", "--loglevel=INFO",
+        "--concurrency=4",
+        "--queues=${basename(var.api_environment_variables["SQS_PIPELINE_CLASSIFIED_URL"])}",
+      ]
+    }
+    clustering = {
+      service_name = "${var.resource_prefix}-clustering-worker-${var.environment}"
+      role_key     = "clustering-worker"
+      log_group    = "processing"
+      command = [
+        "celery", "-A", "app.workers.celery_app", "worker", "--loglevel=INFO",
+        "--concurrency=4",
+        "--queues=${basename(var.api_environment_variables["SQS_PIPELINE_SCORED_URL"])}",
+      ]
+    }
+    synthesis = {
+      service_name = "${var.resource_prefix}-synthesis-worker-${var.environment}"
+      role_key     = "synthesis-worker"
+      log_group    = "processing"
+      command = [
+        "celery", "-A", "app.workers.celery_app", "worker", "--loglevel=INFO",
+        "--concurrency=4",
+        "--queues=${join(",", [basename(var.api_environment_variables["SQS_PIPELINE_CLUSTERED_URL"]), basename(var.api_environment_variables["SQS_PIPELINE_SYNTHESIZED_URL"])])}",
+      ]
+    }
   }
 
   runtime_environment_variables = {
@@ -92,7 +132,10 @@ locals {
       image     = "frontend"
     },
     ], [
-    for worker_key in ["scheduler", "collector", "validation", "normalization"] : {
+    for worker_key in [
+      "scheduler", "collector", "validation", "normalization",
+      "classification", "enrichment", "clustering", "synthesis",
+      ] : {
       service   = local.phase_two_workers[worker_key].service_name
       container = local.phase_two_workers[worker_key].role_key
       image     = "worker"
