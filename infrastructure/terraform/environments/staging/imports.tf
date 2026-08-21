@@ -357,6 +357,87 @@ import {
   id = "sc-cluster-staging/sc-frontend-staging"
 }
 
+# Application CD advances immutable images independently of Terraform. Adopt
+# the latest additive task-definition revisions so infrastructure plans do not
+# deregister previously deployed revisions merely to synchronize the baseline.
+import {
+  to = module.ecs.aws_ecs_task_definition.api
+  id = "arn:aws:ecs:eu-west-1:437040615141:task-definition/sc-api-service-staging:33"
+}
+
+import {
+  to = module.ecs.aws_ecs_task_definition.frontend
+  id = "arn:aws:ecs:eu-west-1:437040615141:task-definition/sc-frontend-staging:32"
+}
+
+import {
+  to = module.ecs.aws_ecs_task_definition.migration
+  id = "arn:aws:ecs:eu-west-1:437040615141:task-definition/sc-migration-task-staging:49"
+}
+
+import {
+  to = module.ecs.aws_ecs_task_definition.phase_two_worker["scheduler"]
+  id = "arn:aws:ecs:eu-west-1:437040615141:task-definition/sc-scheduler-worker-staging:17"
+}
+
+import {
+  to = module.ecs.aws_ecs_task_definition.phase_two_worker["collector"]
+  id = "arn:aws:ecs:eu-west-1:437040615141:task-definition/sc-collector-worker-staging:17"
+}
+
+import {
+  to = module.ecs.aws_ecs_task_definition.phase_two_worker["validation"]
+  id = "arn:aws:ecs:eu-west-1:437040615141:task-definition/sc-validation-worker-staging:17"
+}
+
+import {
+  to = module.ecs.aws_ecs_task_definition.phase_two_worker["normalization"]
+  id = "arn:aws:ecs:eu-west-1:437040615141:task-definition/sc-normalization-worker-staging:17"
+}
+
+# Adopt worker services that reached ECS during interrupted applies without a
+# corresponding remote-state write. The Phase 3 classification, enrichment,
+# and clustering services completed normally and are already in state.
+import {
+  to = module.ecs.aws_ecs_service.phase_two_worker["scheduler"]
+  id = "sc-cluster-staging/sc-scheduler-worker-staging"
+}
+
+import {
+  to = module.ecs.aws_ecs_service.phase_two_worker["collector"]
+  id = "sc-cluster-staging/sc-collector-worker-staging"
+}
+
+import {
+  to = module.ecs.aws_ecs_service.phase_two_worker["validation"]
+  id = "sc-cluster-staging/sc-validation-worker-staging"
+}
+
+import {
+  to = module.ecs.aws_ecs_service.phase_two_worker["normalization"]
+  id = "sc-cluster-staging/sc-normalization-worker-staging"
+}
+
+import {
+  to = module.ecs.aws_ecs_service.phase_two_worker["synthesis"]
+  id = "sc-cluster-staging/sc-synthesis-worker-staging"
+}
+
+import {
+  to = module.ecs.aws_ecs_service.phase_two_worker["classification"]
+  id = "sc-cluster-staging/sc-classification-worker-staging"
+}
+
+import {
+  to = module.ecs.aws_ecs_service.phase_two_worker["enrichment"]
+  id = "sc-cluster-staging/sc-enrichment-worker-staging"
+}
+
+import {
+  to = module.ecs.aws_ecs_service.phase_two_worker["clustering"]
+  id = "sc-cluster-staging/sc-clustering-worker-staging"
+}
+
 # The initial Phase 2 apply reached AWS during a provider retry but did not
 # record these four matching roles. Adopt them atomically so the ECS module's
 # complete-role-map validation remains enforced throughout reconciliation.

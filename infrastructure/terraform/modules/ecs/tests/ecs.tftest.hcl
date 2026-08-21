@@ -28,6 +28,7 @@ variables {
     infrastructure = "/sc/infrastructure/staging"
     ingestion      = "/sc/pipeline/ingestion/staging"
     processing     = "/sc/pipeline/processing/staging"
+    synthesis      = "/sc/pipeline/synthesis/staging"
   }
 
   task_role_arns = {
@@ -226,6 +227,16 @@ run "uses_immutable_images_and_hardened_task_definitions" {
       one([for item in jsondecode(definition.container_definitions)[0].environment : item.value if item.name == "SERVICE_NAME"]) == "sc-${key}-worker-staging"
     ])
     error_message = "Phase 2 worker tasks must use immutable images, read-only roots, writable temp space, and exact service identity."
+  }
+
+  assert {
+    condition = alltrue([
+      jsondecode(aws_ecs_task_definition.phase_two_worker["classification"].container_definitions)[0].logConfiguration.options["awslogs-group"] == "/sc/pipeline/processing/staging",
+      jsondecode(aws_ecs_task_definition.phase_two_worker["enrichment"].container_definitions)[0].logConfiguration.options["awslogs-group"] == "/sc/pipeline/processing/staging",
+      jsondecode(aws_ecs_task_definition.phase_two_worker["clustering"].container_definitions)[0].logConfiguration.options["awslogs-group"] == "/sc/pipeline/processing/staging",
+      jsondecode(aws_ecs_task_definition.phase_two_worker["synthesis"].container_definitions)[0].logConfiguration.options["awslogs-group"] == "/sc/pipeline/synthesis/staging",
+    ])
+    error_message = "Phase 3 workers must write to the log groups allowed by their execution roles."
   }
 
 }
