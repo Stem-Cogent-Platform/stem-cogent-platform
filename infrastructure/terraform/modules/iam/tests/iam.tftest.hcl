@@ -301,6 +301,16 @@ run "enforces_application_cd_least_privilege_boundaries" {
   }
 
   assert {
+    condition = alltrue([
+      for service in ["classification-worker", "enrichment-worker", "clustering-worker", "synthesis-worker"] :
+      contains(local.application_cd_service_names, "sc-${service}-staging") &&
+      contains(local.application_cd_task_definition_families, "sc-${service}-staging") &&
+      contains(local.application_cd_pass_role_keys, service)
+    ])
+    error_message = "The deploy role must be able to roll out every Phase 3 worker with only its matching worker roles."
+  }
+
+  assert {
     condition     = alltrue([for action in local.application_deploy_actions : !startswith(action, "ecr:")])
     error_message = "The deploy role must not be able to push ECR images."
   }
