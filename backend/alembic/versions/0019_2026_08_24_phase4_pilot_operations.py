@@ -55,7 +55,6 @@ def upgrade() -> None:
         )
         """
     )
-    op.execute("ALTER TABLE pilot.engagements ADD CONSTRAINT pilot_engagements_tenant_id_id_key UNIQUE (tenant_id, id)")
     op.execute(
         "CREATE INDEX ix_checkout_intents_tenant_created "
         "ON billing.checkout_intents (tenant_id, created_at DESC)"
@@ -91,6 +90,10 @@ def upgrade() -> None:
             )
         )
         """
+    )
+    op.execute(
+        "ALTER TABLE pilot.engagements "
+        "ADD CONSTRAINT pilot_engagements_tenant_id_id_key UNIQUE (tenant_id, id)"
     )
     op.execute(
         """
