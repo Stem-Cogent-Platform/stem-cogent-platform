@@ -12,6 +12,7 @@ from fastapi import HTTPException
 from starlette.requests import Request
 
 from app.api.auth import Principal, RequestContext
+from app.api.v1 import compliance
 from app.api.v1.compliance import _source_ip
 from app.billing.gates import require_feature
 from app.compliance import documents, service
@@ -132,6 +133,113 @@ def test_consent_audit_uses_alb_appended_source_ip() -> None:
         }
     )
     assert _source_ip(request) == "203.0.113.8"
+
+
+class _ConsentResult:
+    def __init__(self, row=None) -> None:
+        self.row = row
+
+    def mappings(self):
+        return self
+
+    def one(self):
+        assert self.row is not None
+        return self.row
+
+    def one_or_none(self):
+        return self.row
+
+
+class _ConsentSession:
+    def __init__(self, *results: _ConsentResult) -> None:
+        self.results = list(results)
+        self.commits = 0
+
+    async def execute(self, statement, parameters=None):
+        assert self.results, f"Unexpected SQL execution: {statement}"
+        return self.results.pop(0)
+
+    async def commit(self) -> None:
+        self.commits += 1
+
+
+@pytest.mark.asyncio
+async def test_compliance_documents_status_and_consent_happy_path(monkeypatch) -> None:
+    application_version = "0.1.0"
+    monkeypatch.setattr(
+        compliance,
+        "get_settings",
+        lambda: SimpleNamespace(
+            APPLICATION_VERSION=application_version,
+            JWT_SIGNING_SECRET_ARN="arn:jwt",
+        ),
+    )
+    monkeypatch.setattr(compliance, "get_secret_string", lambda _arn: "consent-secret")
+    bundle = documents.current_legal_documents()
+    payload = compliance.ConsentAcceptance(
+        idempotency_key=uuid4(),
+        terms_accepted=True,
+        privacy_notice_acknowledged=True,
+        ndpa_consent_granted=True,
+        terms_version=bundle["terms"].version,
+        privacy_policy_version=bundle["privacy"].version,
+        ndpa_consent_version=bundle["ndpa"].version,
+        application_version=application_version,
+    )
+    ledger_id = uuid4()
+    accepted_at = datetime.now(UTC)
+    session = _ConsentSession(
+        _ConsentResult({"id": ledger_id, "accepted_at": accepted_at}),
+        _ConsentResult(),
+        _ConsentResult(),
+    )
+    base = _context(accepted=False)
+    request_context = RequestContext(principal=base.principal, session=session)  # type: ignore[arg-type]
+    request = Request(
+        {
+            "type": "http",
+            "method": "POST",
+            "path": "/api/v1/compliance/consent",
+            "headers": [(b"user-agent", b"pilot-browser")],
+            "client": ("203.0.113.8", 443),
+        }
+    )
+
+    public_documents = await compliance.get_compliance_documents()
+    assert public_documents["regulatory_framework"]["primary_law"] == "Nigeria Data Protection Act 2023"
+    assert (await compliance.get_compliance_status(base))["accepted"] is False
+
+    accepted = await compliance.accept_compliance_documents(payload, request, request_context)
+    assert accepted["accepted"] is True
+    assert accepted["ledger_id"] == ledger_id
+    assert session.commits == 1
+
+
+@pytest.mark.asyncio
+async def test_consent_rejects_stale_document_versions(monkeypatch) -> None:
+    monkeypatch.setattr(
+        compliance,
+        "get_settings",
+        lambda: SimpleNamespace(APPLICATION_VERSION="0.1.0", JWT_SIGNING_SECRET_ARN="arn:jwt"),
+    )
+    bundle = documents.current_legal_documents()
+    stale = compliance.ConsentAcceptance(
+        idempotency_key=uuid4(),
+        terms_accepted=True,
+        privacy_notice_acknowledged=True,
+        ndpa_consent_granted=True,
+        terms_version="stale",
+        privacy_policy_version=bundle["privacy"].version,
+        ndpa_consent_version=bundle["ndpa"].version,
+        application_version="0.1.0",
+    )
+    with pytest.raises(HTTPException) as conflict:
+        await compliance.accept_compliance_documents(
+            stale,
+            Request({"type": "http", "headers": []}),
+            _context(accepted=False),
+        )
+    assert conflict.value.status_code == 409
 
 
 def test_individual_tier_cannot_forge_company_feature_access() -> None:
