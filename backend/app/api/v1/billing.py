@@ -320,8 +320,12 @@ async def _activate_checkout(session: Any, tenant_id: UUID, reference: str, data
         return
     if data.get("amount") != intent["amount_cents"] or data.get("currency") != intent["currency"]:
         raise ValueError("Paystack settlement does not match the checkout intent")
-    customer = data.get("customer") if isinstance(data.get("customer"), dict) else {}
-    subscription = data.get("subscription") if isinstance(data.get("subscription"), dict) else {}
+    customer_data = data.get("customer")
+    customer: dict[str, Any] = customer_data if isinstance(customer_data, dict) else {}
+    subscription_data = data.get("subscription")
+    subscription: dict[str, Any] = (
+        subscription_data if isinstance(subscription_data, dict) else {}
+    )
     provider_subscription_ref = subscription.get("subscription_code") or data.get("subscription_code")
     await session.execute(
         text(

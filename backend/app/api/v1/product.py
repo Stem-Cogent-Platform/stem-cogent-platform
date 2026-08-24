@@ -16,6 +16,10 @@ from app.billing import require_feature
 router = APIRouter(prefix="/api/v1", tags=["product"])
 
 
+def _default_delivery_channels() -> list[Literal["IN_APP", "EMAIL"]]:
+    return ["IN_APP"]
+
+
 class DecisionActionInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
     action_type: Literal["ACKNOWLEDGED", "WATCHING", "ESCALATED", "ACTED_ON", "DISMISSED"]
@@ -27,7 +31,9 @@ class AlertPreferencesInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
     domain_codes: list[str] = Field(default_factory=list, max_length=20)
     urgency_bands: list[Literal["LOW", "MEDIUM", "HIGH", "CRITICAL"]] = Field(default_factory=list)
-    delivery_channels: list[Literal["IN_APP", "EMAIL"]] = Field(default_factory=lambda: ["IN_APP"])
+    delivery_channels: list[Literal["IN_APP", "EMAIL"]] = Field(
+        default_factory=_default_delivery_channels
+    )
     minimum_relevance_band: Literal["LOW", "MEDIUM", "HIGH", "CRITICAL"] | None = None
     digest_frequency: Literal["DAILY", "WEEKLY", "NONE"] = "DAILY"
     enabled: bool = True

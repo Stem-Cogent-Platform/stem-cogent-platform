@@ -163,10 +163,13 @@ async def logout(
     response: Response,
     refresh_cookie: str | None = Cookie(default=None, alias=_REFRESH_COOKIE),
 ) -> Response:
+    tenant_id: UUID | None
+    session_id: UUID | None
     try:
         tenant_id, session_id, _ = _parse_refresh_cookie(refresh_cookie)
     except HTTPException:
-        tenant_id = session_id = None
+        tenant_id = None
+        session_id = None
     if tenant_id and session_id:
         async for session in get_session():
             await session.execute(
