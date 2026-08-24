@@ -10,6 +10,7 @@ module "iam" {
   bucket_arns                = module.s3.bucket_arns
   bucket_kms_key_arns        = module.s3.kms_key_arns
   secret_arns                = module.secrets.secret_arns
+  secrets_kms_key_arn        = module.kms.key_arns["audit"]
   ecr_repository_arns        = module.ecr.repository_arns
   github_repository_id       = "1254005582"
   github_repository_owner_id = "289108209"

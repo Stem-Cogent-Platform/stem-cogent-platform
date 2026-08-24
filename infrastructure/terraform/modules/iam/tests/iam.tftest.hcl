@@ -73,6 +73,7 @@ variables {
     paystack_public_key     = "arn:aws:secretsmanager:eu-west-1:123456789012:secret:sc/staging/paystack/public-key-a"
     paystack_webhook_secret = "arn:aws:secretsmanager:eu-west-1:123456789012:secret:sc/staging/paystack/webhook-secret-a"
   }
+  secrets_kms_key_arn = "arn:aws:kms:eu-west-1:123456789012:key/audit"
 
   ecr_repository_arns = {
     api      = "arn:aws:ecr:eu-west-1:123456789012:repository/sc-api-service-staging"

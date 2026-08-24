@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from time import monotonic
 from typing import Any, Literal
@@ -11,6 +12,8 @@ from sqlalchemy import text
 
 from app.api.auth import RequestContext, get_request_context, require_permission
 from app.cil import retrieve_context
+from app.cil.answering import answer_query
+from app.billing import require_feature
 
 
 router = APIRouter(prefix="/api/v1/cil", tags=["cil"])
@@ -40,6 +43,7 @@ async def query_cil(
     payload: CILQuery, context: RequestContext = Depends(get_request_context)
 ) -> CILQueryResponse:
     require_permission(context, "USE_CIL")
+    require_feature(context, "cil")
     started = monotonic()
     result = await retrieve_context(
         context.session,
@@ -50,11 +54,8 @@ async def query_cil(
     )
     grounded = result.confidence_indicator != "INSUFFICIENT_DATA"
     session_id = await _upsert_session(payload, context, grounded)
-    answer = (
-        "Authorised structured context was retrieved. Use the cited evidence for investigation."
-        if grounded
-        else "Insufficient authorised evidence is available for this anchor."
-    )
+    generated = await answer_query(payload.query, result) if grounded else None
+    answer = generated.answer_text if generated else "Insufficient authorised evidence is available for this anchor."
     citations = [
         {
             "claim_text": "Retrieved source evidence",
@@ -98,6 +99,30 @@ async def query_cil(
             "latency_ms": round((monotonic() - started) * 1000),
         },
     )
+    await context.session.execute(
+        text(
+            """
+            INSERT INTO billing.usage_events (
+              tenant_id, user_id, metric_code, quantity, event_at,
+              idempotency_key, metadata
+            ) VALUES (
+              :tenant_id, :user_id, 'CIL_QUERY', 1, NOW(),
+              :idempotency_key, CAST(:metadata AS JSONB)
+            ) ON CONFLICT (tenant_id, idempotency_key) DO NOTHING
+            """
+        ),
+        {
+            "tenant_id": context.principal.tenant_id,
+            "user_id": context.principal.user_id,
+            "idempotency_key": (
+                f"cil:{session_id}:{payload.anchor_id}:"
+                f"{hashlib.sha256(payload.query.encode('utf-8')).hexdigest()}"
+            ),
+            "metadata": json.dumps({"anchor_type": payload.anchor_type,
+                                    "anchor_id": str(payload.anchor_id),
+                                    "grounded": grounded}),
+        },
+    )
     await context.session.commit()
     return CILQueryResponse(
         session_id=session_id,
@@ -106,9 +131,7 @@ async def query_cil(
         citations=citations,
         confidence_indicator=result.confidence_indicator,
         response_grounded=grounded,
-        follow_up_suggestions=(
-            ["Review the matched context and source evidence."] if grounded else []
-        ),
+        follow_up_suggestions=generated.follow_up_suggestions if generated else [],
     )
 
 

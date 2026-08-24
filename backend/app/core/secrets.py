@@ -39,3 +39,22 @@ def get_json_secret(secret_arn: str) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise SecretConfigurationError("Secrets Manager JSON value must be an object")
     return value
+
+
+def get_scalar_secret(secret_arn: str) -> str:
+    """Resolve a scalar secret stored directly or inside a single-value JSON object."""
+
+    raw = get_secret_string(secret_arn)
+    try:
+        decoded = json.loads(raw)
+    except json.JSONDecodeError:
+        return raw
+    if isinstance(decoded, str) and decoded:
+        return decoded
+    if isinstance(decoded, dict) and len(decoded) == 1:
+        value = next(iter(decoded.values()))
+        if isinstance(value, str) and value:
+            return value
+    raise SecretConfigurationError(
+        "Managed scalar secret must be a non-empty string or a one-value JSON object"
+    )
