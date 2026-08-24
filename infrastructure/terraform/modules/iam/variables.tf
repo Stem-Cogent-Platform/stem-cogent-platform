@@ -97,6 +97,16 @@ variable "secret_arns" {
   }
 }
 
+variable "secrets_kms_key_arn" {
+  description = "Customer-managed KMS key used to encrypt application Secrets Manager values."
+  type        = string
+
+  validation {
+    condition     = can(regex("^arn:[^:]+:kms:[^:]+:[0-9]{12}:key/.+$", var.secrets_kms_key_arn))
+    error_message = "secrets_kms_key_arn must be a valid KMS key ARN."
+  }
+}
+
 variable "ecr_repository_arns" {
   description = "Canonical ECR repository ARNs keyed by api, worker, and frontend."
   type        = map(string)

@@ -253,7 +253,7 @@ jobs:
           IMAGE_TAG: ${{ github.sha }}
         run: |
           image="$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
-          docker run --rm --entrypoint python "$image" -c "from app.workers.celery_app import TASK_MODULES, celery_app; celery_app.loader.import_default_modules(); expected = {'app.workers.tasks.collection.collect_source', 'app.workers.tasks.validation.validate_raw_signal', 'app.workers.tasks.normalization.normalize_raw_signal', 'app.workers.tasks.classification.classify_signal', 'app.workers.tasks.scoring.score_signal', 'app.workers.tasks.embedding.embed_signal', 'app.workers.tasks.synthesis.synthesize_global_output', 'app.workers.tasks.decision.create_decision_briefs', 'app.workers.tasks.scheduler.schedule_due_sources'}; missing = expected.difference(celery_app.tasks); assert not missing, f'missing Celery tasks: {sorted(missing)}'; assert set(TASK_MODULES) == set(celery_app.conf.include)"
+          docker run --rm --entrypoint python "$image" -c "from app.workers.celery_app import TASK_MODULES, celery_app; celery_app.loader.import_default_modules(); expected = {'app.workers.tasks.collection.collect_source', 'app.workers.tasks.validation.validate_raw_signal', 'app.workers.tasks.normalization.normalize_raw_signal', 'app.workers.tasks.classification.classify_signal', 'app.workers.tasks.scoring.score_signal', 'app.workers.tasks.embedding.embed_signal', 'app.workers.tasks.synthesis.synthesize_global_output', 'app.workers.tasks.decision.create_decision_briefs', 'app.workers.tasks.delivery.handle_decision_brief_ready', 'app.workers.tasks.scheduler.schedule_due_sources'}; missing = expected.difference(celery_app.tasks); assert not missing, f'missing Celery tasks: {sorted(missing)}'; assert set(TASK_MODULES) == set(celery_app.conf.include)"
 
       - name: Push immutable commit tag
         if: steps.immutable-image.outputs.exists != 'true'
@@ -493,6 +493,8 @@ jobs:
           bash .github/scripts/run-one-shot-ecs-task.sh alembic upgrade head
           bash .github/scripts/run-one-shot-ecs-task.sh \
             python alembic/seeds/seed_launch_sources.py
+          bash .github/scripts/run-one-shot-ecs-task.sh \
+            python -m app.billing.provision_plans
 
       - name: Register task definitions and start rolling deployments
         shell: bash
@@ -524,10 +526,24 @@ jobs:
               exit 1
             }
             current_task_definition="$(jq -r '.services[0].taskDefinition // empty' service-current.json)"
+            desired_count="$(jq -r '.services[0].desiredCount // empty' service-current.json)"
             test -n "$current_task_definition" || {
               echo "ECS service $service has no task definition." >&2
               exit 1
             }
+            [[ "$desired_count" =~ ^[0-9]+$ ]] || {
+              echo "ECS service $service has an invalid desired count: $desired_count" >&2
+              exit 1
+            }
+
+            # Production accounts may be intentionally quota-sized for steady
+            # state. Replace tasks within that capacity instead of requiring a
+            # surge slot. Singleton services accept a brief handover gap;
+            # replicated services retain at least half their tasks.
+            minimum_healthy_percent=50
+            if [ "$desired_count" -le 1 ]; then
+              minimum_healthy_percent=0
+            fi
 
             # Use the latest family revision as the deployment baseline. This
             # preserves task-definition corrections registered by Terraform
@@ -570,8 +586,14 @@ jobs:
               --cluster "$ECS_CLUSTER_NAME" \
               --service "$service" \
               --task-definition "$next_task_definition" \
-              --deployment-configuration 'minimumHealthyPercent=50,maximumPercent=200,deploymentCircuitBreaker={enable=true,rollback=true}' \
+              --deployment-configuration "minimumHealthyPercent=$minimum_healthy_percent,maximumPercent=100,deploymentCircuitBreaker={enable=true,rollback=true}" \
               >/dev/null
+
+            # Stabilize each service before consuming capacity for the next
+            # one. This also makes the rollback boundary exact on failure.
+            aws ecs wait services-stable \
+              --cluster "$ECS_CLUSTER_NAME" \
+              --services "$service"
           done < <(jq -c '.[]' <<<"$ECS_SERVICE_DEPLOYMENTS")
 
       - name: Wait for all services to become stable
@@ -646,20 +668,24 @@ jobs:
             exit 0
           fi
 
-          rollback_services=()
           while IFS=$'\t' read -r service task_definition; do
-            rollback_services+=("$service")
+            desired_count="$(aws ecs describe-services \
+              --cluster "$ECS_CLUSTER_NAME" \
+              --services "$service" \
+              --query 'services[0].desiredCount' \
+              --output text)"
+            minimum_healthy_percent=50
+            if [ "$desired_count" -le 1 ]; then
+              minimum_healthy_percent=0
+            fi
             aws ecs update-service \
               --cluster "$ECS_CLUSTER_NAME" \
               --service "$service" \
               --task-definition "$task_definition" \
               --force-new-deployment \
+              --deployment-configuration "minimumHealthyPercent=$minimum_healthy_percent,maximumPercent=100,deploymentCircuitBreaker={enable=true,rollback=true}" \
               >/dev/null
-          done < rollback-task-definitions.tsv
-
-          for ((offset = 0; offset < ${#rollback_services[@]}; offset += 10)); do
-            batch=("${rollback_services[@]:offset:10}")
             aws ecs wait services-stable \
               --cluster "$ECS_CLUSTER_NAME" \
-              --services "${batch[@]}"
-          done
+              --services "$service"
+          done < rollback-task-definitions.tsv

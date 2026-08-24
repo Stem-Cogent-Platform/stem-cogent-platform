@@ -7,6 +7,8 @@ locals {
       DATABASE_REPLICA_HOST       = coalesce(module.rds.read_replica_address, module.rds.primary_address)
       DATABASE_CREDENTIALS_ARN    = module.secrets.secret_arns["database_credentials"]
       DATABASE_SSL_MODE           = "require"
+      DATABASE_RUNTIME_ROLE       = "sc_app_runtime"
+      FRONTEND_PUBLIC_URL         = var.frontend_public_url
       REDIS_HOST                  = module.elasticache.primary_endpoint_address
       REDIS_PORT                  = tostring(module.elasticache.port)
       REDIS_AUTH_TOKEN_ARN        = module.secrets.secret_arns["redis_auth_token"]

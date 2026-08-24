@@ -24,6 +24,41 @@ function readJson(filePath) {
   return JSON.parse(fs.readFileSync(filePath, "utf8"));
 }
 
+function readAssignedJson(filePath) {
+  if (!fs.existsSync(filePath)) {
+    throw new Error(`Missing Next.js route manifest: ${filePath}. Run npm run build first.`);
+  }
+
+  const source = fs.readFileSync(filePath, "utf8").trim();
+  const assignment = source.lastIndexOf(" = ");
+  if (assignment < 0) {
+    throw new Error(`Unsupported Next.js route manifest format: ${filePath}`);
+  }
+  return JSON.parse(source.slice(assignment + 3).replace(/;$/, ""));
+}
+
+function readAppRoutes(nextDirectory) {
+  const legacyManifestPath = path.join(nextDirectory, "app-build-manifest.json");
+  if (fs.existsSync(legacyManifestPath)) {
+    return Object.entries(readJson(legacyManifestPath).pages ?? {});
+  }
+
+  const routeMap = readJson(path.join(nextDirectory, "app-path-routes-manifest.json"));
+  return Object.entries(routeMap).map(([appPath, route]) => {
+    const relativeAppPath = appPath.replace(/^\//, "");
+    const manifest = readAssignedJson(
+      path.join(
+        nextDirectory,
+        "server",
+        "app",
+        `${relativeAppPath}_client-reference-manifest.js`
+      )
+    );
+    const routeFiles = Object.values(manifest.entryJSFiles ?? {}).flat();
+    return [route, routeFiles];
+  });
+}
+
 function compressedSize(filePath) {
   if (!fs.existsSync(filePath)) {
     throw new Error(`Bundle manifest references a missing asset: ${filePath}`);
@@ -35,10 +70,9 @@ function compressedSize(filePath) {
 function main() {
   const maximumKilobytes = readMaximumKilobytes(process.argv.slice(2));
   const nextDirectory = path.resolve(process.cwd(), ".next");
-  const appManifest = readJson(path.join(nextDirectory, "app-build-manifest.json"));
   const buildManifest = readJson(path.join(nextDirectory, "build-manifest.json"));
   const sharedFiles = buildManifest.rootMainFiles ?? [];
-  const routes = Object.entries(appManifest.pages ?? {});
+  const routes = readAppRoutes(nextDirectory);
 
   if (routes.length === 0) {
     throw new Error("The Next.js app build manifest contains no routes to measure.");

@@ -72,6 +72,7 @@ variables {
     SQS_PIPELINE_SCORED_URL      = "https://sqs.eu-west-1.amazonaws.com/123456789012/sc-pipeline-scored-queue-staging"
     SQS_PIPELINE_CLUSTERED_URL   = "https://sqs.eu-west-1.amazonaws.com/123456789012/sc-pipeline-clustered-queue-staging"
     SQS_PIPELINE_SYNTHESIZED_URL = "https://sqs.eu-west-1.amazonaws.com/123456789012/sc-pipeline-synthesized-queue-staging"
+    SQS_PIPELINE_RECOMMENDED_URL = "https://sqs.eu-west-1.amazonaws.com/123456789012/sc-pipeline-recommended-queue-staging"
   }
 }
 
@@ -135,8 +136,8 @@ run "creates_phase_one_and_core_phase_two_services" {
   assert {
     condition = alltrue([
       for service in [aws_ecs_service.api, aws_ecs_service.frontend] :
-      service.deployment_minimum_healthy_percent == 50 &&
-      service.deployment_maximum_percent == 200 &&
+      service.deployment_minimum_healthy_percent == (service.desired_count <= 1 ? 0 : 50) &&
+      service.deployment_maximum_percent == 100 &&
       one(service.deployment_circuit_breaker).enable &&
       one(service.deployment_circuit_breaker).rollback
     ])
@@ -146,8 +147,8 @@ run "creates_phase_one_and_core_phase_two_services" {
   assert {
     condition = alltrue([
       for service in values(aws_ecs_service.phase_two_worker) :
-      service.deployment_minimum_healthy_percent == 50 &&
-      service.deployment_maximum_percent == 200 &&
+      service.deployment_minimum_healthy_percent == (service.desired_count <= 1 ? 0 : 50) &&
+      service.deployment_maximum_percent == 100 &&
       one(service.deployment_circuit_breaker).enable &&
       one(service.deployment_circuit_breaker).rollback &&
       !one(service.network_configuration).assign_public_ip

@@ -83,7 +83,7 @@ locals {
       command = [
         "celery", "-A", "app.workers.celery_app", "worker", "--loglevel=INFO",
         "--concurrency=4",
-        "--queues=${join(",", [basename(var.api_environment_variables["SQS_PIPELINE_CLUSTERED_URL"]), basename(var.api_environment_variables["SQS_PIPELINE_SYNTHESIZED_URL"])])}",
+        "--queues=${join(",", [basename(var.api_environment_variables["SQS_PIPELINE_CLUSTERED_URL"]), basename(var.api_environment_variables["SQS_PIPELINE_SYNTHESIZED_URL"]), basename(var.api_environment_variables["SQS_PIPELINE_RECOMMENDED_URL"])])}",
       ]
     }
   }
@@ -511,8 +511,8 @@ resource "aws_ecs_service" "api" {
     rollback = true
   }
 
-  deployment_maximum_percent         = 200
-  deployment_minimum_healthy_percent = 50
+  deployment_maximum_percent         = 100
+  deployment_minimum_healthy_percent = var.api_desired_count <= 1 ? 0 : 50
   enable_ecs_managed_tags            = true
   force_new_deployment               = false
   health_check_grace_period_seconds  = 120
@@ -567,8 +567,8 @@ resource "aws_ecs_service" "frontend" {
     rollback = true
   }
 
-  deployment_maximum_percent         = 200
-  deployment_minimum_healthy_percent = 50
+  deployment_maximum_percent         = 100
+  deployment_minimum_healthy_percent = var.frontend_desired_count <= 1 ? 0 : 50
   enable_ecs_managed_tags            = true
   force_new_deployment               = false
   health_check_grace_period_seconds  = 120
@@ -623,8 +623,8 @@ resource "aws_ecs_service" "phase_two_worker" {
     rollback = true
   }
 
-  deployment_maximum_percent         = 200
-  deployment_minimum_healthy_percent = 50
+  deployment_maximum_percent         = 100
+  deployment_minimum_healthy_percent = var.phase_two_worker_desired_counts[each.key] <= 1 ? 0 : 50
   enable_ecs_managed_tags            = true
   force_new_deployment               = false
   platform_version                   = "LATEST"
