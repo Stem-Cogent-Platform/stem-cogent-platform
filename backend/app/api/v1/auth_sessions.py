@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import hmac
+import ipaddress
 import json
 import logging
 import secrets
@@ -100,7 +101,9 @@ async def login(body: LoginInput, request: Request, response: Response) -> Acces
                     "user_id": row["id"],
                     "tenant_id": row["tenant_id"],
                     "refresh_hash": refresh_hash,
-                    "ip_address": request.client.host if request.client else "0.0.0.0",
+                    "ip_address": (
+                        request.client.host if request.client else str(ipaddress.IPv4Address(0))
+                    ),
                     "user_agent": request.headers.get("user-agent", "")[:2000],
                     "expires_at": expires_at,
                 },

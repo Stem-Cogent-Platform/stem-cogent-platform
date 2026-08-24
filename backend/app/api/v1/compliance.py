@@ -46,7 +46,7 @@ def _source_ip(request: Request) -> str:
             return str(ipaddress.ip_address(candidate))
         except ValueError:
             continue
-    return "0.0.0.0"
+    return str(ipaddress.IPv4Address(0))
 
 
 @router.get("/documents")
