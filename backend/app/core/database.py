@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import re
 from collections.abc import AsyncIterator
 
 from sqlalchemy import URL, text
@@ -67,6 +68,10 @@ async def get_session() -> AsyncIterator[AsyncSession]:
     if _session_factory is None:
         raise RuntimeError("Database is not configured")
     async with _session_factory() as session:
+        runtime_role = get_settings().DATABASE_RUNTIME_ROLE
+        if not re.fullmatch(r"[a-z][a-z0-9_]{0,62}", runtime_role):
+            raise SecretConfigurationError("DATABASE_RUNTIME_ROLE is not a safe PostgreSQL role name")
+        await session.execute(text(f'SET LOCAL ROLE "{runtime_role}"'))  # nosec B608
         yield session
 
 

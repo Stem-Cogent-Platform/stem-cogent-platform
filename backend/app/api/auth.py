@@ -6,7 +6,8 @@ import hmac
 import json
 import time
 from collections.abc import AsyncIterator
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Any
 from uuid import UUID
 
@@ -21,6 +22,12 @@ from app.core.secrets import get_secret_string
 
 
 _bearer = HTTPBearer(auto_error=False)
+_ACTIVE_BILLING_STATES = frozenset({"TRIALING", "ACTIVE"})
+_BILLING_EXEMPT_PREFIXES = (
+    "/api/v1/auth",
+    "/api/v1/billing",
+    "/api/v1/compliance",
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -29,6 +36,17 @@ class Principal:
     tenant_id: UUID
     permission_role: str
     permissions: frozenset[str]
+    tos_accepted_at: datetime | None = None
+    tos_version: str | None = None
+    privacy_policy_accepted_at: datetime | None = None
+    privacy_policy_version: str | None = None
+    ndpa_consent_accepted_at: datetime | None = None
+    ndpa_consent_version: str | None = None
+    binding_app_version: str | None = None
+    current_compliance_ledger_id: UUID | None = None
+    plan_code: str = "TRIAL"
+    billing_status: str = "TRIALING"
+    entitlements: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(slots=True)
@@ -59,10 +77,39 @@ async def get_request_context(
                 text(
                     """
                     SELECT users.id, users.tenant_id, users.permission_role,
-                           roles.permissions
+                           roles.permissions, users.tos_accepted_at, users.tos_version,
+                           users.privacy_policy_accepted_at, users.privacy_policy_version,
+                           users.ndpa_consent_accepted_at, users.ndpa_consent_version,
+                           users.binding_app_version, users.current_compliance_ledger_id,
+                           plans.plan_code,
+                           CASE
+                             WHEN subscriptions.id IS NOT NULL AND subscriptions.status = 'TRIALING'
+                               AND subscriptions.trial_ends_at <= NOW() THEN 'EXPIRED'
+                             WHEN subscriptions.id IS NOT NULL
+                               AND subscriptions.status IN ('ACTIVE', 'PAST_DUE')
+                               AND subscriptions.current_period_end <= NOW() THEN 'PAST_DUE'
+                             WHEN subscriptions.id IS NOT NULL THEN subscriptions.status
+                             WHEN tenants.status IN ('TRIAL', 'ACTIVE') THEN
+                               CASE WHEN tenants.status = 'TRIAL' THEN 'TRIALING' ELSE 'ACTIVE' END
+                             ELSE tenants.status
+                           END AS billing_status,
+                           plans.entitlements
                     FROM auth.users AS users
                     JOIN auth.roles AS roles
                       ON roles.role_code = users.permission_role
+                    JOIN auth.tenants AS tenants ON tenants.id = users.tenant_id
+                    LEFT JOIN LATERAL (
+                        SELECT candidate.id, candidate.plan_code, candidate.status,
+                               candidate.trial_ends_at, candidate.current_period_end
+                        FROM billing.subscriptions AS candidate
+                        WHERE candidate.tenant_id = users.tenant_id
+                          AND candidate.status IN ('TRIALING', 'ACTIVE', 'PAST_DUE')
+                        ORDER BY candidate.updated_at DESC
+                        LIMIT 1
+                    ) AS subscriptions ON TRUE
+                    JOIN billing.plans AS plans
+                      ON plans.plan_code = COALESCE(subscriptions.plan_code, tenants.plan_tier)
+                     AND plans.active
                     WHERE users.id = :user_id
                       AND users.tenant_id = :tenant_id
                       AND users.status = 'ACTIVE'
@@ -78,7 +125,29 @@ async def get_request_context(
             tenant_id=row["tenant_id"],
             permission_role=row["permission_role"],
             permissions=frozenset(row["permissions"]),
+            tos_accepted_at=row["tos_accepted_at"],
+            tos_version=row["tos_version"],
+            privacy_policy_accepted_at=row["privacy_policy_accepted_at"],
+            privacy_policy_version=row["privacy_policy_version"],
+            ndpa_consent_accepted_at=row["ndpa_consent_accepted_at"],
+            ndpa_consent_version=row["ndpa_consent_version"],
+            binding_app_version=row["binding_app_version"],
+            current_compliance_ledger_id=row["current_compliance_ledger_id"],
+            plan_code=row["plan_code"],
+            billing_status=row["billing_status"],
+            entitlements=dict(row["entitlements"]),
         )
+        if (
+            principal.billing_status not in _ACTIVE_BILLING_STATES
+            and not request.url.path.startswith(_BILLING_EXEMPT_PREFIXES)
+        ):
+            raise HTTPException(
+                status.HTTP_403_FORBIDDEN,
+                detail={
+                    "code": "BILLING_ACCESS_REQUIRED",
+                    "message": "This workspace does not have an active plan. Review billing to continue.",
+                },
+            )
         request.state.principal = principal
         yield RequestContext(principal, session)
         return

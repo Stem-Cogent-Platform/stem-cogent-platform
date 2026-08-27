@@ -5,6 +5,7 @@ import hashlib
 import hmac
 import json
 import time
+from datetime import UTC, datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from uuid import uuid4
@@ -16,6 +17,7 @@ from app.api import auth
 from app.api.auth import Principal, RequestContext
 from app.api.v1 import cil, context, reviews
 from app.cil.retrieval import CILCitation, CILRetrievalResult
+from app.compliance.documents import current_legal_documents
 from app.context import cache
 
 
@@ -69,12 +71,27 @@ class FakeSession:
         self.commits += 1
 
 
-def make_context(session: FakeSession, *permissions: str) -> RequestContext:
+def make_context(
+    session: FakeSession, *permissions: str, accepted: bool = True
+) -> RequestContext:
+    accepted_at = datetime.now(UTC) if accepted else None
+    legal = current_legal_documents()
     principal = Principal(
         user_id=uuid4(),
         tenant_id=uuid4(),
         permission_role="CEO",
         permissions=frozenset(permissions),
+        tos_accepted_at=accepted_at,
+        tos_version=legal["terms"].version if accepted else None,
+        privacy_policy_accepted_at=accepted_at,
+        privacy_policy_version=legal["privacy"].version if accepted else None,
+        ndpa_consent_accepted_at=accepted_at,
+        ndpa_consent_version=legal["ndpa"].version if accepted else None,
+        binding_app_version="0.1.0" if accepted else None,
+        current_compliance_ledger_id=uuid4() if accepted else None,
+        plan_code="TRIAL",
+        billing_status="TRIALING",
+        entitlements={"cil": True, "realtime_briefing": True},
     )
     return RequestContext(principal=principal, session=session)  # type: ignore[arg-type]
 
@@ -191,6 +208,25 @@ async def test_context_api_validation_and_not_found_paths(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
+async def test_company_context_cannot_bypass_legal_consent() -> None:
+    unconsented = make_context(
+        FakeSession(), "CONFIGURE_COMPANY_CONTEXT", accepted=False
+    )
+    with pytest.raises(HTTPException) as rejected:
+        await context.put_company_context(
+            context.CompanyProfileInput(
+                business_categories=["PAYMENTS"],
+                operating_markets=["NG"],
+                strategic_priorities=["SETTLEMENT_RESILIENCE"],
+            ),
+            unconsented,
+        )
+    assert rejected.value.status_code == 403
+    assert rejected.value.detail["code"] == "LEGAL_CONSENT_REQUIRED"
+    assert unconsented.session.statements == []
+
+
+@pytest.mark.asyncio
 async def test_context_api_cache_hits_and_focus_not_found_branches(monkeypatch) -> None:
     row_id = uuid4()
     cached_context = make_context(FakeSession())
@@ -290,7 +326,9 @@ async def test_cil_query_creates_and_reuses_grounded_sessions(monkeypatch) -> No
     session = FakeSession(
         FakeResult(scalar_one=session_id),
         FakeResult(),
+        FakeResult(),
         FakeResult(scalar_one_or_none=session_id),
+        FakeResult(),
         FakeResult(),
     )
     request_context = make_context(session, "USE_CIL")
@@ -332,7 +370,7 @@ async def test_cil_missing_session_and_ungrounded_response(monkeypatch) -> None:
 
     new_id = uuid4()
     fresh_context = make_context(
-        FakeSession(FakeResult(scalar_one=new_id), FakeResult()), "USE_CIL"
+        FakeSession(FakeResult(scalar_one=new_id), FakeResult(), FakeResult()), "USE_CIL"
     )
     response = await cil.query_cil(
         payload.model_copy(update={"session_id": None}), fresh_context

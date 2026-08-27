@@ -12,6 +12,9 @@ BACKEND_ROOT = Path(__file__).resolve().parents[2]
 MIGRATION_PATH = (
     BACKEND_ROOT / "alembic" / "versions" / "0009_2026_08_15_create_billing_tables.py"
 )
+CHECKOUT_QUOTE_MIGRATION_PATH = (
+    BACKEND_ROOT / "alembic" / "versions" / "0020_2026_08_25_add_auditable_ngn_checkout_quotes.py"
+)
 PLAN_PRICES = {
     "TRIAL": 0,
     "INDIVIDUAL": 14900,
@@ -104,3 +107,24 @@ def test_tenant_billing_tables_have_rls_but_global_tables_do_not() -> None:
         assert f"CREATE POLICY tenant_isolation_{table}" in sql
     assert "ALTER TABLE billing.plans ENABLE ROW LEVEL SECURITY" not in sql
     assert "ALTER TABLE billing.webhook_events ENABLE ROW LEVEL SECURITY" not in sql
+
+
+def test_checkout_quote_migration_records_the_display_price_and_locked_fx_provenance() -> None:
+    spec = importlib.util.spec_from_file_location("sc_migration_0020", CHECKOUT_QUOTE_MIGRATION_PATH)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    assert module.revision == "0020"
+    assert module.down_revision == "0019"
+
+    sql = _offline_sql()
+    for column in (
+        "display_amount_cents",
+        "display_currency",
+        "fx_rate",
+        "fx_source",
+        "fx_source_url",
+        "fx_quoted_at",
+    ):
+        assert column in sql
+    assert "checkout_intents_fx_quote_complete_check" in sql

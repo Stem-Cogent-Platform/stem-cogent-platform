@@ -151,7 +151,7 @@ async def _retrieve_entity(
 ) -> CILRetrievalResult:
     entity = (
         await session.execute(
-            text("SELECT id, canonical_name, entity_type, region_codes, aliases FROM intelligence.entities WHERE id = :entity_id"),
+            text("SELECT id, canonical_name, entity_type, region_tags, aliases FROM intelligence.entities WHERE id = :entity_id"),
             {"entity_id": entity_id},
         )
     ).mappings().one_or_none()

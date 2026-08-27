@@ -72,6 +72,7 @@ variables {
     SQS_PIPELINE_SCORED_URL      = "https://sqs.eu-west-1.amazonaws.com/123456789012/sc-pipeline-scored-queue-staging"
     SQS_PIPELINE_CLUSTERED_URL   = "https://sqs.eu-west-1.amazonaws.com/123456789012/sc-pipeline-clustered-queue-staging"
     SQS_PIPELINE_SYNTHESIZED_URL = "https://sqs.eu-west-1.amazonaws.com/123456789012/sc-pipeline-synthesized-queue-staging"
+    SQS_PIPELINE_RECOMMENDED_URL = "https://sqs.eu-west-1.amazonaws.com/123456789012/sc-pipeline-recommended-queue-staging"
   }
 }
 

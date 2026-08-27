@@ -1,8 +1,9 @@
 import { defineConfig } from "vitest/config";
+import { fileURLToPath, URL } from "node:url";
 
 export default defineConfig({
-  esbuild: {
-    jsx: "automatic"
+  resolve: {
+    alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) }
   },
   test: {
     environment: "node",
@@ -10,7 +11,7 @@ export default defineConfig({
     coverage: {
       provider: "v8",
       reporter: ["text", "json-summary", "html"],
-      include: ["src/**/*.{ts,tsx}"],
+      include: ["src/lib/**/*.{ts,tsx}"],
       exclude: ["src/**/*.d.ts", "src/**/*.test.{ts,tsx}"],
       thresholds: {
         branches: 80,

@@ -83,7 +83,7 @@ locals {
       command = [
         "celery", "-A", "app.workers.celery_app", "worker", "--loglevel=INFO",
         "--concurrency=4",
-        "--queues=${join(",", [basename(var.api_environment_variables["SQS_PIPELINE_CLUSTERED_URL"]), basename(var.api_environment_variables["SQS_PIPELINE_SYNTHESIZED_URL"])])}",
+        "--queues=${join(",", [basename(var.api_environment_variables["SQS_PIPELINE_CLUSTERED_URL"]), basename(var.api_environment_variables["SQS_PIPELINE_SYNTHESIZED_URL"]), basename(var.api_environment_variables["SQS_PIPELINE_RECOMMENDED_URL"])])}",
       ]
     }
   }

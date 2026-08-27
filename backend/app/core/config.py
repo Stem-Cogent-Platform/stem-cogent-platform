@@ -12,6 +12,7 @@ class Settings(BaseSettings):
 
     ENVIRONMENT: str = "development"
     SERVICE_NAME: str = "sc-api-service"
+    FRONTEND_PUBLIC_URL: str = "http://localhost:3000"
     AWS_REGION: str = "eu-west-1"
     LOG_LEVEL: str = "INFO"
     XRAY_ENABLED: bool = False
@@ -23,6 +24,7 @@ class Settings(BaseSettings):
     DATABASE_REPLICA_HOST: str | None = None
     DATABASE_URL: str | None = None
     DATABASE_SSL_MODE: str = "require"
+    DATABASE_RUNTIME_ROLE: str = "sc_app_runtime"
 
     REDIS_HOST: str | None = None
     REDIS_PORT: int = 6379
@@ -70,6 +72,7 @@ class Settings(BaseSettings):
     LLM_TIMEOUT_SECONDS: float = 45.0
     LLM_MAX_RETRIES: int = 4
     GLOBAL_SYNTHESIS_PROMPT_VERSION: str = "2026.08-v2"
+    APPLICATION_VERSION: str = "0.1.0"
 
     DATABASE_CREDENTIALS_ARN: str | None = None
     REDIS_AUTH_TOKEN_ARN: str | None = None
@@ -80,6 +83,8 @@ class Settings(BaseSettings):
     PAYSTACK_SECRET_KEY_ARN: str | None = None
     PAYSTACK_PUBLIC_KEY_ARN: str | None = None
     PAYSTACK_WEBHOOK_SECRET_ARN: str | None = None
+    CBN_USD_NGN_RATE_URL: str = "https://www.cbn.gov.ng/api/GetNFEM_Rates_TOP"
+    FX_QUOTE_TIMEOUT_SECONDS: float = 15.0
 
     SYNTHESIS_ENABLED: bool = True
     CIL_ENABLED: bool = True

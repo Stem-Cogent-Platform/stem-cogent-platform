@@ -17,6 +17,7 @@ from app.context.cache import (
     invalidate_company,
     invalidate_user,
 )
+from app.compliance import require_current_legal_acceptance
 
 
 router = APIRouter(tags=["context"])
@@ -141,6 +142,7 @@ async def put_company_context(
     context: RequestContext = Depends(get_request_context),
 ) -> dict[str, Any]:
     require_permission(context, "CONFIGURE_COMPANY_CONTEXT")
+    require_current_legal_acceptance(context)
     values = body.model_dump()
     completeness = sum(bool(values[key]) for key in values) / len(values)
     row = (
@@ -189,6 +191,7 @@ async def create_company_object(
     context: RequestContext = Depends(get_request_context),
 ) -> dict[str, Any]:
     require_permission(context, "CONFIGURE_COMPANY_CONTEXT")
+    require_current_legal_acceptance(context)
     row = (
         await context.session.execute(
             text(
@@ -221,6 +224,7 @@ async def patch_company_object(
     context: RequestContext = Depends(get_request_context),
 ) -> dict[str, Any]:
     require_permission(context, "CONFIGURE_COMPANY_CONTEXT")
+    require_current_legal_acceptance(context)
     changes = body.model_dump(exclude_unset=True)
     if not changes:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "No changes supplied")

@@ -130,7 +130,7 @@ locals {
       publish = ["pipeline-clustered"]
     }
     synthesis-worker = {
-      consume = ["pipeline-clustered", "pipeline-synthesized"]
+      consume = ["pipeline-clustered", "pipeline-synthesized", "pipeline-recommended"]
       publish = ["pipeline-synthesized", "pipeline-recommended"]
     }
     alert-worker = {
@@ -301,10 +301,15 @@ locals {
 
   service_read_kms_keys = {
     for service in local.services :
-    service => distinct([
-      for entry in local.service_s3_read_entries[service] :
-      var.bucket_kms_key_arns[entry.bucket]
-    ])
+    service => distinct(concat(
+      [
+        for entry in local.service_s3_read_entries[service] :
+        var.bucket_kms_key_arns[entry.bucket]
+      ],
+      length(local.secret_access[service]) + length(local.dynamic_secret_resources[service]) > 0
+      ? [var.secrets_kms_key_arn]
+      : []
+    ))
   }
 
   service_write_kms_keys = {

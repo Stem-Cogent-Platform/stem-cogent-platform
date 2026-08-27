@@ -4,10 +4,16 @@ from time import perf_counter
 from uuid import uuid4
 
 from fastapi import FastAPI, Request, Response
+from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.v1.cil import router as cil_router
+from app.api.v1.auth_sessions import router as auth_sessions_router
+from app.api.v1.billing import router as billing_router
+from app.api.v1.compliance import router as compliance_router
 from app.api.v1.context import router as context_router
 from app.api.v1.health import router as health_router
+from app.api.v1.product import router as product_router
+from app.api.v1.realtime import router as realtime_router
 from app.api.v1.reviews import router as reviews_router
 from app.core.config import get_settings
 from app.core.database import close_database_connection
@@ -18,11 +24,13 @@ from app.core.logging import (
     reset_log_context,
 )
 from app.core.redis import close_redis_connection
+from app.core.runtime_config import validate_runtime_configuration
 from app.core.tracing import configure_tracing
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+    validate_runtime_configuration()
     yield
     await close_database_connection()
     await close_redis_connection()
@@ -41,6 +49,13 @@ app = FastAPI(
     lifespan=lifespan,
 )
 configure_tracing(app)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[settings.FRONTEND_PUBLIC_URL],
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "X-Request-ID", "X-Correlation-ID"],
+)
 
 
 def _request_identifier(value: str | None) -> str:
@@ -101,6 +116,11 @@ async def add_security_headers(request: Request, call_next) -> Response:
 
 
 app.include_router(health_router)
+app.include_router(auth_sessions_router)
+app.include_router(billing_router)
+app.include_router(compliance_router)
 app.include_router(context_router)
+app.include_router(product_router)
+app.include_router(realtime_router)
 app.include_router(cil_router)
 app.include_router(reviews_router)

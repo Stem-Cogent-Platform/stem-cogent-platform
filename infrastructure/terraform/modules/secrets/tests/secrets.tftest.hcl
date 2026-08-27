@@ -5,6 +5,7 @@ run "creates_paths_without_secret_values" {
 
   variables {
     environment = "staging"
+    kms_key_id  = "arn:aws:kms:eu-west-1:123456789012:key/audit"
   }
 
   assert {
@@ -26,5 +27,13 @@ run "creates_paths_without_secret_values" {
       secret.recovery_window_in_days == 30
     ])
     error_message = "Every secret must retain the production-safe 30-day recovery window."
+  }
+
+  assert {
+    condition = alltrue([
+      for secret in aws_secretsmanager_secret.this :
+      secret.kms_key_id == "arn:aws:kms:eu-west-1:123456789012:key/audit"
+    ])
+    error_message = "Every application secret must use the environment customer-managed KMS key."
   }
 }
