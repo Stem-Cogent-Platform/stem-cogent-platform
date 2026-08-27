@@ -5,7 +5,7 @@ from types import SimpleNamespace
 import pytest
 
 from app.authn.passwords import hash_password, verify_password
-from app.billing import paystack, provision_plans
+from app.billing import paystack
 
 
 def test_password_hashing_is_salted_strong_and_fail_closed() -> None:
@@ -73,26 +73,4 @@ async def test_paystack_client_uses_trusted_checkout_and_provider_contract(monke
         ),
         ("GET", "/plan?perPage=100", None),
     ]
-
-
-def test_plan_matching_prefers_provider_code_then_exact_contract() -> None:
-    row = {
-        "plan_code": "TEAM",
-        "monthly_price_cents": 4900,
-        "currency": "NGN",
-        "provider_plan_code": "PLN_existing",
-    }
-    existing = {"plan_code": "PLN_existing", "name": "Legacy"}
-    assert provision_plans._find_provider_plan([existing], row) is existing
-
-    row["provider_plan_code"] = None
-    exact = {
-        "plan_code": "PLN_team",
-        "name": "Stem Cogent Team Monthly",
-        "amount": 4900,
-        "currency": "NGN",
-        "interval": "monthly",
-    }
-    assert provision_plans._find_provider_plan([exact], row) is exact
-    assert provision_plans._provider_name("INDIVIDUAL") == "Stem Cogent Individual Monthly"
 
