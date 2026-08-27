@@ -4,6 +4,7 @@ import hashlib
 import hmac
 import json
 from datetime import UTC, datetime
+from decimal import Decimal
 from types import SimpleNamespace
 from uuid import uuid4
 
@@ -12,6 +13,7 @@ from fastapi import Request
 
 from app.api.auth import Principal, RequestContext
 from app.api.v1 import billing
+from app.billing.fx import UsdNgnQuote
 
 
 class Result:
@@ -34,6 +36,10 @@ class Result:
         return self.rows
 
     def scalar_one_or_none(self):
+        return self.scalar
+
+    def scalar_one(self):
+        assert self.scalar is not None
         return self.scalar
 
 
@@ -76,14 +82,16 @@ class Paystack:
         pass
 
     async def initialize_transaction(self, payload):
-        assert payload["plan"] == "PLN_team"
+        assert payload["amount"] == "7350000"
+        assert payload["currency"] == "NGN"
+        assert "plan" not in payload
         return {"authorization_url": "https://checkout.paystack.com/test"}
 
     async def verify_transaction(self, reference: str):
         return {
             "status": "success",
             "reference": reference,
-            "amount": 4900,
+            "amount": "7350000",
             "currency": "NGN",
             "customer": {"customer_code": "CUS_test"},
             "subscription": {"subscription_code": "SUB_test"},
@@ -96,8 +104,7 @@ async def test_plan_status_checkout_and_provider_verification(monkeypatch) -> No
         "plan_code": "TEAM",
         "name": "Team",
         "monthly_price_cents": 4900,
-        "currency": "NGN",
-        "provider_plan_code": "PLN_team",
+        "currency": "USD",
     }
     assert (await billing.list_plans(context(Session(Result(rows=[plan])))))[0]["plan_code"] == "TEAM"
 
@@ -109,16 +116,33 @@ async def test_plan_status_checkout_and_provider_verification(monkeypatch) -> No
         "plan_code": "TEAM",
         "status": "INITIALIZED",
         "authorization_url": "https://checkout.paystack.com/test",
+        "amount_cents": 7350000,
+        "currency": "NGN",
+        "display_amount_cents": 4900,
+        "display_currency": "USD",
+        "fx_rate": Decimal("1500"),
+        "fx_source": "CBN_NFEM_VWAP",
+        "fx_source_url": "https://www.cbn.gov.ng/api/GetNFEM_Rates_TOP",
+        "fx_quoted_at": datetime.now(UTC),
     }
     checkout_session = Session(
         Result(row=plan),
         Result(row={"email": "pilot@example.com"}),
         Result(row=None),
-        Result(),
+        Result(row={**initialized, "status": "PENDING"}),
         Result(row=initialized),
     )
     monkeypatch.setattr(billing, "PaystackClient", Paystack)
     monkeypatch.setattr(billing, "_paystack_secret", lambda: "sk_test_server")
+
+    async def fixed_quote():
+        return UsdNgnQuote(
+            rate=Decimal("1500"), source="CBN_NFEM_VWAP",
+            source_url="https://www.cbn.gov.ng/api/GetNFEM_Rates_TOP",
+            quoted_at=datetime.now(UTC),
+        )
+
+    monkeypatch.setattr(billing, "quote_usd_ngn", fixed_quote)
     monkeypatch.setattr(
         billing,
         "get_settings",
@@ -131,20 +155,16 @@ async def test_plan_status_checkout_and_provider_verification(monkeypatch) -> No
     assert created["authorization_url"].startswith("https://checkout.paystack.com/")
     assert checkout_session.commits == 2
 
-    intent = {**plan, "status": "INITIALIZED", "amount_cents": 4900}
+    intent = {**initialized, "id": uuid4(), "status": "INITIALIZED"}
     verify_session = Session(
         Result(row=intent),
         Result(row=intent),
-        Result(),
-        Result(),
-        Result(),
-        Result(),
+        Result(scalar=uuid4()),
+        Result(), Result(), Result(), Result(),
     )
     verify_context = context(verify_session)
     reference = f"sc-{verify_context.principal.tenant_id.hex[:12]}-{uuid4().hex}"
-    verify_session.results[-1] = Result(
-        row={**intent, "status": "SUCCEEDED", "provider_reference": reference}
-    )
+    verify_session.results[-1] = Result(row={**intent, "status": "SUCCEEDED", "provider_reference": reference})
     verified = await billing.verify_checkout(reference, verify_context)
     assert verified["status"] == "SUCCEEDED"
     assert verify_session.commits == 1
@@ -155,17 +175,27 @@ async def test_webhook_charge_and_subscription_processing() -> None:
     tenant_id = uuid4()
     reference = "sc-provider-reference"
     intent = {
-        "amount_cents": 4900,
+        "id": uuid4(),
+        "status": "INITIALIZED",
+        "amount_cents": 7350000,
         "currency": "NGN",
         "plan_code": "TEAM",
+        "display_amount_cents": 4900,
+        "display_currency": "USD",
+        "fx_rate": Decimal("1500"),
+        "fx_source": "CBN_NFEM_VWAP",
+        "fx_source_url": "https://www.cbn.gov.ng/api/GetNFEM_Rates_TOP",
+        "fx_quoted_at": datetime.now(UTC),
     }
-    charge_session = Session(Result(), Result(row=intent), Result(), Result(), Result())
+    charge_session = Session(
+        Result(), Result(row=intent), Result(scalar=uuid4()), Result(), Result(), Result()
+    )
     await billing._process_webhook(
         charge_session,
         "charge.success",
         {
             "reference": reference,
-            "amount": 4900,
+            "amount": "7350000",
             "currency": "NGN",
             "metadata": json.dumps({"tenant_id": str(tenant_id)}),
             "customer": {"customer_code": "CUS_test"},

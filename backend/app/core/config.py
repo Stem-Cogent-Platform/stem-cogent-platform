@@ -83,6 +83,8 @@ class Settings(BaseSettings):
     PAYSTACK_SECRET_KEY_ARN: str | None = None
     PAYSTACK_PUBLIC_KEY_ARN: str | None = None
     PAYSTACK_WEBHOOK_SECRET_ARN: str | None = None
+    CBN_USD_NGN_RATE_URL: str = "https://www.cbn.gov.ng/api/GetNFEM_Rates_TOP"
+    FX_QUOTE_TIMEOUT_SECONDS: float = 15.0
 
     SYNTHESIS_ENABLED: bool = True
     CIL_ENABLED: bool = True

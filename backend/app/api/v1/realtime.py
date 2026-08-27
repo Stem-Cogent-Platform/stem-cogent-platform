@@ -78,13 +78,20 @@ async def _is_entitled(tenant_id: UUID, user_id: UUID) -> bool:
                 text(
                     """
                     SELECT plans.entitlements->>'realtime_briefing' AS enabled,
-                           COALESCE(subscription.status,
+                           CASE
+                             WHEN subscription.status = 'TRIALING'
+                               AND subscription.trial_ends_at <= NOW() THEN 'EXPIRED'
+                             WHEN subscription.status IN ('ACTIVE', 'PAST_DUE')
+                               AND subscription.current_period_end <= NOW() THEN 'PAST_DUE'
+                             ELSE COALESCE(subscription.status,
                              CASE WHEN tenant.status = 'TRIAL' THEN 'TRIALING' ELSE tenant.status END
-                           ) AS billing_status
+                             )
+                           END AS billing_status
                     FROM auth.users AS users
                     JOIN auth.tenants AS tenant ON tenant.id = users.tenant_id
                     LEFT JOIN LATERAL (
-                        SELECT candidate.plan_code, candidate.status
+                        SELECT candidate.plan_code, candidate.status, candidate.trial_ends_at,
+                               candidate.current_period_end
                         FROM billing.subscriptions AS candidate
                         WHERE candidate.tenant_id = tenant.id
                           AND candidate.status IN ('TRIALING', 'ACTIVE', 'PAST_DUE')

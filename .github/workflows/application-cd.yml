@@ -493,8 +493,6 @@ jobs:
           bash .github/scripts/run-one-shot-ecs-task.sh alembic upgrade head
           bash .github/scripts/run-one-shot-ecs-task.sh \
             python alembic/seeds/seed_launch_sources.py
-          bash .github/scripts/run-one-shot-ecs-task.sh \
-            python -m app.billing.provision_plans
 
       - name: Register task definitions and start rolling deployments
         shell: bash

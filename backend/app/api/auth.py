@@ -22,6 +22,12 @@ from app.core.secrets import get_secret_string
 
 
 _bearer = HTTPBearer(auto_error=False)
+_ACTIVE_BILLING_STATES = frozenset({"TRIALING", "ACTIVE"})
+_BILLING_EXEMPT_PREFIXES = (
+    "/api/v1/auth",
+    "/api/v1/billing",
+    "/api/v1/compliance",
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -77,6 +83,11 @@ async def get_request_context(
                            users.binding_app_version, users.current_compliance_ledger_id,
                            plans.plan_code,
                            CASE
+                             WHEN subscriptions.id IS NOT NULL AND subscriptions.status = 'TRIALING'
+                               AND subscriptions.trial_ends_at <= NOW() THEN 'EXPIRED'
+                             WHEN subscriptions.id IS NOT NULL
+                               AND subscriptions.status IN ('ACTIVE', 'PAST_DUE')
+                               AND subscriptions.current_period_end <= NOW() THEN 'PAST_DUE'
                              WHEN subscriptions.id IS NOT NULL THEN subscriptions.status
                              WHEN tenants.status IN ('TRIAL', 'ACTIVE') THEN
                                CASE WHEN tenants.status = 'TRIAL' THEN 'TRIALING' ELSE 'ACTIVE' END
@@ -88,7 +99,8 @@ async def get_request_context(
                       ON roles.role_code = users.permission_role
                     JOIN auth.tenants AS tenants ON tenants.id = users.tenant_id
                     LEFT JOIN LATERAL (
-                        SELECT candidate.id, candidate.plan_code, candidate.status
+                        SELECT candidate.id, candidate.plan_code, candidate.status,
+                               candidate.trial_ends_at, candidate.current_period_end
                         FROM billing.subscriptions AS candidate
                         WHERE candidate.tenant_id = users.tenant_id
                           AND candidate.status IN ('TRIALING', 'ACTIVE', 'PAST_DUE')
@@ -125,6 +137,17 @@ async def get_request_context(
             billing_status=row["billing_status"],
             entitlements=dict(row["entitlements"]),
         )
+        if (
+            principal.billing_status not in _ACTIVE_BILLING_STATES
+            and not request.url.path.startswith(_BILLING_EXEMPT_PREFIXES)
+        ):
+            raise HTTPException(
+                status.HTTP_403_FORBIDDEN,
+                detail={
+                    "code": "BILLING_ACCESS_REQUIRED",
+                    "message": "This workspace does not have an active plan. Review billing to continue.",
+                },
+            )
         request.state.principal = principal
         yield RequestContext(principal, session)
         return
