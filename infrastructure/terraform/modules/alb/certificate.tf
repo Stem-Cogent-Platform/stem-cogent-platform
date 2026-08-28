@@ -1,6 +1,6 @@
 resource "aws_acm_certificate" "this" {
   domain_name               = var.frontend_hostname
-  subject_alternative_names = [var.api_hostname]
+  subject_alternative_names = concat([var.api_hostname], sort(tolist(var.frontend_redirect_hostnames)))
   validation_method         = "DNS"
 
   lifecycle {
@@ -17,7 +17,10 @@ resource "aws_route53_record" "certificate_validation" {
 
   # Instance keys come from input hostnames, not apply-time ACM attributes, so
   # a fresh environment can produce one complete plan without -target passes.
-  for_each = toset([var.api_hostname, var.frontend_hostname])
+  for_each = setunion(
+    toset([var.api_hostname, var.frontend_hostname]),
+    var.frontend_redirect_hostnames,
+  )
 
   allow_overwrite = true
   zone_id         = data.aws_route53_zone.public.zone_id
