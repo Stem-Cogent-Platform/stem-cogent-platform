@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 
-MANIFEST_VERSION = "2026.08-v3"
+MANIFEST_VERSION = "2026.08-v4"
 TAXONOMY_DOMAINS = frozenset(
     {
         "REGULATORY_POLICY",
@@ -88,19 +88,6 @@ LAUNCH_SOURCES = (
         0.97,
         ("REGULATORY_POLICY", "FRAUD_RISK_TRUST"),
         "https://ndpc.gov.ng/news/",
-    ),
-    LaunchSource(
-        "NIBSS_MEDIA_HTML",
-        "Nigeria Inter-Bank Settlement System Media",
-        "HTML",
-        1,
-        "https://nibss-plc.com.ng/media/",
-        "NO_AUTH",
-        "4,19,34,49 * * * *",
-        "HIGH",
-        0.95,
-        ("INFRASTRUCTURE_RELIABILITY", "CUSTOMER_MARKET", "FRAUD_RISK_TRUST"),
-        "https://nibss-plc.com.ng/media/",
     ),
     LaunchSource(
         "PAYSTACK_STATUS_API",

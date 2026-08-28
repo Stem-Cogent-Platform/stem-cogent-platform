@@ -15,7 +15,13 @@ from app.ingestion.base_collector import (
     S3EvidenceStore,
 )
 from app.ingestion.html_collector import HTMLCollector
-from app.ingestion.http import ApprovedHttpFetcher, HttpPayload, UnsafeSourceUrl, _is_public
+from app.ingestion.http import (
+    ApprovedHttpFetcher,
+    HttpPayload,
+    SourceFetchError,
+    UnsafeSourceUrl,
+    _is_public,
+)
 from app.ingestion.pdf_collector import PDFCollector
 from app.ingestion.rss_collector import RSSCollector
 from app.ingestion.upload_collector import UploadCollector
@@ -188,3 +194,36 @@ async def test_http_fetcher_retries_transient_rate_limit(monkeypatch) -> None:
 
     assert attempts == 2
     assert payload.body == b'{"articles": []}'
+
+
+@pytest.mark.asyncio
+async def test_http_fetcher_retries_transport_failure(monkeypatch) -> None:
+    attempts = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise httpx.ConnectTimeout("temporary outage", request=request)
+        return httpx.Response(200, content=b"ok", request=request)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        fetcher = ApprovedHttpFetcher({"status.example.com"}, client=client)
+        monkeypatch.setattr(fetcher, "_validate_url", AsyncMock())
+        monkeypatch.setattr("app.ingestion.http.asyncio.sleep", AsyncMock())
+        payload = await fetcher.fetch("https://status.example.com/api")
+
+    assert attempts == 2
+    assert payload.body == b"ok"
+
+
+@pytest.mark.asyncio
+async def test_http_fetcher_normalises_terminal_source_failure(monkeypatch) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(403, request=request)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        fetcher = ApprovedHttpFetcher({"blocked.example.com"}, client=client)
+        monkeypatch.setattr(fetcher, "_validate_url", AsyncMock())
+        with pytest.raises(SourceFetchError, match="HTTP 403"):
+            await fetcher.fetch("https://blocked.example.com/news")
