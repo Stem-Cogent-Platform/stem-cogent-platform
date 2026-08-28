@@ -67,5 +67,26 @@ exit_code="$(jq -r --arg container "$ECS_MIGRATION_CONTAINER_NAME" \
 if [ "$exit_code" != "0" ]; then
   jq '{stoppedReason: .tasks[0].stoppedReason, containers: [.tasks[0].containers[] | {name, exitCode, reason, lastStatus}]}' \
     one-shot-result.json >&2
+  task_id="${task_arn##*/}"
+  log_configuration="$(aws ecs describe-task-definition \
+    --task-definition "$MIGRATION_TASK_DEFINITION" \
+    --query "taskDefinition.containerDefinitions[?name=='$ECS_MIGRATION_CONTAINER_NAME'].logConfiguration.options | [0]" \
+    --output json)"
+  log_group="$(jq -r '."awslogs-group" // empty' <<<"$log_configuration")"
+  log_prefix="$(jq -r '."awslogs-stream-prefix" // empty' <<<"$log_configuration")"
+  if [ -n "$log_group" ] && [ -n "$log_prefix" ]; then
+    log_stream="$log_prefix/$ECS_MIGRATION_CONTAINER_NAME/$task_id"
+    echo "One-shot container logs ($log_group / $log_stream):" >&2
+    for attempt in 1 2 3 4 5; do
+      if aws logs get-log-events \
+        --log-group-name "$log_group" \
+        --log-stream-name "$log_stream" \
+        --query 'events[].message' \
+        --output text >&2; then
+        break
+      fi
+      sleep 2
+    done
+  fi
   exit 1
 fi

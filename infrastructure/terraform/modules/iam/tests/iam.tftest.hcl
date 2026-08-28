@@ -82,6 +82,7 @@ variables {
     worker   = "arn:aws:ecr:eu-west-1:123456789012:repository/sc-worker-staging"
     frontend = "arn:aws:ecr:eu-west-1:123456789012:repository/sc-frontend-staging"
   }
+  api_log_group_arn = "arn:aws:logs:eu-west-1:123456789012:log-group:/sc/api-service/staging"
 
   ecs_cluster_arn            = "arn:aws:ecs:eu-west-1:123456789012:cluster/sc-cluster-staging"
   github_repository_id       = "1254005582"
@@ -319,7 +320,15 @@ run "enforces_application_cd_least_privilege_boundaries" {
   }
 
   assert {
-    condition     = local.application_deploy_policy_statements[6].Condition.StringEquals["iam:PassedToService"] == "ecs-tasks.amazonaws.com"
+    condition = one([
+      for statement in local.application_deploy_policy_statements : statement
+      if statement.Sid == "ReadMigrationFailureLogs"
+    ]).Resource == ["arn:aws:logs:eu-west-1:123456789012:log-group:/sc/api-service/staging:log-stream:api-service/migration/*"]
+    error_message = "Migration diagnostics must read only the migration streams in the API log group."
+  }
+
+  assert {
+    condition     = one([for statement in local.application_deploy_policy_statements : statement if statement.Sid == "PassOnlyApplicationTaskRoles"]).Condition.StringEquals["iam:PassedToService"] == "ecs-tasks.amazonaws.com"
     error_message = "PassRole must be restricted to the ECS tasks service."
   }
 }
