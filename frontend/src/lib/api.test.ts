@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { ApiError, accessToken, apiRequest, clearSession, currentUser, login, logout } from "./api";
+import { ApiError, accessToken, apiRequest, beginSso, clearSession, currentUser, login, logout, register } from "./api";
 import { legalCopy } from "./legal-copy";
 
 afterEach(() => {
@@ -88,6 +88,20 @@ describe("apiRequest", () => {
     ).resolves.toMatchObject({ access_token: "fresh-token" });
     expect(accessToken()).toBe("fresh-token");
     expect(currentUser()).toEqual({ display_name: "Pilot User" });
+  });
+
+  it("creates public trial sessions and begins provider sign-in through the API", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ access_token: "trial-token", expires_in: 900, user: { workspace_name: "Acme" } }), { status: 201, headers: { "Content-Type": "application/json" } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ authorization_url: "https://accounts.google.com/authorize" }), { status: 200, headers: { "Content-Type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await register({ company_name: "Acme", display_name: "Ada User", email: "ada@example.com", password: "long-secure-password" });
+    await expect(beginSso("google", "signup")).resolves.toEqual({ authorization_url: "https://accounts.google.com/authorize" });
+
+    expect(accessToken()).toBe("trial-token");
+    expect(fetchMock.mock.calls[0][0]).toBe("http://localhost:8000/api/v1/auth/register");
+    expect(fetchMock.mock.calls[1][0]).toBe("http://localhost:8000/api/v1/auth/sso/google/start?intent=signup");
   });
 
   it("refreshes once after an authenticated 401 and retries the request", async () => {

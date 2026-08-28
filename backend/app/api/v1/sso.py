@@ -164,6 +164,7 @@ async def callback(
             .mappings()
             .one_or_none()
         )
+        session_user: Any
         if identity is None:
             if payload.get("intent") != "signup":
                 missing = RedirectResponse(
@@ -171,7 +172,7 @@ async def callback(
                 )
                 missing.delete_cookie(_NONCE_COOKIE, path="/api/v1/auth/sso")
                 return missing
-            row = await _create_sso_account(
+            session_user = await _create_sso_account(
                 session, provider, subject, email, display_name
             )
             redirect = RedirectResponse(
@@ -182,7 +183,7 @@ async def callback(
                 text("SELECT set_config('app.current_tenant_id', :tenant_id, true)"),
                 {"tenant_id": str(identity["tenant_id"])},
             )
-            row = (
+            session_user = (
                 (
                     await session.execute(
                         text(
@@ -204,13 +205,13 @@ async def callback(
                 .mappings()
                 .one_or_none()
             )
-            if row is None:
+            if session_user is None:
                 raise HTTPException(
                     status.HTTP_409_CONFLICT,
                     "This account is linked to another identity",
                 )
         redirect.delete_cookie(_NONCE_COOKIE, path="/api/v1/auth/sso")
-        await _issue_session(session, row, request, redirect)
+        await _issue_session(session, session_user, request, redirect)
         return redirect
     raise HTTPException(
         status.HTTP_503_SERVICE_UNAVAILABLE, "Single sign-on is temporarily unavailable"
