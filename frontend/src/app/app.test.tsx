@@ -23,8 +23,12 @@ describe("HomePage", () => {
 
 describe("RootLayout", () => {
   it("defines the platform metadata", () => {
-    expect(metadata.title).toEqual({ default: "Stem", template: "%s · Stem" });
+    expect(metadata.title).toEqual({
+      default: "Stem Cogent | Decision Intelligence for Nigerian Fintech",
+      template: "%s · Stem Cogent"
+    });
     expect(metadata.description).toContain("Evidence-backed decision intelligence");
+    expect(metadata.alternates).toEqual({ canonical: "/" });
   });
 
   it("renders an English document with its children", () => {
