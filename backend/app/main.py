@@ -15,6 +15,8 @@ from app.api.v1.health import router as health_router
 from app.api.v1.product import router as product_router
 from app.api.v1.realtime import router as realtime_router
 from app.api.v1.reviews import router as reviews_router
+from app.api.v1.search import router as search_router
+from app.api.v1.sso import router as sso_router
 from app.core.config import get_settings
 from app.core.database import close_database_connection
 from app.core.logging import (
@@ -70,7 +72,9 @@ def _request_identifier(value: str | None) -> str:
 async def add_request_context(request: Request, call_next) -> Response:
     request_id = _request_identifier(request.headers.get("x-request-id"))
     correlation_header = request.headers.get("x-correlation-id")
-    correlation_id = _request_identifier(correlation_header) if correlation_header else request_id
+    correlation_id = (
+        _request_identifier(correlation_header) if correlation_header else request_id
+    )
     tokens = bind_log_context(request_id=request_id, correlation_id=correlation_id)
     started = perf_counter()
 
@@ -108,7 +112,9 @@ async def add_request_context(request: Request, call_next) -> Response:
 @app.middleware("http")
 async def add_security_headers(request: Request, call_next) -> Response:
     response: Response = await call_next(request)
-    response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains; preload"
+    response.headers["Strict-Transport-Security"] = (
+        "max-age=31536000; includeSubDomains; preload"
+    )
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
@@ -124,3 +130,5 @@ app.include_router(product_router)
 app.include_router(realtime_router)
 app.include_router(cil_router)
 app.include_router(reviews_router)
+app.include_router(search_router)
+app.include_router(sso_router)

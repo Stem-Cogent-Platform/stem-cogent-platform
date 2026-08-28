@@ -2,42 +2,59 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { ReactNode, useEffect, useState } from "react";
+import { FormEvent, ReactNode, useEffect, useState } from "react";
 
-import { clearSession, logout } from "@/lib/api";
 import { StemMark } from "@/components/stem-mark";
+import { apiRequest, bootstrapSession, currentUser, logout } from "@/lib/api";
 
 const navigation = [
-  ["/briefing", "My Briefing"],
-  ["/company", "Company Lens"],
-  ["/watchlist", "Watchlist"],
-  ["/intelligence", "Intelligence"],
-  ["/alerts", "Alerts"],
-  ["/digests", "Digests"],
-  ["/pilot", "Guided Pilot"]
+  ["/briefing", "My Decision Briefing", "briefing"],
+  ["/company", "Company Lens", "company"],
+  ["/watchlist", "Watchlist", "watch"],
+  ["/intelligence", "Wider Intelligence", "intelligence"],
+  ["/alerts", "Alerts", "alerts"],
+  ["/digests", "Digests", "digests"]
 ] as const;
+
+function NavIcon({ name }: { name: string }) {
+  const paths: Record<string, ReactNode> = {
+    briefing: <><path d="M4 5.5h16M4 12h10M4 18.5h13" /><circle cx="18" cy="12" r="2" /></>,
+    company: <><path d="M4 21V7l8-4 8 4v14M8 9h1m6 0h1M8 13h1m6 0h1M9 21v-4h6v4" /></>,
+    watch: <><path d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6Z" /><circle cx="12" cy="12" r="2.5" /></>,
+    intelligence: <><path d="M4 19V9m5 10V5m5 14v-7m5 7V3" /></>,
+    alerts: <><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4" /></>,
+    digests: <><path d="M5 3h11l3 3v15H5zM8 9h8M8 13h8M8 17h5" /></>,
+    settings: <><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-2.8 2.8-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6v.2h-4V21a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1L4.2 17l.1-.1a1.7 1.7 0 0 0 .3-1.9A1.7 1.7 0 0 0 3 14H2.8v-4H3a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9L4.2 7 7 4.2l.1.1A1.7 1.7 0 0 0 9 4.6 1.7 1.7 0 0 0 10 3V2.8h4V3a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.3l.1-.1L19.8 7l-.1.1a1.7 1.7 0 0 0-.3 1.9 1.7 1.7 0 0 0 1.6 1h.2v4H21a1.7 1.7 0 0 0-1.6 1Z" /></>
+  };
+  return <svg aria-hidden="true" className="nav-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.7">{paths[name]}</svg>;
+}
 
 export function WorkspaceShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
-  const [label, setLabel] = useState("Workspace");
+  const [ready, setReady] = useState(false);
+  const [mobileOpen, setMobileOpen] = useState(false);
+  const [user, setUser] = useState<Record<string, unknown>>({});
+  const [query, setQuery] = useState("");
+  const [unreadAlerts, setUnreadAlerts] = useState(0);
 
   useEffect(() => {
-    const token = window.sessionStorage.getItem("sc_access_token");
-    if (!token) {
-      clearSession();
-      router.replace(`/login?next=${encodeURIComponent(pathname)}`);
-      return;
-    }
-    const labelTimer = window.setTimeout(() => {
-      try {
-        const user = JSON.parse(window.sessionStorage.getItem("sc_user") ?? "{}");
-        setLabel(user.workspace_name ?? user.display_name ?? "Workspace");
-      } catch {
-        setLabel("Workspace");
+    let active = true;
+    void bootstrapSession().then((authenticated) => {
+      if (!active) return;
+      if (!authenticated) {
+        router.replace(`/login?next=${encodeURIComponent(pathname)}`);
+        return;
       }
-    }, 0);
-    return () => window.clearTimeout(labelTimer);
+      setUser(currentUser() ?? {});
+      setReady(true);
+      void apiRequest<Array<{ read_at?: string | null }>>("/api/v1/alerts")
+        .then((alerts) => {
+          if (active) setUnreadAlerts(alerts.filter((alert) => !alert.read_at).length);
+        })
+        .catch(() => undefined);
+    });
+    return () => { active = false; };
   }, [pathname, router]);
 
   async function signOut() {
@@ -45,27 +62,52 @@ export function WorkspaceShell({ children }: { children: ReactNode }) {
     router.replace("/login");
   }
 
+  function search(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const normalized = query.trim();
+    if (normalized.length >= 2) router.push(`/search?q=${encodeURIComponent(normalized)}`);
+  }
+
+  if (!ready) return <main className="centered-state"><p>Opening your workspace…</p></main>;
+
+  const displayName = String(user.display_name ?? "Stem user");
+  const workspaceName = String(user.workspace_name ?? "Workspace");
+  const initials = displayName.split(/\s+/).slice(0, 2).map((part) => part[0]).join("").toUpperCase();
+
   return (
-    <main className="workspace-page">
-      <header className="workspace-header">
-        <Link className="wordmark" href="/briefing" aria-label="Stem briefing">
-          <StemMark compact />
-          <span>Stem</span>
-        </Link>
-        <nav aria-label="Primary">
-          {navigation.map(([href, text]) => (
-            <Link className={pathname.startsWith(href) ? "active" : ""} href={href} key={href}>
-              {text}
-            </Link>
-          ))}
+    <main className="app-shell">
+      {mobileOpen && <button aria-label="Close navigation" className="sidebar-scrim" onClick={() => setMobileOpen(false)} type="button" />}
+      <aside className={mobileOpen ? "app-sidebar mobile-open" : "app-sidebar"}>
+        <Link className="sidebar-brand" href="/briefing"><StemMark compact /><span>Stem Cogent</span></Link>
+        <div className="sidebar-section-label">Workspace</div>
+        <nav aria-label="Primary navigation">
+          {navigation.map(([href, text, icon]) => {
+            const active = pathname.startsWith(href);
+            return <Link aria-current={active ? "page" : undefined} className={active ? "active" : ""} href={href} key={href} onClick={() => setMobileOpen(false)}><NavIcon name={icon} /><span>{text}</span>{href === "/alerts" && unreadAlerts > 0 && <i className="nav-count">{unreadAlerts > 99 ? "99+" : unreadAlerts}</i>}</Link>;
+          })}
         </nav>
-        <div className="workspace-account">
-          <span className="profile-chip">{label}</span>
-          <Link className="text-link" href="/settings/billing">Billing</Link>
-          <button className="link-button" onClick={() => void signOut()} type="button">Sign out</button>
+        <div className="sidebar-spacer" />
+        <nav aria-label="Account navigation">
+          <Link className={pathname.startsWith("/settings") ? "active" : ""} href="/settings"><NavIcon name="settings" /><span>Settings</span></Link>
+        </nav>
+        <div className="sidebar-user">
+          <span className="user-avatar">{initials || "SC"}</span>
+          <div><strong>{displayName}</strong><small>{String(user.permission_role ?? "Member")}</small></div>
+          <button aria-label="Sign out" onClick={() => void signOut()} type="button">↗</button>
         </div>
-      </header>
-      {children}
+      </aside>
+      <div className="app-frame">
+        <header className="app-topnav">
+          <button aria-label="Open navigation" className="mobile-menu" onClick={() => setMobileOpen(true)} type="button">☰</button>
+          <form className="global-search" onSubmit={search} role="search"><span aria-hidden="true">⌕</span><input aria-label="Search briefs, intelligence, and entities" onChange={(event) => setQuery(event.target.value)} placeholder="Search briefs, intelligence, entities…" type="search" value={query} /><button className="sr-only" type="submit">Search</button></form>
+          <div className="topnav-actions">
+            <Link aria-label={unreadAlerts ? `View ${unreadAlerts} unread alerts` : "View alerts"} className="topnav-icon" href="/alerts"><NavIcon name="alerts" />{unreadAlerts > 0 && <i />}</Link>
+            <span className="company-switcher"><small>Company</small><strong>{workspaceName}</strong></span>
+            <span className="user-avatar compact">{initials || "SC"}</span>
+          </div>
+        </header>
+        <div className="app-content">{children}</div>
+      </div>
     </main>
   );
 }

@@ -88,7 +88,7 @@ export function LegalConsentCard() {
       });
       setState("saved");
       setMessage("Your acceptance is securely recorded. Company Context is now available.");
-      window.setTimeout(() => router.push("/onboarding/company"), 500);
+      window.setTimeout(() => router.push("/onboarding"), 500);
     } catch (error) {
       setState("ready");
       if (error instanceof ApiError && error.status === 401) {

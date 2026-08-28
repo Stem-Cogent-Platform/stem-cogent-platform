@@ -63,15 +63,17 @@ variables {
   }
 
   secret_arns = {
-    database_credentials    = "arn:aws:secretsmanager:eu-west-1:123456789012:secret:sc/staging/rds/stemcogent/credentials-a"
-    redis_auth_token        = "arn:aws:secretsmanager:eu-west-1:123456789012:secret:sc/staging/elasticache/redis/auth-token-a"
-    jwt_signing_secret      = "arn:aws:secretsmanager:eu-west-1:123456789012:secret:sc/staging/auth/jwt-signing-secret-a"
-    openai_api_key          = "arn:aws:secretsmanager:eu-west-1:123456789012:secret:sc/staging/llm/openai/api-key-a"
-    groq_api_key            = "arn:aws:secretsmanager:eu-west-1:123456789012:secret:sc/staging/llm/groq/api-key-a"
-    resend_api_key          = "arn:aws:secretsmanager:eu-west-1:123456789012:secret:sc/staging/email/resend/api-key-a"
-    paystack_secret_key     = "arn:aws:secretsmanager:eu-west-1:123456789012:secret:sc/staging/paystack/secret-key-a"
-    paystack_public_key     = "arn:aws:secretsmanager:eu-west-1:123456789012:secret:sc/staging/paystack/public-key-a"
-    paystack_webhook_secret = "arn:aws:secretsmanager:eu-west-1:123456789012:secret:sc/staging/paystack/webhook-secret-a"
+    database_credentials       = "arn:aws:secretsmanager:eu-west-1:123456789012:secret:sc/staging/rds/stemcogent/credentials-a"
+    redis_auth_token           = "arn:aws:secretsmanager:eu-west-1:123456789012:secret:sc/staging/elasticache/redis/auth-token-a"
+    jwt_signing_secret         = "arn:aws:secretsmanager:eu-west-1:123456789012:secret:sc/staging/auth/jwt-signing-secret-a"
+    openai_api_key             = "arn:aws:secretsmanager:eu-west-1:123456789012:secret:sc/staging/llm/openai/api-key-a"
+    groq_api_key               = "arn:aws:secretsmanager:eu-west-1:123456789012:secret:sc/staging/llm/groq/api-key-a"
+    resend_api_key             = "arn:aws:secretsmanager:eu-west-1:123456789012:secret:sc/staging/email/resend/api-key-a"
+    paystack_secret_key        = "arn:aws:secretsmanager:eu-west-1:123456789012:secret:sc/staging/paystack/secret-key-a"
+    paystack_public_key        = "arn:aws:secretsmanager:eu-west-1:123456789012:secret:sc/staging/paystack/public-key-a"
+    paystack_webhook_secret    = "arn:aws:secretsmanager:eu-west-1:123456789012:secret:sc/staging/paystack/webhook-secret-a"
+    google_oauth_credentials   = "arn:aws:secretsmanager:eu-west-1:123456789012:secret:sc/staging/auth/google-oauth-credentials-a"
+    linkedin_oauth_credentials = "arn:aws:secretsmanager:eu-west-1:123456789012:secret:sc/staging/auth/linkedin-oauth-credentials-a"
   }
   secrets_kms_key_arn = "arn:aws:kms:eu-west-1:123456789012:key/audit"
 

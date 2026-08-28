@@ -1,28 +1,30 @@
 locals {
   api_environment_variables = merge(
     {
-      DATABASE_HOST               = module.rds.primary_address
-      DATABASE_PORT               = tostring(module.rds.port)
-      DATABASE_NAME               = module.rds.database_name
-      DATABASE_REPLICA_HOST       = coalesce(module.rds.read_replica_address, module.rds.primary_address)
-      DATABASE_CREDENTIALS_ARN    = module.secrets.secret_arns["database_credentials"]
-      DATABASE_SSL_MODE           = "require"
-      DATABASE_RUNTIME_ROLE       = "sc_app_runtime"
-      FRONTEND_PUBLIC_URL         = var.frontend_public_url
-      REDIS_HOST                  = module.elasticache.primary_endpoint_address
-      REDIS_PORT                  = tostring(module.elasticache.port)
-      REDIS_AUTH_TOKEN_ARN        = module.secrets.secret_arns["redis_auth_token"]
-      REDIS_TLS_ENABLED           = "true"
-      JWT_SIGNING_SECRET_ARN      = module.secrets.secret_arns["jwt_signing_secret"]
-      OPENAI_API_KEY_ARN          = module.secrets.secret_arns["openai_api_key"]
-      GROQ_API_KEY_ARN            = module.secrets.secret_arns["groq_api_key"]
-      RESEND_API_KEY_ARN          = module.secrets.secret_arns["resend_api_key"]
-      PAYSTACK_SECRET_KEY_ARN     = module.secrets.secret_arns["paystack_secret_key"]
-      PAYSTACK_PUBLIC_KEY_ARN     = module.secrets.secret_arns["paystack_public_key"]
-      PAYSTACK_WEBHOOK_SECRET_ARN = module.secrets.secret_arns["paystack_webhook_secret"]
-      SYNTHESIS_ENABLED           = "false"
-      CIL_ENABLED                 = "false"
-      CLICKHOUSE_ENABLED          = "false"
+      DATABASE_HOST                  = module.rds.primary_address
+      DATABASE_PORT                  = tostring(module.rds.port)
+      DATABASE_NAME                  = module.rds.database_name
+      DATABASE_REPLICA_HOST          = coalesce(module.rds.read_replica_address, module.rds.primary_address)
+      DATABASE_CREDENTIALS_ARN       = module.secrets.secret_arns["database_credentials"]
+      DATABASE_SSL_MODE              = "require"
+      DATABASE_RUNTIME_ROLE          = "sc_app_runtime"
+      FRONTEND_PUBLIC_URL            = var.frontend_public_url
+      REDIS_HOST                     = module.elasticache.primary_endpoint_address
+      REDIS_PORT                     = tostring(module.elasticache.port)
+      REDIS_AUTH_TOKEN_ARN           = module.secrets.secret_arns["redis_auth_token"]
+      REDIS_TLS_ENABLED              = "true"
+      JWT_SIGNING_SECRET_ARN         = module.secrets.secret_arns["jwt_signing_secret"]
+      OPENAI_API_KEY_ARN             = module.secrets.secret_arns["openai_api_key"]
+      GROQ_API_KEY_ARN               = module.secrets.secret_arns["groq_api_key"]
+      RESEND_API_KEY_ARN             = module.secrets.secret_arns["resend_api_key"]
+      PAYSTACK_SECRET_KEY_ARN        = module.secrets.secret_arns["paystack_secret_key"]
+      PAYSTACK_PUBLIC_KEY_ARN        = module.secrets.secret_arns["paystack_public_key"]
+      PAYSTACK_WEBHOOK_SECRET_ARN    = module.secrets.secret_arns["paystack_webhook_secret"]
+      GOOGLE_OAUTH_CREDENTIALS_ARN   = module.secrets.secret_arns["google_oauth_credentials"]
+      LINKEDIN_OAUTH_CREDENTIALS_ARN = module.secrets.secret_arns["linkedin_oauth_credentials"]
+      SYNTHESIS_ENABLED              = "true"
+      CIL_ENABLED                    = "true"
+      CLICKHOUSE_ENABLED             = "false"
     },
     {
       for queue_name, queue_url in module.sqs.queue_urls :

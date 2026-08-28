@@ -32,6 +32,9 @@ class Result:
         assert self.scalar is not None
         return self.scalar
 
+    def scalar_one_or_none(self):
+        return self.scalar
+
 
 class Session:
     def __init__(self, *results: Result) -> None:
@@ -74,9 +77,13 @@ def configure_auth(monkeypatch) -> None:
     monkeypatch.setattr(
         auth_sessions,
         "get_settings",
-        lambda: SimpleNamespace(JWT_SIGNING_SECRET_ARN="arn:jwt", ENVIRONMENT="staging"),
+        lambda: SimpleNamespace(
+            JWT_SIGNING_SECRET_ARN="arn:jwt", ENVIRONMENT="staging"
+        ),
     )
-    monkeypatch.setattr(auth_sessions, "get_secret_string", lambda _arn: "signing-secret")
+    monkeypatch.setattr(
+        auth_sessions, "get_secret_string", lambda _arn: "signing-secret"
+    )
 
 
 @pytest.mark.asyncio
@@ -84,18 +91,26 @@ async def test_login_refresh_logout_and_me(monkeypatch) -> None:
     configure_auth(monkeypatch)
     user = row()
     session_id = uuid4()
-    login_session = Session(Result(), Result(row=user), Result(scalar=session_id), Result())
+    login_session = Session(
+        Result(), Result(row=user), Result(scalar=session_id), Result()
+    )
 
     async def login_sessions():
         yield login_session
 
     monkeypatch.setattr(auth_sessions, "get_session", login_sessions)
-    monkeypatch.setattr(auth_sessions, "verify_password", lambda password, encoded: password == "correct")
+    monkeypatch.setattr(
+        auth_sessions,
+        "verify_password",
+        lambda password, encoded: password == "correct",
+    )
     monkeypatch.setattr(auth_sessions, "_enforce_rate_limit", AsyncMock())
     response = Response()
     logged_in = await auth_sessions.login(
         auth_sessions.LoginInput(
-            workspace_id=user["tenant_id"], email="PILOT@example.com", password="correct"
+            workspace_id=user["tenant_id"],
+            email="PILOT@example.com",
+            password="correct",
         ),
         request(),
         response,
@@ -107,9 +122,14 @@ async def test_login_refresh_logout_and_me(monkeypatch) -> None:
     assert "HttpOnly" in response.headers["set-cookie"]
     assert "Secure" in response.headers["set-cookie"]
 
-    cookie = response.headers["set-cookie"].split("sc_refresh_token=", 1)[1].split(";", 1)[0]
+    cookie = (
+        response.headers["set-cookie"].split("sc_refresh_token=", 1)[1].split(";", 1)[0]
+    )
     _, _, secret = auth_sessions._parse_refresh_cookie(cookie)
-    refresh_row = {**user, "refresh_token_hash": hashlib.sha256(secret.encode()).hexdigest()}
+    refresh_row = {
+        **user,
+        "refresh_token_hash": hashlib.sha256(secret.encode()).hexdigest(),
+    }
     refresh_session = Session(Result(), Result(row=refresh_row))
 
     async def refresh_sessions():
@@ -146,10 +166,48 @@ async def test_login_refresh_logout_and_me(monkeypatch) -> None:
         billing_status="ACTIVE",
         entitlements={},
     )
-    me_session = Session(Result(row={key: user[key] for key in ("email", "display_name", "tenant_name")}))
-    current = await auth_sessions.me(RequestContext(principal=principal, session=me_session))  # type: ignore[arg-type]
+    me_session = Session(
+        Result(row={key: user[key] for key in ("email", "display_name", "tenant_name")})
+    )
+    current = await auth_sessions.me(
+        RequestContext(principal=principal, session=me_session)
+    )  # type: ignore[arg-type]
     assert current["plan_code"] == "BUSINESS"
     assert current["legal_acceptance_current"] is True
+
+
+@pytest.mark.asyncio
+async def test_public_login_resolves_tenant_without_workspace_uuid(monkeypatch) -> None:
+    configure_auth(monkeypatch)
+    user = row()
+    session_id = uuid4()
+    login_session = Session(
+        Result(scalar=user["tenant_id"]),
+        Result(),
+        Result(row=user),
+        Result(scalar=session_id),
+        Result(),
+    )
+
+    async def login_sessions():
+        yield login_session
+
+    monkeypatch.setattr(auth_sessions, "get_session", login_sessions)
+    monkeypatch.setattr(
+        auth_sessions,
+        "verify_password",
+        lambda password, _encoded: password == "correct",
+    )
+    monkeypatch.setattr(auth_sessions, "_enforce_rate_limit", AsyncMock())
+
+    logged_in = await auth_sessions.login(
+        auth_sessions.LoginInput(email="pilot@example.com", password="correct"),
+        request(),
+        Response(),
+    )
+
+    assert logged_in.user["workspace_id"] == str(user["tenant_id"])
+    assert login_session.commits == 1
 
 
 @pytest.mark.asyncio
@@ -163,12 +221,16 @@ async def test_authentication_rejection_and_rate_limit_paths(monkeypatch) -> Non
         yield denied_session
 
     monkeypatch.setattr(auth_sessions, "get_session", denied_sessions)
-    monkeypatch.setattr(auth_sessions, "verify_password", lambda _password, _encoded: False)
+    monkeypatch.setattr(
+        auth_sessions, "verify_password", lambda _password, _encoded: False
+    )
     monkeypatch.setattr(auth_sessions, "_enforce_rate_limit", AsyncMock())
     with pytest.raises(HTTPException) as denied:
         await auth_sessions.login(
             auth_sessions.LoginInput(
-                workspace_id=user["tenant_id"], email="pilot@example.com", password="wrong"
+                workspace_id=user["tenant_id"],
+                email="pilot@example.com",
+                password="wrong",
             ),
             request(),
             Response(),

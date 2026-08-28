@@ -106,6 +106,16 @@ async def provision(args: argparse.Namespace) -> dict[str, str]:
         await session.execute(
             text(
                 """
+                INSERT INTO auth.login_identities (email, tenant_id, user_id)
+                VALUES (:email, :tenant_id, :user_id)
+                ON CONFLICT (email) DO NOTHING
+                """
+            ),
+            {"email": email, "tenant_id": tenant_id, "user_id": user_id},
+        )
+        await session.execute(
+            text(
+                """
                 INSERT INTO billing.subscriptions (
                     tenant_id, plan_code, status, trial_started_at, trial_ends_at
                 ) VALUES (:tenant_id, 'TRIAL', 'TRIALING', :started_at, :ends_at)
