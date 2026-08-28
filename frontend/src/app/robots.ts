@@ -20,7 +20,7 @@ export default function robots(): MetadataRoute.Robots {
         "/watchlist"
       ]
     },
-    sitemap: "https://app.stem-cogent.com/sitemap.xml",
-    host: "https://app.stem-cogent.com"
+    sitemap: "https://stem-cogent.com/sitemap.xml",
+    host: "https://stem-cogent.com"
   };
 }

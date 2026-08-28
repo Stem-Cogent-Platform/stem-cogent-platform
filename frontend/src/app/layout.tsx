@@ -3,7 +3,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  metadataBase: new URL("https://app.stem-cogent.com"),
+  metadataBase: new URL("https://stem-cogent.com"),
   applicationName: "Stem Cogent",
   title: {
     default: "Stem Cogent | Decision Intelligence for Nigerian Fintech",

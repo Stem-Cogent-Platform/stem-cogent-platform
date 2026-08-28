@@ -7,8 +7,8 @@ describe("public search discovery", () => {
   it("publishes the canonical sitemap while excluding private workspace routes", () => {
     const policy = robots();
 
-    expect(policy.sitemap).toBe("https://app.stem-cogent.com/sitemap.xml");
-    expect(policy.host).toBe("https://app.stem-cogent.com");
+    expect(policy.sitemap).toBe("https://stem-cogent.com/sitemap.xml");
+    expect(policy.host).toBe("https://stem-cogent.com");
     expect(policy.rules).toMatchObject({
       allow: ["/", "/login", "/legal/privacy", "/legal/terms"]
     });
@@ -21,10 +21,10 @@ describe("public search discovery", () => {
     const entries = sitemap();
 
     expect(entries.map((entry) => entry.url)).toEqual([
-      "https://app.stem-cogent.com",
-      "https://app.stem-cogent.com/login",
-      "https://app.stem-cogent.com/legal/privacy",
-      "https://app.stem-cogent.com/legal/terms"
+      "https://stem-cogent.com",
+      "https://stem-cogent.com/login",
+      "https://stem-cogent.com/legal/privacy",
+      "https://stem-cogent.com/legal/terms"
     ]);
   });
 });
