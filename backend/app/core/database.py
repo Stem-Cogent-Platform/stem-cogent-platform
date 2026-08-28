@@ -23,7 +23,9 @@ _session_factory: async_sessionmaker[AsyncSession] | None = None
 def get_database_url() -> str | None:
     settings = get_settings()
     if settings.DATABASE_URL is not None:
-        return settings.DATABASE_URL.replace("postgresql://", "postgresql+asyncpg://", 1)
+        return settings.DATABASE_URL.replace(
+            "postgresql://", "postgresql+asyncpg://", 1
+        )
 
     credentials_arn = getattr(settings, "DATABASE_CREDENTIALS_ARN", None)
     database_host = getattr(settings, "DATABASE_HOST", None)
@@ -33,8 +35,15 @@ def get_database_url() -> str | None:
     credentials = get_json_secret(credentials_arn)
     username = credentials.get("username")
     password = credentials.get("password")
-    if not isinstance(username, str) or not username or not isinstance(password, str) or not password:
-        raise SecretConfigurationError("Database credentials secret requires non-empty username and password fields")
+    if (
+        not isinstance(username, str)
+        or not username
+        or not isinstance(password, str)
+        or not password
+    ):
+        raise SecretConfigurationError(
+            "Database credentials secret requires non-empty username and password fields"
+        )
 
     return URL.create(
         drivername="postgresql+asyncpg",
@@ -45,6 +54,8 @@ def get_database_url() -> str | None:
         database=getattr(settings, "DATABASE_NAME", "stemcogent"),
         query={"ssl": getattr(settings, "DATABASE_SSL_MODE", "require")},
     ).render_as_string(hide_password=False)
+
+
 def _database_url() -> str | None:
     """Backward-compatible alias for callers predating the migration runtime."""
     return get_database_url()
@@ -57,7 +68,15 @@ def get_engine() -> AsyncEngine | None:
         database_url = get_database_url()
         if database_url is None:
             return None
-        _engine = create_async_engine(database_url, pool_pre_ping=True)
+        settings = get_settings()
+        _engine = create_async_engine(
+            database_url,
+            pool_pre_ping=True,
+            pool_size=settings.DATABASE_POOL_SIZE,
+            max_overflow=settings.DATABASE_MAX_OVERFLOW,
+            pool_timeout=settings.DATABASE_POOL_TIMEOUT_SECONDS,
+            pool_recycle=settings.DATABASE_POOL_RECYCLE_SECONDS,
+        )
         _session_factory = async_sessionmaker(_engine, expire_on_commit=False)
 
     return _engine
@@ -70,7 +89,9 @@ async def get_session() -> AsyncIterator[AsyncSession]:
     async with _session_factory() as session:
         runtime_role = get_settings().DATABASE_RUNTIME_ROLE
         if not re.fullmatch(r"[a-z][a-z0-9_]{0,62}", runtime_role):
-            raise SecretConfigurationError("DATABASE_RUNTIME_ROLE is not a safe PostgreSQL role name")
+            raise SecretConfigurationError(
+                "DATABASE_RUNTIME_ROLE is not a safe PostgreSQL role name"
+            )
         await session.execute(text(f'SET LOCAL ROLE "{runtime_role}"'))  # nosec B608
         yield session
 
