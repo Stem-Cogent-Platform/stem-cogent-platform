@@ -14,6 +14,9 @@ locals {
       REDIS_AUTH_TOKEN_ARN        = module.secrets.secret_arns["redis_auth_token"]
       REDIS_TLS_ENABLED           = "true"
       JWT_SIGNING_SECRET_ARN      = module.secrets.secret_arns["jwt_signing_secret"]
+      OPENAI_API_KEY_ARN          = module.secrets.secret_arns["openai_api_key"]
+      GROQ_API_KEY_ARN            = module.secrets.secret_arns["groq_api_key"]
+      RESEND_API_KEY_ARN          = module.secrets.secret_arns["resend_api_key"]
       PAYSTACK_SECRET_KEY_ARN     = module.secrets.secret_arns["paystack_secret_key"]
       PAYSTACK_PUBLIC_KEY_ARN     = module.secrets.secret_arns["paystack_public_key"]
       PAYSTACK_WEBHOOK_SECRET_ARN = module.secrets.secret_arns["paystack_webhook_secret"]
