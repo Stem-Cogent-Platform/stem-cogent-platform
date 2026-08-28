@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.core.database import get_session
-from app.core.secrets import get_secret_string
+from app.core.secrets import get_scalar_secret
 from app.intelligence.synthesis import EvidenceItem, GlobalContextPackage, SynthesisService
 from app.intelligence.synthesis.client import OpenAIResponsesClient
 from app.workers.celery_app import celery_app
@@ -43,7 +43,7 @@ def _synthesis_client() -> OpenAIResponsesClient:
     if settings.LLM_PRIMARY_PROVIDER != "openai" or not settings.OPENAI_API_KEY_ARN:
         raise RuntimeError("Configured OpenAI synthesis provider is missing its secret ARN")
     return OpenAIResponsesClient(
-        api_key=get_secret_string(settings.OPENAI_API_KEY_ARN),
+        api_key=get_scalar_secret(settings.OPENAI_API_KEY_ARN),
         model=settings.LLM_PRIMARY_MODEL,
         timeout_seconds=settings.LLM_TIMEOUT_SECONDS,
         max_retries=settings.LLM_MAX_RETRIES,

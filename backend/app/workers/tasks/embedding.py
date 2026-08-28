@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.core.database import get_session
-from app.core.secrets import get_secret_string
+from app.core.secrets import get_scalar_secret
 from app.intelligence.embeddings import (
     OpenAIEmbeddingClient,
     SimilarityMatch,
@@ -94,7 +94,7 @@ def _embedding_client() -> OpenAIEmbeddingClient:
     if settings.EMBEDDING_PROVIDER != "openai" or not settings.OPENAI_API_KEY_ARN:
         raise RuntimeError("Configured OpenAI embedding provider is missing its secret ARN")
     return OpenAIEmbeddingClient(
-        api_key=get_secret_string(settings.OPENAI_API_KEY_ARN),
+        api_key=get_scalar_secret(settings.OPENAI_API_KEY_ARN),
         model=settings.EMBEDDING_MODEL,
         dimensions=settings.EMBEDDING_DIMENSION,
         timeout_seconds=settings.EMBEDDING_TIMEOUT_SECONDS,
