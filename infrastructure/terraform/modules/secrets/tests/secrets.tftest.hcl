@@ -9,8 +9,8 @@ run "creates_paths_without_secret_values" {
   }
 
   assert {
-    condition     = length(aws_secretsmanager_secret.this) == 9
-    error_message = "The module must create all nine required secret definitions."
+    condition     = length(aws_secretsmanager_secret.this) == 11
+    error_message = "The module must create all required secret definitions."
   }
 
   assert {

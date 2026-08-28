@@ -17,25 +17,57 @@ type AuthResponse = {
 };
 
 let refreshInFlight: Promise<boolean> | null = null;
+let activeAccessToken: string | null = null;
+let activeUser: Record<string, unknown> | null = null;
 
 export function accessToken() {
-  return typeof window === "undefined" ? null : window.sessionStorage.getItem("sc_access_token");
+  return activeAccessToken;
+}
+
+export function currentUser() {
+  return activeUser;
 }
 
 export function clearSession() {
-  if (typeof window !== "undefined") {
-    window.sessionStorage.removeItem("sc_access_token");
-    window.sessionStorage.removeItem("sc_user");
-  }
+  activeAccessToken = null;
+  activeUser = null;
 }
 
-export async function login(input: { workspace_id: string; email: string; password: string }) {
+export async function login(input: { email: string; password: string; workspace_id?: string }) {
   const response = await rawRequest<AuthResponse>("/api/v1/auth/login", {
     method: "POST",
     body: JSON.stringify(input)
   });
   storeSession(response);
   return response;
+}
+
+export async function register(input: {
+  company_name: string;
+  display_name: string;
+  email: string;
+  password: string;
+}) {
+  const response = await rawRequest<AuthResponse>("/api/v1/auth/register", {
+    method: "POST",
+    body: JSON.stringify(input)
+  });
+  storeSession(response);
+  return response;
+}
+
+export async function beginSso(provider: "google" | "linkedin", intent: "login" | "signup") {
+  return rawRequest<{ authorization_url: string }>(
+    `/api/v1/auth/sso/${provider}/start?intent=${intent}`
+  );
+}
+
+export async function bootstrapSession() {
+  if (activeAccessToken && activeUser) return true;
+  refreshInFlight ??= refreshSession().finally(() => {
+    refreshInFlight = null;
+  });
+  return refreshInFlight;
 }
 
 export async function logout() {
@@ -60,7 +92,7 @@ export async function apiRequest<T>(path: string, init?: RequestInit): Promise<T
 }
 
 async function rawRequest<T>(path: string, init?: RequestInit): Promise<T> {
-  const token = typeof window === "undefined" ? null : window.sessionStorage.getItem("sc_access_token");
+  const token = activeAccessToken;
   const response = await fetch(`${API_URL}${path}`, {
     ...init,
     credentials: "include",
@@ -95,6 +127,6 @@ async function refreshSession() {
 }
 
 function storeSession(response: AuthResponse) {
-  window.sessionStorage.setItem("sc_access_token", response.access_token);
-  window.sessionStorage.setItem("sc_user", JSON.stringify(response.user));
+  activeAccessToken = response.access_token;
+  activeUser = response.user;
 }

@@ -5,6 +5,7 @@ import { useCallback, useEffect, useState } from "react";
 
 import { BriefCard } from "@/components/brief-card";
 import { ModuleFailure, ModuleLoading } from "@/components/module-state";
+import { PriorityAlertMatrix } from "@/components/priority-alert-matrix";
 import { WorkspaceShell } from "@/components/workspace-shell";
 import { accessToken, apiRequest } from "@/lib/api";
 import { Brief, LoadState } from "@/lib/types";
@@ -53,6 +54,8 @@ export default function BriefingPage() {
   }, []);
 
   const data = briefs.status === "ready" ? briefs.data : [];
+  const priorityIds = new Set(data.filter((brief) => ["CRITICAL", "HIGH"].includes(brief.urgency_band ?? brief.relevance_band)).map((brief) => brief.id));
+  const standardBriefs = data.filter((brief) => !priorityIds.has(brief.id));
   return (
     <WorkspaceShell>
       <section className="briefing-heading">
@@ -60,15 +63,16 @@ export default function BriefingPage() {
         <span className="connection-status"><i /> {connection}</span>
       </section>
       {newCount > 0 && <button className="new-brief-banner" onClick={() => void load()} type="button">{newCount} new brief{newCount === 1 ? " is" : "s are"} ready — review updates</button>}
+      {briefs.status === "ready" && <PriorityAlertMatrix briefs={data} />}
       <section className="briefing-grid">
         <div className="brief-column">
-          <div className="section-heading"><h2>Priority briefs</h2><span>{data.length} evidence-backed</span></div>
+          <div className="section-heading"><h2>{priorityIds.size ? "All other briefs" : "Decision briefs"}</h2><span>{data.length} evidence-backed</span></div>
           {briefs.status === "loading" && <ModuleLoading label="Loading Decision Briefs" />}
           {briefs.status === "error" && <ModuleFailure message={briefs.message} retry={() => void load()} />}
           {briefs.status === "ready" && data.length === 0 && (
             <article className="empty-brief"><h3>No developments currently meet your Decision Brief threshold.</h3><p>Wider Intelligence remains available while Stem continues monitoring your Focus Areas.</p><Link className="secondary-button" href="/intelligence">Review Wider Intelligence</Link></article>
           )}
-          {data.map((brief) => <BriefCard brief={brief} key={brief.id} />)}
+          {standardBriefs.map((brief) => <BriefCard brief={brief} key={brief.id} />)}
         </div>
         <aside className="focus-panel"><p className="eyebrow">Watching</p><h2>Your Focus Areas</h2><p>Your configured Focus Areas influence ranking while factual evidence remains shared and unchanged.</p><Link className="text-link" href="/watchlist">Review focus and watchlist</Link></aside>
       </section>

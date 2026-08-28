@@ -4,20 +4,21 @@ import { resolve } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 
 vi.mock("next/navigation", () => ({
-  useRouter: () => ({ push: vi.fn() })
+  useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
+  useSearchParams: () => new URLSearchParams()
 }));
 
 import RootLayout, { metadata } from "./layout";
 import HomePage from "./page";
 
 describe("HomePage", () => {
-  it("renders the locked legal-consent onboarding checkpoint", () => {
+  it("renders public account creation rather than legal consent", () => {
     const markup = renderToStaticMarkup(<HomePage />);
 
-    expect(markup).toContain("Secure workspace setup");
-    expect(markup).toContain("Legal consent");
-    expect(markup).toContain("Preparing the current documents");
-    expect(markup).not.toContain("Company Context is now available");
+    expect(markup).toContain("Start your workspace");
+    expect(markup).toContain("Create workspace");
+    expect(markup).toContain("No invitation or card is required");
+    expect(markup).not.toContain("Legal consent");
   });
 });
 

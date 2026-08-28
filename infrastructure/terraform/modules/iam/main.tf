@@ -67,6 +67,8 @@ locals {
     "paystack_secret_key",
     "paystack_public_key",
     "paystack_webhook_secret",
+    "google_oauth_credentials",
+    "linkedin_oauth_credentials",
   ])
 
   queue_access = {
@@ -161,6 +163,8 @@ locals {
       "paystack_secret_key",
       "paystack_public_key",
       "paystack_webhook_secret",
+      "google_oauth_credentials",
+      "linkedin_oauth_credentials",
     ]
     frontend-service        = []
     scheduler-worker        = ["database_credentials", "redis_auth_token"]

@@ -1,24 +1,25 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { ApiError, accessToken, apiRequest, clearSession, login, logout } from "./api";
+import { ApiError, accessToken, apiRequest, beginSso, clearSession, currentUser, login, logout, register } from "./api";
 import { legalCopy } from "./legal-copy";
 
 afterEach(() => {
+  clearSession();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
 
 describe("apiRequest", () => {
   it("sends authenticated JSON requests with caller headers", async () => {
-    const getItem = vi.fn(() => "session-token");
-    vi.stubGlobal("window", { sessionStorage: { getItem } });
-    const fetchMock = vi.fn(async () =>
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ access_token: "session-token", expires_in: 900, user: {} }), { status: 200, headers: { "Content-Type": "application/json" } }))
+      .mockResolvedValueOnce(
       new Response(JSON.stringify({ saved: true }), {
         status: 200,
         headers: { "Content-Type": "application/json" }
-      })
-    );
+      }));
     vi.stubGlobal("fetch", fetchMock);
+    await login({ email: "person@example.com", password: "twelve-characters" });
 
     await expect(
       apiRequest<{ saved: boolean }>("/context/company", {
@@ -28,8 +29,7 @@ describe("apiRequest", () => {
       })
     ).resolves.toEqual({ saved: true });
 
-    expect(getItem).toHaveBeenCalledWith("sc_access_token");
-    expect(fetchMock).toHaveBeenCalledWith(
+    expect(fetchMock).toHaveBeenLastCalledWith(
       "http://localhost:8000/context/company",
       expect.objectContaining({
         credentials: "include",
@@ -68,13 +68,7 @@ describe("apiRequest", () => {
     await expect(apiRequest("/health")).resolves.toEqual({});
   });
 
-  it("stores login state and exposes the browser access token", async () => {
-    const sessionStorage = {
-      getItem: vi.fn(() => "fresh-token"),
-      setItem: vi.fn(),
-      removeItem: vi.fn()
-    };
-    vi.stubGlobal("window", { sessionStorage });
+  it("keeps login state in memory instead of browser storage", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async () =>
@@ -90,23 +84,29 @@ describe("apiRequest", () => {
     );
 
     await expect(
-      login({ workspace_id: crypto.randomUUID(), email: "pilot@example.com", password: "secret" })
+      login({ email: "pilot@example.com", password: "correct-password" })
     ).resolves.toMatchObject({ access_token: "fresh-token" });
-    expect(sessionStorage.setItem).toHaveBeenCalledWith("sc_access_token", "fresh-token");
-    expect(sessionStorage.setItem).toHaveBeenCalledWith(
-      "sc_user",
-      JSON.stringify({ display_name: "Pilot User" })
-    );
     expect(accessToken()).toBe("fresh-token");
+    expect(currentUser()).toEqual({ display_name: "Pilot User" });
+  });
+
+  it("creates public trial sessions and begins provider sign-in through the API", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ access_token: "trial-token", expires_in: 900, user: { workspace_name: "Acme" } }), { status: 201, headers: { "Content-Type": "application/json" } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ authorization_url: "https://accounts.google.com/authorize" }), { status: 200, headers: { "Content-Type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await register({ company_name: "Acme", display_name: "Ada User", email: "ada@example.com", password: "long-secure-password" });
+    await expect(beginSso("google", "signup")).resolves.toEqual({ authorization_url: "https://accounts.google.com/authorize" });
+
+    expect(accessToken()).toBe("trial-token");
+    expect(fetchMock.mock.calls[0][0]).toBe("http://localhost:8000/api/v1/auth/register");
+    expect(fetchMock.mock.calls[1][0]).toBe("http://localhost:8000/api/v1/auth/sso/google/start?intent=signup");
   });
 
   it("refreshes once after an authenticated 401 and retries the request", async () => {
-    const sessionStorage = {
-      getItem: vi.fn(() => "expired-token"),
-      setItem: vi.fn(),
-      removeItem: vi.fn()
-    };
-    vi.stubGlobal("window", { sessionStorage });
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ access_token: "expired-token", expires_in: 900, user: {} }), { status: 200, headers: { "Content-Type": "application/json" } })));
+    await login({ email: "pilot@example.com", password: "correct-password" });
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(
@@ -131,16 +131,12 @@ describe("apiRequest", () => {
 
     await expect(apiRequest<{ ok: boolean }>("/protected")).resolves.toEqual({ ok: true });
     expect(fetchMock).toHaveBeenCalledTimes(3);
-    expect(sessionStorage.setItem).toHaveBeenCalledWith("sc_access_token", "renewed-token");
+    expect(accessToken()).toBe("renewed-token");
   });
 
   it("clears session state when refresh or logout fails", async () => {
-    const sessionStorage = {
-      getItem: vi.fn(() => "expired-token"),
-      setItem: vi.fn(),
-      removeItem: vi.fn()
-    };
-    vi.stubGlobal("window", { sessionStorage });
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ access_token: "expired-token", expires_in: 900, user: {} }), { status: 200, headers: { "Content-Type": "application/json" } })));
+    await login({ email: "pilot@example.com", password: "correct-password" });
     const fetchMock = vi.fn(async () =>
       new Response(JSON.stringify({ detail: "Unavailable" }), {
         status: 401,
@@ -152,12 +148,12 @@ describe("apiRequest", () => {
     await expect(apiRequest("/protected")).rejects.toMatchObject({ status: 401 });
     await expect(logout()).rejects.toMatchObject({ status: 401 });
     clearSession();
-    expect(sessionStorage.removeItem).toHaveBeenCalledWith("sc_access_token");
-    expect(sessionStorage.removeItem).toHaveBeenCalledWith("sc_user");
+    expect(accessToken()).toBeNull();
+    expect(currentUser()).toBeNull();
   });
 
-  it("returns no session token during server rendering", () => {
-    vi.stubGlobal("window", undefined);
+  it("returns no token after an explicit session clear", () => {
+    clearSession();
     expect(accessToken()).toBeNull();
     expect(() => clearSession()).not.toThrow();
   });
