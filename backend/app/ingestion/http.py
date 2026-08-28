@@ -14,6 +14,10 @@ class UnsafeSourceUrl(ValueError):
     pass
 
 
+class SourceFetchError(RuntimeError):
+    """A remote source failed after its bounded collection attempts."""
+
+
 @dataclass(frozen=True)
 class HttpPayload:
     body: bytes
@@ -43,37 +47,54 @@ class ApprovedHttpFetcher:
         self._retry_attempts = max(1, retry_attempts)
 
     async def fetch(self, url: str) -> HttpPayload:
-        await self._validate_url(url)
+        try:
+            await self._validate_url(url)
+        except UnsafeSourceUrl:
+            raise
+        except OSError as exc:
+            raise SourceFetchError("Source DNS resolution failed") from exc
         owns_client = self._client is None
         client = self._client or httpx.AsyncClient(follow_redirects=False)
         try:
             for attempt in range(self._retry_attempts):
                 retry_delay: float | None = None
-                async with client.stream(
-                    "GET", url, headers=self._headers, timeout=self._timeout
-                ) as response:
-                    if (
-                        response.status_code == 429 or response.status_code >= 500
-                    ) and attempt + 1 < self._retry_attempts:
-                        retry_delay = _retry_delay(response, attempt)
-                    else:
-                        response.raise_for_status()
-                        chunks: list[bytes] = []
-                        size = 0
-                        async for chunk in response.aiter_bytes():
-                            size += len(chunk)
-                            if size > self._max_bytes:
-                                raise ValueError(
-                                    f"Source payload exceeds {self._max_bytes} bytes"
-                                )
-                            chunks.append(chunk)
-                        return HttpPayload(
-                            body=b"".join(chunks),
-                            content_type=response.headers.get(
-                                "content-type", "application/octet-stream"
-                            ).split(";", maxsplit=1)[0],
-                            final_url=str(response.url),
-                        )
+                try:
+                    async with client.stream(
+                        "GET", url, headers=self._headers, timeout=self._timeout
+                    ) as response:
+                        if (
+                            response.status_code == 429
+                            or response.status_code >= 500
+                        ) and attempt + 1 < self._retry_attempts:
+                            retry_delay = _retry_delay(response, attempt)
+                        else:
+                            response.raise_for_status()
+                            chunks: list[bytes] = []
+                            size = 0
+                            async for chunk in response.aiter_bytes():
+                                size += len(chunk)
+                                if size > self._max_bytes:
+                                    raise ValueError(
+                                        f"Source payload exceeds {self._max_bytes} bytes"
+                                    )
+                                chunks.append(chunk)
+                            return HttpPayload(
+                                body=b"".join(chunks),
+                                content_type=response.headers.get(
+                                    "content-type", "application/octet-stream"
+                                ).split(";", maxsplit=1)[0],
+                                final_url=str(response.url),
+                            )
+                except httpx.HTTPStatusError as exc:
+                    raise SourceFetchError(
+                        f"Source returned HTTP {exc.response.status_code}"
+                    ) from exc
+                except httpx.TransportError as exc:
+                    if attempt + 1 >= self._retry_attempts:
+                        raise SourceFetchError(
+                            "Source transport failed after bounded retries"
+                        ) from exc
+                    retry_delay = min(30.0, float(5 * 2**attempt))
                 if retry_delay is not None:
                     await asyncio.sleep(retry_delay)
             raise RuntimeError("HTTP retry loop ended without a response")
