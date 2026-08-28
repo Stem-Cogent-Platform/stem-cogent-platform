@@ -47,4 +47,4 @@ def test_synthesis_client_resolves_json_wrapped_api_key(monkeypatch) -> None:  #
     client = synthesis._synthesis_client()
 
     assert resolved == ["arn:openai"]
-    assert client._api_key == "resolved-openai-key"
+    assert client._key == "resolved-openai-key"
