@@ -188,6 +188,7 @@ locals {
   dynamic_secret_resources = {
     api-service = [
       "arn:${data.aws_partition.current.partition}:secretsmanager:${var.aws_region}:${var.aws_account_id}:secret:${var.resource_prefix}/${var.environment}/users/*/totp-secret-*",
+      "arn:${data.aws_partition.current.partition}:secretsmanager:${var.aws_region}:${var.aws_account_id}:secret:${var.resource_prefix}/${var.environment}/pilots/*/initial-password-*",
     ]
     frontend-service = []
     scheduler-worker = []
