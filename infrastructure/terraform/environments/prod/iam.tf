@@ -12,6 +12,7 @@ module "iam" {
   secret_arns                = module.secrets.secret_arns
   secrets_kms_key_arn        = module.kms.key_arns["audit"]
   ecr_repository_arns        = module.ecr.repository_arns
+  api_log_group_arn          = module.observability.log_group_arns["api"]
   github_repository_id       = "1254005582"
   github_repository_owner_id = "289108209"
   github_environment_name    = "production"

@@ -136,6 +136,16 @@ variable "ecs_cluster_arn" {
   }
 }
 
+variable "api_log_group_arn" {
+  description = "CloudWatch log group ARN containing API and one-shot migration output."
+  type        = string
+
+  validation {
+    condition     = can(regex("^arn:[^:]+:logs:[^:]+:[0-9]{12}:log-group:.+$", var.api_log_group_arn))
+    error_message = "api_log_group_arn must be a valid CloudWatch Logs log-group ARN."
+  }
+}
+
 variable "github_repository" {
   description = "GitHub repository allowed to assume the Application CD roles, in owner/name form."
   type        = string

@@ -173,6 +173,12 @@ locals {
       }
     },
     {
+      Sid      = "ReadMigrationFailureLogs"
+      Effect   = "Allow"
+      Action   = ["logs:GetLogEvents"]
+      Resource = ["${var.api_log_group_arn}:log-stream:api-service/migration/*"]
+    },
+    {
       Sid      = "PassOnlyApplicationTaskRoles"
       Effect   = "Allow"
       Action   = ["iam:PassRole"]
