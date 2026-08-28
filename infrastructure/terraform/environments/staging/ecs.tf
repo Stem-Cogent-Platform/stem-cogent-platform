@@ -8,6 +8,10 @@ locals {
       DATABASE_CREDENTIALS_ARN       = module.secrets.secret_arns["database_credentials"]
       DATABASE_SSL_MODE              = "require"
       DATABASE_RUNTIME_ROLE          = "sc_app_runtime"
+      DATABASE_POOL_SIZE             = "3"
+      DATABASE_MAX_OVERFLOW          = "2"
+      DATABASE_POOL_TIMEOUT_SECONDS  = "10"
+      DATABASE_POOL_RECYCLE_SECONDS  = "300"
       FRONTEND_PUBLIC_URL            = var.frontend_public_url
       REDIS_HOST                     = module.elasticache.primary_endpoint_address
       REDIS_PORT                     = tostring(module.elasticache.port)

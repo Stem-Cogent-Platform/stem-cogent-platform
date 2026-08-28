@@ -25,6 +25,10 @@ class Settings(BaseSettings):
     DATABASE_URL: str | None = None
     DATABASE_SSL_MODE: str = "require"
     DATABASE_RUNTIME_ROLE: str = "sc_app_runtime"
+    DATABASE_POOL_SIZE: int = 3
+    DATABASE_MAX_OVERFLOW: int = 2
+    DATABASE_POOL_TIMEOUT_SECONDS: int = 10
+    DATABASE_POOL_RECYCLE_SECONDS: int = 300
 
     REDIS_HOST: str | None = None
     REDIS_PORT: int = 6379
