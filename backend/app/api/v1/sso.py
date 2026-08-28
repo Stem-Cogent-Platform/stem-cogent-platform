@@ -11,6 +11,7 @@ from urllib.parse import urlencode
 from uuid import uuid4
 
 import httpx
+from botocore.exceptions import BotoCoreError, ClientError
 from fastapi import APIRouter, HTTPException, Request, Response, status
 from fastapi.responses import RedirectResponse
 from sqlalchemy import text
@@ -18,7 +19,11 @@ from sqlalchemy import text
 from app.api.v1.auth_sessions import _issue_session, _workspace_slug
 from app.core.config import get_settings
 from app.core.database import get_session
-from app.core.secrets import get_json_secret, get_scalar_secret
+from app.core.secrets import (
+    SecretConfigurationError,
+    get_json_secret,
+    get_scalar_secret,
+)
 
 router = APIRouter(prefix="/api/v1/auth/sso", tags=["authentication"])
 Provider = Literal["google", "linkedin"]
@@ -285,7 +290,13 @@ def _credentials(provider: Provider) -> tuple[str, str]:
             status.HTTP_503_SERVICE_UNAVAILABLE,
             f"{provider.title()} sign-in is not configured",
         )
-    credentials = get_json_secret(secret_arn)
+    try:
+        credentials = get_json_secret(secret_arn)
+    except (SecretConfigurationError, BotoCoreError, ClientError) as error:
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            f"{provider.title()} sign-in is not configured",
+        ) from error
     client_id, client_secret = (
         credentials.get("client_id"),
         credentials.get("client_secret"),

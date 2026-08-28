@@ -7,6 +7,7 @@ import pytest
 from fastapi import HTTPException
 
 from app.api.v1 import sso
+from app.core.secrets import SecretConfigurationError
 
 
 def configure(monkeypatch) -> None:
@@ -61,3 +62,20 @@ def test_provider_credentials_are_server_side_and_complete(monkeypatch) -> None:
     with pytest.raises(HTTPException) as incomplete:
         sso._credentials("linkedin")
     assert incomplete.value.status_code == 503
+
+
+def test_missing_provider_secret_is_reported_as_unavailable(monkeypatch) -> None:
+    configure(monkeypatch)
+    monkeypatch.setattr(
+        sso,
+        "get_json_secret",
+        lambda _arn: (_ for _ in ()).throw(
+            SecretConfigurationError("secret value is unavailable")
+        ),
+    )
+
+    with pytest.raises(HTTPException) as unavailable:
+        sso._credentials("google")
+
+    assert unavailable.value.status_code == 503
+    assert unavailable.value.detail == "Google sign-in is not configured"
