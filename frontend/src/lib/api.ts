@@ -82,7 +82,7 @@ export async function apiRequest<T>(path: string, init?: RequestInit): Promise<T
   try {
     return await rawRequest<T>(path, init);
   } catch (error) {
-    if (!(error instanceof ApiError) || error.status !== 401 || !accessToken()) throw error;
+    if (!(error instanceof ApiError) || error.status !== 401) throw error;
     refreshInFlight ??= refreshSession().finally(() => {
       refreshInFlight = null;
     });

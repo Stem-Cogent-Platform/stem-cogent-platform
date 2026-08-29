@@ -1,9 +1,9 @@
 "use client";
 
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 
-import { apiRequest } from "@/lib/api";
+import { apiRequest, bootstrapSession } from "@/lib/api";
 
 const steps = ["Company", "Company Context", "Your Role", "Decision Lens", "Focus Areas", "Delivery"];
 const roles = [
@@ -34,6 +34,7 @@ function list(value: string) {
 export function OnboardingWizard() {
   const router = useRouter();
   const [step, setStep] = useState(0);
+  const [sessionReady, setSessionReady] = useState(false);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
   const [state, setState] = useState({
@@ -44,6 +45,21 @@ export function OnboardingWizard() {
   });
   const progress = useMemo(() => ((step + 1) / steps.length) * 100, [step]);
 
+  useEffect(() => {
+    let active = true;
+    void bootstrapSession().then((authenticated) => {
+      if (!active) return;
+      if (!authenticated) {
+        router.replace("/login?next=%2Fonboarding");
+        return;
+      }
+      setSessionReady(true);
+    });
+    return () => {
+      active = false;
+    };
+  }, [router]);
+
   function toggle(key: "categories" | "markets" | "segments" | "domains", value: string) {
     setState((current) => ({ ...current, [key]: current[key].includes(value) ? current[key].filter((item) => item !== value) : [...current[key], value] }));
   }
@@ -53,6 +69,10 @@ export function OnboardingWizard() {
     setSaving(true);
     setMessage("");
     try {
+      if (!(await bootstrapSession())) {
+        router.replace("/login?next=%2Fonboarding");
+        return;
+      }
       await apiRequest("/context/company", { method: "PUT", body: JSON.stringify({
         business_categories: state.categories,
         operating_markets: state.markets,
@@ -79,6 +99,10 @@ export function OnboardingWizard() {
     } finally {
       setSaving(false);
     }
+  }
+
+  if (!sessionReady) {
+    return <main className="centered-state"><p>Restoring your secure workspace sessionâ€¦</p></main>;
   }
 
   return (
