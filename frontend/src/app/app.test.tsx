@@ -52,6 +52,9 @@ describe("Visual token contract", () => {
     expect(css).toContain("--bg-page: #f5f6fa");
     expect(css).toContain("--accent: #2a4bff");
     expect(css).toContain("--text-primary: #0b0f1a");
+    expect(css).toContain("height: 100dvh");
+    expect(css).toContain("grid-template-rows: 70px minmax(0, 1fr)");
+    expect(css).toContain("overflow-y: auto");
     expect(`${css}\n${source}`).not.toMatch(/linear-gradient|radial-gradient|dark:|neon|text-shadow|filter:\s*drop-shadow/i);
   });
 });

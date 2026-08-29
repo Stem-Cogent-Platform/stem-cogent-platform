@@ -134,6 +134,45 @@ describe("apiRequest", () => {
     expect(accessToken()).toBe("renewed-token");
   });
 
+  it("restores a cookie-backed session after an in-memory page reload", async () => {
+    clearSession();
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ detail: "Bearer token required" }), {
+          status: 401,
+          headers: { "Content-Type": "application/json" }
+        })
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            access_token: "restored-token",
+            expires_in: 900,
+            user: { display_name: "Reloaded User" }
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        )
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ saved: true }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" }
+        })
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(apiRequest<{ saved: boolean }>("/context/company")).resolves.toEqual({
+      saved: true
+    });
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+      "http://localhost:8000/context/company",
+      "http://localhost:8000/api/v1/auth/refresh",
+      "http://localhost:8000/context/company"
+    ]);
+    expect(accessToken()).toBe("restored-token");
+  });
+
   it("clears session state when refresh or logout fails", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ access_token: "expired-token", expires_in: 900, user: {} }), { status: 200, headers: { "Content-Type": "application/json" } })));
     await login({ email: "pilot@example.com", password: "correct-password" });
