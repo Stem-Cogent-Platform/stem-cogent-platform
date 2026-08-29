@@ -1,4 +1,4 @@
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+const API_ORIGIN = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
 export class ApiError extends Error {
   constructor(
@@ -19,6 +19,7 @@ type AuthResponse = {
 let refreshInFlight: Promise<boolean> | null = null;
 let activeAccessToken: string | null = null;
 let activeUser: Record<string, unknown> | null = null;
+let activeSessionOrigin = "";
 
 export function accessToken() {
   return activeAccessToken;
@@ -31,6 +32,7 @@ export function currentUser() {
 export function clearSession() {
   activeAccessToken = null;
   activeUser = null;
+  activeSessionOrigin = "";
 }
 
 export async function login(input: { email: string; password: string; workspace_id?: string }) {
@@ -38,7 +40,7 @@ export async function login(input: { email: string; password: string; workspace_
     method: "POST",
     body: JSON.stringify(input)
   });
-  storeSession(response);
+  storeSession(response, "");
   return response;
 }
 
@@ -52,13 +54,13 @@ export async function register(input: {
     method: "POST",
     body: JSON.stringify(input)
   });
-  storeSession(response);
+  storeSession(response, "");
   return response;
 }
 
 export async function beginSso(provider: "google" | "linkedin", intent: "login" | "signup") {
   return rawRequest<{ authorization_url: string }>(
-    `/api/v1/auth/sso/${provider}/start?intent=${intent}`
+    `${API_ORIGIN}/api/v1/auth/sso/${provider}/start?intent=${intent}`
   );
 }
 
@@ -72,7 +74,7 @@ export async function bootstrapSession() {
 
 export async function logout() {
   try {
-    await rawRequest("/api/v1/auth/logout", { method: "POST" });
+    await rawRequest(`${activeSessionOrigin}/api/v1/auth/logout`, { method: "POST" });
   } finally {
     clearSession();
   }
@@ -93,16 +95,25 @@ export async function apiRequest<T>(path: string, init?: RequestInit): Promise<T
 
 async function rawRequest<T>(path: string, init?: RequestInit): Promise<T> {
   const token = activeAccessToken;
-  const response = await fetch(`${API_URL}${path}`, {
-    ...init,
-    credentials: "include",
-    headers: {
-      Accept: "application/json",
-      ...(init?.body ? { "Content-Type": "application/json" } : {}),
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...init?.headers
-    }
-  });
+  let response: globalThis.Response;
+  try {
+    response = await fetch(path, {
+      ...init,
+      credentials: "include",
+      headers: {
+        Accept: "application/json",
+        ...(init?.body ? { "Content-Type": "application/json" } : {}),
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...init?.headers
+      }
+    });
+  } catch {
+    throw new ApiError(
+      "Stem could not reach the intelligence service. Check your connection and try again.",
+      0,
+      "NETWORK_UNAVAILABLE"
+    );
+  }
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) {
     const detail = payload.detail;
@@ -118,15 +129,22 @@ async function rawRequest<T>(path: string, init?: RequestInit): Promise<T> {
 async function refreshSession() {
   try {
     const response = await rawRequest<AuthResponse>("/api/v1/auth/refresh", { method: "POST" });
-    storeSession(response);
+    storeSession(response, "");
     return true;
   } catch {
-    clearSession();
-    return false;
+    try {
+      const response = await rawRequest<AuthResponse>(`${API_ORIGIN}/api/v1/auth/refresh`, { method: "POST" });
+      storeSession(response, API_ORIGIN);
+      return true;
+    } catch {
+      clearSession();
+      return false;
+    }
   }
 }
 
-function storeSession(response: AuthResponse) {
+function storeSession(response: AuthResponse, sessionOrigin = "") {
   activeAccessToken = response.access_token;
   activeUser = response.user;
+  activeSessionOrigin = sessionOrigin;
 }

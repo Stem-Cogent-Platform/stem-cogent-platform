@@ -230,7 +230,7 @@ fieldset legend { margin-bottom: 12px; }
 .global-search span { color: var(--text-secondary); font-size: 1.2rem; }
 .global-search input { background: transparent; border: 0; color: var(--text-primary); font-size: .75rem; height: 40px; outline: 0; width: 100%; }
 .topnav-actions { align-items: center; display: flex; gap: 16px; }
-.topnav-icon { align-items: center; border: 1px solid var(--border); border-radius: 9px; display: flex; height: 36px; justify-content: center; position: relative; text-decoration: none; width: 36px; }
+.topnav-icon { align-items: center; background: #fff; border: 1px solid var(--border); border-radius: 9px; cursor: pointer; display: flex; height: 36px; justify-content: center; padding: 0; position: relative; text-decoration: none; width: 36px; }
 .topnav-icon .nav-icon { height: 18px; width: 18px; }
 .topnav-icon i { background: var(--critical); border: 2px solid white; border-radius: 50%; height: 8px; position: absolute; right: 5px; top: 5px; width: 8px; }
 .sr-only { height: 1px; margin: -1px; overflow: hidden; padding: 0; position: absolute; width: 1px; clip: rect(0, 0, 0, 0); white-space: nowrap; }
@@ -439,6 +439,129 @@ fieldset legend { margin-bottom: 12px; }
   .auth-footnote { display: none; }
   .auth-brand-copy > p:last-child { font-size: .78rem; line-height: 1.4; }
   .auth-preview article { padding: 10px; }
+}
+
+/* Enterprise workspace: fluid 12-column canvas with density that scales from
+   standard laptops through high-resolution operations displays. */
+.app-shell {
+  grid-template-columns: 232px minmax(0, 1fr);
+  transition: grid-template-columns 180ms ease;
+}
+.app-shell.sidebar-collapsed { grid-template-columns: 76px minmax(0, 1fr); }
+.app-sidebar { padding: 18px 14px 14px; }
+.sidebar-brand { margin: 0 6px 25px; min-height: 32px; overflow: hidden; white-space: nowrap; }
+.sidebar-collapse {
+  align-items: center; background: #fff; border: 1px solid var(--border); border-radius: 999px;
+  color: var(--text-secondary); cursor: pointer; display: flex; font-size: 1.05rem; height: 27px;
+  justify-content: center; position: absolute; right: -14px; top: 20px; width: 27px; z-index: 2;
+}
+.sidebar-collapse:hover { border-color: var(--accent); color: var(--accent); }
+.sidebar-collapsed .sidebar-brand span,
+.sidebar-collapsed .sidebar-section-label,
+.sidebar-collapsed .app-sidebar nav a span,
+.sidebar-collapsed .sidebar-user div,
+.sidebar-collapsed .sidebar-user button,
+.sidebar-collapsed .nav-count { display: none; }
+.sidebar-collapsed .sidebar-brand,
+.sidebar-collapsed .app-sidebar nav a,
+.sidebar-collapsed .sidebar-user { justify-content: center; margin-left: 0; margin-right: 0; padding-left: 0; padding-right: 0; }
+.app-sidebar nav a { min-height: 40px; }
+.app-frame { grid-template-rows: 64px minmax(0, 1fr); }
+.app-topnav { height: 64px; padding: 0 clamp(18px, 2.4vw, 38px); }
+.app-content { scrollbar-width: thin; }
+.app-content .briefing-heading,
+.app-content .briefing-grid,
+.app-content .content-page,
+.app-content .detail-page,
+.app-content .settings-page { max-width: 1560px; }
+.briefing-heading,
+.content-page,
+.detail-page,
+.settings-page { padding-left: clamp(24px, 3vw, 48px); padding-right: clamp(24px, 3vw, 48px); }
+.briefing-heading { align-items: center; padding-bottom: 22px; padding-top: 34px; }
+.briefing-heading h1,
+.page-heading h1,
+.brief-detail h1 { font-size: clamp(2rem, 3vw, 3.35rem); line-height: 1.02; }
+.content-page,
+.detail-page,
+.settings-page { padding-bottom: 56px; padding-top: 34px; }
+.page-heading { margin-bottom: 22px; }
+.briefing-grid {
+  gap: 20px; grid-template-columns: repeat(12, minmax(0, 1fr));
+  padding-bottom: 54px; padding-left: clamp(24px, 3vw, 48px); padding-right: clamp(24px, 3vw, 48px);
+}
+.brief-column { grid-column: span 9; min-width: 0; }
+.focus-panel { grid-column: span 3; min-width: 0; }
+.company-summary { grid-template-columns: repeat(12, minmax(0, 1fr)); }
+.company-summary > div { grid-column: span 4; min-width: 0; }
+.two-column { grid-template-columns: repeat(12, minmax(0, 1fr)); }
+.two-column > * { grid-column: span 6; min-width: 0; }
+.detail-grid { grid-template-columns: repeat(12, minmax(0, 1fr)); }
+.brief-detail { grid-column: span 8; min-width: 0; }
+.detail-grid > .cil-panel { grid-column: span 4; min-width: 0; }
+.settings-layout { grid-template-columns: repeat(12, minmax(0, 1fr)); }
+.settings-tabs { grid-column: span 2; min-width: 0; }
+.settings-content { grid-column: span 10; min-width: 0; }
+.settings-panel { min-height: 360px; padding: clamp(24px, 2.6vw, 40px); }
+.brief-card, .intelligence-list > article { border-radius: 18px; padding: clamp(20px, 2vw, 28px); }
+.module-failure, .module-loading { min-height: 220px; padding: clamp(24px, 3vw, 40px); }
+.notification-scrim { background: rgba(9, 14, 29, .18); border: 0; inset: 0; position: fixed; z-index: 70; }
+.notification-drawer {
+  background: #fff; border-left: 1px solid var(--border); box-shadow: -18px 0 48px rgba(19, 29, 52, .13);
+  display: grid; grid-template-rows: auto minmax(0, 1fr) auto; height: 100dvh; padding: 24px;
+  position: fixed; right: 0; top: 0; width: min(420px, 100vw); z-index: 71;
+}
+.notification-drawer > header { align-items: center; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; padding-bottom: 18px; }
+.notification-drawer h2 { font-size: 1.45rem; margin: 4px 0 0; }
+.notification-drawer > header button { background: var(--bg-subtle); border: 0; border-radius: 9px; cursor: pointer; font-size: 1.25rem; height: 36px; width: 36px; }
+.notification-stack { display: grid; gap: 10px; overflow-y: auto; padding: 18px 2px; }
+.notification-stack > button { background: #fff; border: 1px solid var(--border); border-radius: 14px; cursor: pointer; display: grid; gap: 8px; padding: 16px; text-align: left; }
+.notification-stack > button.unread { border-left: 3px solid var(--accent); }
+.notification-stack strong { font-size: .82rem; line-height: 1.4; }
+.notification-stack small, .notification-stack > p { color: var(--text-secondary); font-size: .7rem; line-height: 1.55; }
+.notification-stack .priority-chip { justify-self: start; }
+.notification-drawer > a { border-top: 1px solid var(--border); color: var(--link); font-size: .75rem; font-weight: 700; padding-top: 17px; text-decoration: none; }
+
+@media (min-width: 1680px) {
+  .app-shell { grid-template-columns: 248px minmax(0, 1fr); }
+  .app-shell.sidebar-collapsed { grid-template-columns: 80px minmax(0, 1fr); }
+  .brief-column { grid-column: span 9; }
+  .focus-panel { grid-column: span 3; }
+}
+
+@media (min-width: 861px) and (max-width: 1280px) {
+  .app-shell { grid-template-columns: 76px minmax(0, 1fr); }
+  .sidebar-brand span, .sidebar-section-label, .app-sidebar nav a span,
+  .sidebar-user div, .sidebar-user button, .nav-count, .sidebar-collapse { display: none; }
+  .sidebar-brand, .app-sidebar nav a, .sidebar-user { justify-content: center; margin-left: 0; margin-right: 0; padding-left: 0; padding-right: 0; }
+  .brief-column { grid-column: span 8; }
+  .focus-panel { grid-column: span 4; }
+  .settings-tabs { grid-column: span 3; }
+  .settings-content { grid-column: span 9; }
+  .brief-detail { grid-column: span 7; }
+  .detail-grid > .cil-panel { grid-column: span 5; }
+}
+
+@media (max-width: 860px) {
+  .sidebar-collapse { display: none; }
+  .app-frame { grid-template-rows: 60px minmax(0, 1fr); }
+  .app-topnav { height: 60px; }
+  .brief-column, .focus-panel, .company-summary > div, .two-column > *,
+  .brief-detail, .detail-grid > .cil-panel, .settings-tabs, .settings-content { grid-column: 1 / -1; }
+  .briefing-grid, .company-summary, .two-column, .detail-grid, .settings-layout { grid-template-columns: minmax(0, 1fr); }
+  .page-heading h1, .briefing-heading h1, .brief-detail h1 { font-size: clamp(1.8rem, 8vw, 2.7rem); }
+  .cil-panel { max-height: none; width: 100%; }
+}
+
+@media (max-width: 560px) {
+  .briefing-heading, .briefing-grid, .content-page, .detail-page, .settings-page { padding-left: 16px; padding-right: 16px; }
+  .topnav-actions .user-avatar { display: none; }
+  .global-search { min-width: 0; }
+  .global-search input { min-width: 0; }
+  .company-summary > div { padding: 18px; }
+  .panel, .brief-detail, .cil-panel { border-radius: 16px; padding: 20px; }
+  .watch-item { grid-template-columns: minmax(0, 1fr) auto; }
+  .watch-item a { grid-column: 1 / -1; }
 }
 
 @media (prefers-reduced-motion: reduce) {

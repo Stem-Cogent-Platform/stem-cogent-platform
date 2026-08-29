@@ -28,7 +28,7 @@ data_services_apply_immediately = false
 
 next_public_api_url = "https://api.stem-cogent.com"
 next_public_ws_url  = "wss://api.stem-cogent.com"
-frontend_public_url = "https://app.stem-cogent.com"
+frontend_public_url = "https://stem-cogent.com"
 
 public_hosted_zone_name = "stem-cogent.com"
 alb_deletion_protection = true

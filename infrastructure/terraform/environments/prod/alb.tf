@@ -17,7 +17,7 @@ module "alb" {
   api_hostname      = trimprefix(var.next_public_api_url, "https://")
   frontend_hostname = trimprefix(var.frontend_public_url, "https://")
   frontend_redirect_hostnames = [
-    trimsuffix(var.public_hosted_zone_name, "."),
+    "app.${trimsuffix(var.public_hosted_zone_name, ".")}",
     "www.${trimsuffix(var.public_hosted_zone_name, ".")}",
   ]
   enable_deletion_protection = var.alb_deletion_protection

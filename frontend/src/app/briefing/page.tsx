@@ -7,7 +7,7 @@ import { BriefCard } from "@/components/brief-card";
 import { ModuleFailure, ModuleLoading } from "@/components/module-state";
 import { PriorityAlertMatrix } from "@/components/priority-alert-matrix";
 import { WorkspaceShell } from "@/components/workspace-shell";
-import { accessToken, apiRequest } from "@/lib/api";
+import { accessToken, apiRequest, bootstrapSession } from "@/lib/api";
 import { Brief, LoadState } from "@/lib/types";
 
 const WS_URL = process.env.NEXT_PUBLIC_WS_URL ?? "ws://localhost:8000";
@@ -28,15 +28,19 @@ export default function BriefingPage() {
 
   useEffect(() => { const timer = window.setTimeout(() => void load(), 0); return () => window.clearTimeout(timer); }, [load]);
   useEffect(() => {
-    const token = accessToken();
-    if (!token) return;
     let reconnect: ReturnType<typeof setTimeout> | undefined;
     let active = true;
     let socket: WebSocket;
+    let reconnectAttempt = 0;
     function connect() {
       if (!active) return;
-      socket = new WebSocket(`${WS_URL.replace(/\/$/, "")}/api/v1/realtime/briefing?access_token=${encodeURIComponent(accessToken() ?? "")}`);
-      socket.onopen = () => setConnection("Connected");
+      const token = accessToken();
+      if (!token) {
+        setConnection("Session unavailable");
+        return;
+      }
+      socket = new WebSocket(`${WS_URL.replace(/\/$/, "")}/api/v1/realtime/briefing?access_token=${encodeURIComponent(token)}`);
+      socket.onopen = () => { reconnectAttempt = 0; setConnection("Live updates on"); };
       socket.onmessage = (event) => {
         try {
           const message = JSON.parse(event.data);
@@ -46,10 +50,18 @@ export default function BriefingPage() {
       socket.onerror = () => setConnection("Updates delayed");
       socket.onclose = () => {
         setConnection("Reconnecting");
-        if (active) reconnect = setTimeout(connect, 4000);
+        if (active) {
+          const delay = Math.min(30_000, 1_000 * (2 ** reconnectAttempt));
+          reconnectAttempt += 1;
+          reconnect = setTimeout(connect, delay);
+        }
       };
     }
-    connect();
+    void bootstrapSession().then((authenticated) => {
+      if (!active) return;
+      if (authenticated) connect();
+      else setConnection("Session unavailable");
+    });
     return () => { active = false; if (reconnect) clearTimeout(reconnect); socket?.close(); };
   }, []);
 

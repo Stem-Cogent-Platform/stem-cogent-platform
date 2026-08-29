@@ -11,6 +11,11 @@ export const metadata: Metadata = {
   },
   description:
     "Evidence-backed decision intelligence for Nigerian fintech leaders, with verified signals, contextual briefs, and auditable recommendations.",
+  icons: {
+    icon: [{ url: "/stem-logo.png", type: "image/png" }],
+    apple: [{ url: "/stem-logo.png", type: "image/png" }],
+    shortcut: "/stem-logo.png"
+  },
   alternates: { canonical: "/" },
   openGraph: {
     type: "website",
