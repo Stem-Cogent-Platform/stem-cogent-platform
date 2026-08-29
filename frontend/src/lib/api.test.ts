@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { ApiError, accessToken, apiRequest, beginSso, clearSession, currentUser, login, logout, register } from "./api";
+import { ApiError, accessToken, apiRequest, beginSso, bootstrapSession, clearSession, currentUser, login, logout, register } from "./api";
 import { legalCopy } from "./legal-copy";
 
 afterEach(() => {
@@ -30,7 +30,7 @@ describe("apiRequest", () => {
     ).resolves.toEqual({ saved: true });
 
     expect(fetchMock).toHaveBeenLastCalledWith(
-      "http://localhost:8000/context/company",
+      "/context/company",
       expect.objectContaining({
         credentials: "include",
         headers: expect.objectContaining({
@@ -68,6 +68,16 @@ describe("apiRequest", () => {
     await expect(apiRequest("/health")).resolves.toEqual({});
   });
 
+  it("turns browser transport failures into an actionable API error", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => { throw new TypeError("Failed to fetch"); }));
+
+    await expect(apiRequest("/api/v1/briefs")).rejects.toMatchObject({
+      status: 0,
+      code: "NETWORK_UNAVAILABLE",
+      message: "Stem could not reach the intelligence service. Check your connection and try again."
+    });
+  });
+
   it("keeps login state in memory instead of browser storage", async () => {
     vi.stubGlobal(
       "fetch",
@@ -100,7 +110,7 @@ describe("apiRequest", () => {
     await expect(beginSso("google", "signup")).resolves.toEqual({ authorization_url: "https://accounts.google.com/authorize" });
 
     expect(accessToken()).toBe("trial-token");
-    expect(fetchMock.mock.calls[0][0]).toBe("http://localhost:8000/api/v1/auth/register");
+    expect(fetchMock.mock.calls[0][0]).toBe("/api/v1/auth/register");
     expect(fetchMock.mock.calls[1][0]).toBe("http://localhost:8000/api/v1/auth/sso/google/start?intent=signup");
   });
 
@@ -166,11 +176,27 @@ describe("apiRequest", () => {
       saved: true
     });
     expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
-      "http://localhost:8000/context/company",
-      "http://localhost:8000/api/v1/auth/refresh",
-      "http://localhost:8000/context/company"
+      "/context/company",
+      "/api/v1/auth/refresh",
+      "/context/company"
     ]);
     expect(accessToken()).toBe("restored-token");
+  });
+
+  it("restores an SSO session from the API host when the same-origin cookie is absent", async () => {
+    clearSession();
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ detail: "No refresh session" }), { status: 401, headers: { "Content-Type": "application/json" } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ access_token: "sso-token", expires_in: 900, user: { display_name: "SSO User" } }), { status: 200, headers: { "Content-Type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(bootstrapSession()).resolves.toBe(true);
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+      "/api/v1/auth/refresh",
+      "http://localhost:8000/api/v1/auth/refresh"
+    ]);
+    expect(accessToken()).toBe("sso-token");
   });
 
   it("clears session state when refresh or logout fails", async () => {

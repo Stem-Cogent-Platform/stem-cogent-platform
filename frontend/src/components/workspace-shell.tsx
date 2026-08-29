@@ -16,6 +16,15 @@ const navigation = [
   ["/digests", "Digests", "digests"]
 ] as const;
 
+type ShellAlert = {
+  id: string;
+  brief_id: string;
+  priority: string;
+  subject: string;
+  read_at?: string | null;
+  payload?: { why_delivered?: string };
+};
+
 function NavIcon({ name }: { name: string }) {
   const paths: Record<string, ReactNode> = {
     briefing: <><path d="M4 5.5h16M4 12h10M4 18.5h13" /><circle cx="18" cy="12" r="2" /></>,
@@ -34,9 +43,11 @@ export function WorkspaceShell({ children }: { children: ReactNode }) {
   const router = useRouter();
   const [ready, setReady] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [user, setUser] = useState<Record<string, unknown>>({});
   const [query, setQuery] = useState("");
-  const [unreadAlerts, setUnreadAlerts] = useState(0);
+  const [alerts, setAlerts] = useState<ShellAlert[]>([]);
 
   useEffect(() => {
     let active = true;
@@ -48,9 +59,9 @@ export function WorkspaceShell({ children }: { children: ReactNode }) {
       }
       setUser(currentUser() ?? {});
       setReady(true);
-      void apiRequest<Array<{ read_at?: string | null }>>("/api/v1/alerts")
+      void apiRequest<ShellAlert[]>("/api/v1/alerts")
         .then((alerts) => {
-          if (active) setUnreadAlerts(alerts.filter((alert) => !alert.read_at).length);
+          if (active) setAlerts(alerts);
         })
         .catch(() => undefined);
     });
@@ -68,17 +79,29 @@ export function WorkspaceShell({ children }: { children: ReactNode }) {
     if (normalized.length >= 2) router.push(`/search?q=${encodeURIComponent(normalized)}`);
   }
 
+  async function openAlert(alert: ShellAlert) {
+    if (!alert.read_at) {
+      await apiRequest(`/api/v1/alerts/${alert.id}/read`, { method: "POST" });
+      setAlerts((items) => items.map((item) => item.id === alert.id ? { ...item, read_at: new Date().toISOString() } : item));
+    }
+    setNotificationsOpen(false);
+    router.push(`/briefs/${alert.brief_id}`);
+  }
+
   if (!ready) return <main className="centered-state"><p>Opening your workspace…</p></main>;
 
   const displayName = String(user.display_name ?? "Stem user");
   const workspaceName = String(user.workspace_name ?? "Workspace");
+  const permissionLabel = user.permission_role === "ADMIN" ? "Workspace owner" : String(user.permission_role ?? "Member").replaceAll("_", " ");
+  const unreadAlerts = alerts.filter((alert) => !alert.read_at).length;
   const initials = displayName.split(/\s+/).slice(0, 2).map((part) => part[0]).join("").toUpperCase();
 
   return (
-    <main className="app-shell">
+    <main className={sidebarCollapsed ? "app-shell sidebar-collapsed" : "app-shell"}>
       {mobileOpen && <button aria-label="Close navigation" className="sidebar-scrim" onClick={() => setMobileOpen(false)} type="button" />}
       <aside className={mobileOpen ? "app-sidebar mobile-open" : "app-sidebar"}>
         <Link className="sidebar-brand" href="/briefing"><StemMark compact /><span>Stem Cogent</span></Link>
+        <button aria-label={sidebarCollapsed ? "Expand navigation" : "Collapse navigation"} className="sidebar-collapse" onClick={() => setSidebarCollapsed((value) => !value)} type="button">{sidebarCollapsed ? "›" : "‹"}</button>
         <div className="sidebar-section-label">Workspace</div>
         <nav aria-label="Primary navigation">
           {navigation.map(([href, text, icon]) => {
@@ -92,7 +115,7 @@ export function WorkspaceShell({ children }: { children: ReactNode }) {
         </nav>
         <div className="sidebar-user">
           <span className="user-avatar">{initials || "SC"}</span>
-          <div><strong>{displayName}</strong><small>{String(user.permission_role ?? "Member")}</small></div>
+          <div><strong>{displayName}</strong><small>{permissionLabel}</small></div>
           <button aria-label="Sign out" onClick={() => void signOut()} type="button">↗</button>
         </div>
       </aside>
@@ -101,13 +124,21 @@ export function WorkspaceShell({ children }: { children: ReactNode }) {
           <button aria-label="Open navigation" className="mobile-menu" onClick={() => setMobileOpen(true)} type="button">☰</button>
           <form className="global-search" onSubmit={search} role="search"><span aria-hidden="true">⌕</span><input aria-label="Search briefs, intelligence, and entities" onChange={(event) => setQuery(event.target.value)} placeholder="Search briefs, intelligence, entities…" type="search" value={query} /><button className="sr-only" type="submit">Search</button></form>
           <div className="topnav-actions">
-            <Link aria-label={unreadAlerts ? `View ${unreadAlerts} unread alerts` : "View alerts"} className="topnav-icon" href="/alerts"><NavIcon name="alerts" />{unreadAlerts > 0 && <i />}</Link>
+            <button aria-expanded={notificationsOpen} aria-label={unreadAlerts ? `View ${unreadAlerts} unread alerts` : "View alerts"} className="topnav-icon" onClick={() => setNotificationsOpen((value) => !value)} type="button"><NavIcon name="alerts" />{unreadAlerts > 0 && <i />}</button>
             <span className="company-switcher"><small>Company</small><strong>{workspaceName}</strong></span>
             <span className="user-avatar compact">{initials || "SC"}</span>
           </div>
         </header>
         <div className="app-content">{children}</div>
       </div>
+      {notificationsOpen && <>
+        <button aria-label="Close notifications" className="notification-scrim" onClick={() => setNotificationsOpen(false)} type="button" />
+        <aside aria-label="Notifications" className="notification-drawer">
+          <header><div><p className="eyebrow">Live workspace</p><h2>Notifications</h2></div><button aria-label="Close notifications" onClick={() => setNotificationsOpen(false)} type="button">×</button></header>
+          <div className="notification-stack">{alerts.slice(0, 8).map((alert) => <button className={alert.read_at ? "" : "unread"} key={alert.id} onClick={() => void openAlert(alert)} type="button"><span className={`priority-chip priority-${alert.priority.toLowerCase()}`}>{alert.priority}</span><strong>{alert.subject}</strong><small>{alert.payload?.why_delivered || "Matched your configured Decision Lens."}</small></button>)}{alerts.length === 0 && <p>No notifications yet. New evidence-backed alerts will appear here.</p>}</div>
+          <Link href="/alerts" onClick={() => setNotificationsOpen(false)}>View alert history →</Link>
+        </aside>
+      </>}
     </main>
   );
 }
