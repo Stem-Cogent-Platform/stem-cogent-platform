@@ -15,9 +15,10 @@ resource "aws_route53_record" "api" {
 resource "aws_route53_record" "frontend" {
   provider = aws.dns
 
-  zone_id = data.aws_route53_zone.public.zone_id
-  name    = var.frontend_hostname
-  type    = "A"
+  allow_overwrite = true
+  zone_id         = data.aws_route53_zone.public.zone_id
+  name            = var.frontend_hostname
+  type            = "A"
 
   alias {
     name                   = aws_lb.this.dns_name
@@ -30,9 +31,10 @@ resource "aws_route53_record" "frontend_redirect" {
   provider = aws.dns
   for_each = var.frontend_redirect_hostnames
 
-  zone_id = data.aws_route53_zone.public.zone_id
-  name    = each.value
-  type    = "A"
+  allow_overwrite = true
+  zone_id         = data.aws_route53_zone.public.zone_id
+  name            = each.value
+  type            = "A"
 
   alias {
     name                   = aws_lb.this.dns_name

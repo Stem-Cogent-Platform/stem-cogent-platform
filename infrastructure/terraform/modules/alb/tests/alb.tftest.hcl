@@ -125,9 +125,11 @@ run "creates_tls_only_application_routing" {
       toset(aws_acm_certificate.this.subject_alternative_names) ==
       toset(["api.staging.stem-cogent.com", "stem-cogent.com", "www.stem-cogent.com"]) &&
       toset(keys(aws_route53_record.frontend_redirect)) ==
-      toset(["stem-cogent.com", "www.stem-cogent.com"])
+      toset(["stem-cogent.com", "www.stem-cogent.com"]) &&
+      aws_route53_record.frontend.allow_overwrite &&
+      alltrue([for record in aws_route53_record.frontend_redirect : record.allow_overwrite])
     )
-    error_message = "The frontend aliases must be covered by TLS and resolve to the public ALB."
+    error_message = "Frontend aliases must be covered by TLS and safely reconcile canonical-host migrations."
   }
 
   assert {
