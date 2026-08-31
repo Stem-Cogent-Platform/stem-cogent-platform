@@ -85,7 +85,8 @@ async def list_briefs(
                 JOIN pipeline.signals AS signal ON signal.id = brief.signal_id
                 WHERE brief.tenant_id = :tenant_id
                   AND (brief.user_id = :user_id OR brief.user_id IS NULL)
-                  AND (:status_filter IS NULL OR brief.brief_status = :status_filter)
+                  AND (CAST(:status_filter AS VARCHAR) IS NULL
+                       OR brief.brief_status = CAST(:status_filter AS VARCHAR))
                 ORDER BY (brief.user_id IS NOT NULL) DESC,
                          brief.personal_priority_score DESC NULLS LAST,
                          assessment.relevance_score DESC, brief.created_at DESC
@@ -96,6 +97,14 @@ async def list_briefs(
              "status_filter": status_filter, "limit": limit},
         )
     ).mappings().all()
+    if any(not row["evidence_signal_ids"] for row in rows):
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={
+                "code": "BRIEF_EVIDENCE_INTEGRITY_FAILED",
+                "message": "One or more Decision Briefs do not have stored evidence. The briefing cannot be shown safely.",
+            },
+        )
     return jsonable_encoder([dict(row) for row in rows])
 
 
@@ -133,7 +142,8 @@ async def get_brief(
             text(
                 """
                 SELECT signal.id, signal.title, signal.source_url, signal.published_at,
-                       signal.detected_at, signal.confidence_band, source.name AS source_name
+                       signal.detected_at, signal.confidence_band,
+                       source.source_name AS source_name
                 FROM pipeline.signals AS signal
                 JOIN config.sources AS source ON source.id = signal.source_id
                 WHERE signal.id = ANY(:signal_ids)
@@ -144,6 +154,14 @@ async def get_brief(
             {"signal_ids": list(row["evidence_signal_ids"]), "tenant_id": context.principal.tenant_id},
         )
     ).mappings().all()
+    if not evidence or len(evidence) != len(set(row["evidence_signal_ids"])):
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={
+                "code": "BRIEF_EVIDENCE_INTEGRITY_FAILED",
+                "message": "This Decision Brief cannot be shown because its stored evidence is incomplete.",
+            },
+        )
     actions = (
         await context.session.execute(
             text(
@@ -204,7 +222,8 @@ async def record_decision_action(
     return jsonable_encoder(dict(row))
 
 
-@router.get("/company")
+@router.get("/company/briefs")
+@router.get("/company", include_in_schema=False)
 async def company_lens(context: RequestContext = Depends(get_request_context)) -> dict[str, Any]:
     require_permission(context, "READ_DECISION_BRIEFS")
     require_feature(context, "company_intelligence_matrix")
@@ -220,9 +239,11 @@ async def company_lens(context: RequestContext = Depends(get_request_context)) -
                 """
                 SELECT brief.id, brief.what_changed, brief.why_it_matters, brief.brief_status,
                        brief.owner_roles, brief.decision_window, brief.created_at,
+                       brief.evidence_signal_ids, brief.uncertainties,
                        assessment.relevance_score, assessment.relevance_band,
                        assessment.exposure_types, assessment.stakes_types,
-                       signal.primary_domain, signal.urgency_band
+                       assessment.quantification_status,
+                       signal.primary_domain, signal.urgency_band, signal.confidence_band
                 FROM decision.briefs AS brief
                 JOIN decision.assessments AS assessment
                   ON assessment.tenant_id = brief.tenant_id AND assessment.id = brief.assessment_id
@@ -234,11 +255,20 @@ async def company_lens(context: RequestContext = Depends(get_request_context)) -
             {"tenant_id": context.principal.tenant_id},
         )
     ).mappings().all()
+    if any(not row["evidence_signal_ids"] for row in rows):
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={
+                "code": "BRIEF_EVIDENCE_INTEGRITY_FAILED",
+                "message": "Company Lens cannot be shown because a Decision Brief has no stored evidence.",
+            },
+        )
     return jsonable_encoder({"profile": dict(profile) if profile else None,
                              "briefs": [dict(row) for row in rows]})
 
 
-@router.get("/intelligence")
+@router.get("/signals")
+@router.get("/intelligence", include_in_schema=False)
 async def wider_intelligence(
     limit: int = Query(default=40, ge=1, le=100),
     context: RequestContext = Depends(get_request_context),
@@ -252,7 +282,7 @@ async def wider_intelligence(
                        output.global_implication, output.confidence_note, output.citations,
                        output.synthesized_at, signal.title, signal.primary_domain,
                        signal.urgency_band, signal.confidence_band, signal.source_url,
-                       signal.published_at, source.name AS source_name
+                       signal.published_at, source.source_name AS source_name
                 FROM intelligence.global_outputs AS output
                 JOIN pipeline.signals AS signal ON signal.id = output.signal_id
                 JOIN config.sources AS source ON source.id = signal.source_id
@@ -264,6 +294,14 @@ async def wider_intelligence(
             {"tenant_id": context.principal.tenant_id, "limit": limit},
         )
     ).mappings().all()
+    if any(not row["citations"] for row in rows):
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={
+                "code": "INTELLIGENCE_EVIDENCE_INTEGRITY_FAILED",
+                "message": "Wider Intelligence cannot be shown because a synthesized output has no stored citations.",
+            },
+        )
     return jsonable_encoder([dict(row) for row in rows])
 
 
@@ -317,6 +355,70 @@ async def entity_profile(
     ).mappings().all()
     return jsonable_encoder({"entity": dict(entity), "activity": [dict(row) for row in activity],
                              "relationships": [dict(row) for row in relationships]})
+
+
+@router.get("/watchlist")
+async def watchlist(context: RequestContext = Depends(get_request_context)) -> dict[str, Any]:
+    require_permission(context, "READ_INTELLIGENCE")
+    company = (
+        await context.session.execute(
+            text(
+                """
+                SELECT object.id, object.name, object.object_type, object.importance,
+                       object.entity_id,
+                       CASE WHEN object.entity_id IS NULL THEN NULL ELSE (
+                         SELECT COUNT(DISTINCT link.signal_id)
+                         FROM intelligence.signal_entities AS link
+                         JOIN pipeline.signals AS signal ON signal.id = link.signal_id
+                         WHERE link.entity_id = object.entity_id
+                           AND signal.detected_at >= NOW() - INTERVAL '30 days'
+                           AND (signal.tenant_id IS NULL OR signal.tenant_id = :tenant_id)
+                       ) END AS recent_activity_count,
+                       (
+                         SELECT COUNT(DISTINCT brief.id)
+                         FROM decision.assessments AS assessment
+                         JOIN decision.briefs AS brief
+                           ON brief.tenant_id = assessment.tenant_id
+                          AND brief.assessment_id = assessment.id
+                         WHERE assessment.tenant_id = object.tenant_id
+                           AND object.id = ANY(assessment.matched_object_ids)
+                           AND brief.brief_status IN ('OPEN', 'WATCHING', 'ESCALATED')
+                       ) AS open_brief_count
+                FROM context.company_objects AS object
+                WHERE object.tenant_id = :tenant_id AND object.active
+                ORDER BY object.importance DESC, object.object_type, object.name
+                """
+            ),
+            {"tenant_id": context.principal.tenant_id},
+        )
+    ).mappings().all()
+    focus = (
+        await context.session.execute(
+            text(
+                """
+                SELECT focus.id, focus.label, focus.focus_type, focus.weight,
+                       focus.entity_id,
+                       CASE WHEN focus.entity_id IS NULL THEN NULL ELSE (
+                         SELECT COUNT(DISTINCT link.signal_id)
+                         FROM intelligence.signal_entities AS link
+                         JOIN pipeline.signals AS signal ON signal.id = link.signal_id
+                         WHERE link.entity_id = focus.entity_id
+                           AND signal.detected_at >= NOW() - INTERVAL '30 days'
+                           AND (signal.tenant_id IS NULL OR signal.tenant_id = :tenant_id)
+                       ) END AS recent_activity_count,
+                       NULL::BIGINT AS open_brief_count
+                FROM context.focus_areas AS focus
+                WHERE focus.tenant_id = :tenant_id AND focus.user_id = :user_id
+                  AND focus.active AND (focus.expires_at IS NULL OR focus.expires_at > NOW())
+                ORDER BY focus.weight DESC, focus.created_at DESC
+                """
+            ),
+            {"tenant_id": context.principal.tenant_id, "user_id": context.principal.user_id},
+        )
+    ).mappings().all()
+    return jsonable_encoder(
+        {"company": [dict(row) for row in company], "focus": [dict(row) for row in focus]}
+    )
 
 
 @router.get("/alerts")
@@ -427,6 +529,64 @@ async def list_digests(context: RequestContext = Depends(get_request_context)) -
         )
     ).mappings().all()
     return jsonable_encoder([dict(row) for row in rows])
+
+
+@router.get("/team")
+async def list_team_members(
+    context: RequestContext = Depends(get_request_context),
+) -> list[dict[str, Any]]:
+    """Return persisted tenant membership for the admin-only Settings tab."""
+
+    require_permission(context, "MANAGE_USERS")
+    rows = (
+        await context.session.execute(
+            text(
+                """
+                SELECT id, email, display_name, permission_role, status,
+                       mfa_enabled, last_login_at, created_at
+                FROM auth.users
+                WHERE tenant_id = :tenant_id
+                ORDER BY status = 'ACTIVE' DESC, display_name NULLS LAST, email
+                """
+            ),
+            {"tenant_id": context.principal.tenant_id},
+        )
+    ).mappings().all()
+    return jsonable_encoder([dict(row) for row in rows])
+
+
+@router.get("/integrations")
+async def integration_status(
+    context: RequestContext = Depends(get_request_context),
+) -> dict[str, Any]:
+    """Expose persisted API-key state and the active plan's real feature gates."""
+
+    keys: list[Any] = []
+    if "MANAGE_USERS" in context.principal.permissions:
+        keys = list(
+            (
+                await context.session.execute(
+                    text(
+                        """
+                        SELECT id, name, key_prefix, permissions, status,
+                               last_used_at, expires_at, created_at
+                        FROM auth.api_keys
+                        WHERE tenant_id = :tenant_id
+                        ORDER BY created_at DESC
+                        """
+                    ),
+                    {"tenant_id": context.principal.tenant_id},
+                )
+            ).mappings().all()
+        )
+    return jsonable_encoder(
+        {
+            "plan_code": context.principal.plan_code,
+            "api_enabled": context.principal.entitlements.get("api") is True,
+            "private_uploads": context.principal.entitlements.get("private_uploads", False),
+            "api_keys": [dict(row) for row in keys],
+        }
+    )
 
 
 @router.get("/pilot")

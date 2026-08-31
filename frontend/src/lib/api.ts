@@ -1,4 +1,4 @@
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+const API_ORIGIN = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
 export class ApiError extends Error {
   constructor(
@@ -7,6 +7,7 @@ export class ApiError extends Error {
     readonly code?: string
   ) {
     super(message);
+    this.name = "ApiError";
   }
 }
 
@@ -17,30 +18,64 @@ type AuthResponse = {
 };
 
 let refreshInFlight: Promise<boolean> | null = null;
+let activeAccessToken: string | null = null;
+let activeUser: Record<string, unknown> | null = null;
+let activeSessionOrigin = "";
 
 export function accessToken() {
-  return typeof window === "undefined" ? null : window.sessionStorage.getItem("sc_access_token");
+  return activeAccessToken;
+}
+
+export function currentUser() {
+  return activeUser;
 }
 
 export function clearSession() {
-  if (typeof window !== "undefined") {
-    window.sessionStorage.removeItem("sc_access_token");
-    window.sessionStorage.removeItem("sc_user");
-  }
+  activeAccessToken = null;
+  activeUser = null;
+  activeSessionOrigin = "";
 }
 
-export async function login(input: { workspace_id: string; email: string; password: string }) {
+export async function login(input: { email: string; password: string; workspace_id?: string }) {
   const response = await rawRequest<AuthResponse>("/api/v1/auth/login", {
     method: "POST",
     body: JSON.stringify(input)
   });
-  storeSession(response);
+  storeSession(response, "");
   return response;
+}
+
+export async function register(input: {
+  company_name: string;
+  display_name: string;
+  email: string;
+  password: string;
+}) {
+  const response = await rawRequest<AuthResponse>("/api/v1/auth/register", {
+    method: "POST",
+    body: JSON.stringify(input)
+  });
+  storeSession(response, "");
+  return response;
+}
+
+export async function beginSso(provider: "google" | "linkedin", intent: "login" | "signup") {
+  return rawRequest<{ authorization_url: string }>(
+    `${API_ORIGIN}/api/v1/auth/sso/${provider}/start?intent=${intent}`
+  );
+}
+
+export async function bootstrapSession() {
+  if (activeAccessToken && activeUser) return true;
+  refreshInFlight ??= refreshSession().finally(() => {
+    refreshInFlight = null;
+  });
+  return refreshInFlight;
 }
 
 export async function logout() {
   try {
-    await rawRequest("/api/v1/auth/logout", { method: "POST" });
+    await rawRequest(`${activeSessionOrigin}/api/v1/auth/logout`, { method: "POST" });
   } finally {
     clearSession();
   }
@@ -50,7 +85,7 @@ export async function apiRequest<T>(path: string, init?: RequestInit): Promise<T
   try {
     return await rawRequest<T>(path, init);
   } catch (error) {
-    if (!(error instanceof ApiError) || error.status !== 401 || !accessToken()) throw error;
+    if (!(error instanceof ApiError) || error.status !== 401) throw error;
     refreshInFlight ??= refreshSession().finally(() => {
       refreshInFlight = null;
     });
@@ -60,18 +95,42 @@ export async function apiRequest<T>(path: string, init?: RequestInit): Promise<T
 }
 
 async function rawRequest<T>(path: string, init?: RequestInit): Promise<T> {
-  const token = typeof window === "undefined" ? null : window.sessionStorage.getItem("sc_access_token");
-  const response = await fetch(`${API_URL}${path}`, {
-    ...init,
-    credentials: "include",
-    headers: {
-      Accept: "application/json",
-      ...(init?.body ? { "Content-Type": "application/json" } : {}),
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...init?.headers
-    }
-  });
-  const payload = await response.json().catch(() => ({}));
+  const token = activeAccessToken;
+  const requestId = globalThis.crypto?.randomUUID?.() ?? `stem-${Date.now().toString(36)}`;
+  let response: globalThis.Response;
+  try {
+    response = await fetch(path, {
+      ...init,
+      credentials: "include",
+      signal: init?.signal ?? AbortSignal.timeout(20_000),
+      headers: {
+        Accept: "application/json",
+        "X-Request-ID": requestId,
+        ...(init?.body ? { "Content-Type": "application/json" } : {}),
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...init?.headers
+      }
+    });
+  } catch (error) {
+    const timedOut = error instanceof DOMException && error.name === "TimeoutError";
+    throw new ApiError(
+      timedOut
+        ? "The intelligence service took too long to respond. Please try again."
+        : "Stem could not reach the intelligence service. Check your connection and try again.",
+      0,
+      timedOut ? "REQUEST_TIMEOUT" : "NETWORK_UNAVAILABLE"
+    );
+  }
+  const isEmpty = response.status === 204 || response.headers.get("content-length") === "0";
+  const contentType = response.headers.get("content-type")?.toLowerCase() ?? "";
+  if (response.ok && !isEmpty && !contentType.includes("application/json")) {
+    throw new ApiError(
+      "The intelligence service returned an invalid response. Please try again.",
+      response.status,
+      "INVALID_API_RESPONSE"
+    );
+  }
+  const payload = isEmpty ? {} : await response.json().catch(() => ({}));
   if (!response.ok) {
     const detail = payload.detail;
     const message =
@@ -86,15 +145,22 @@ async function rawRequest<T>(path: string, init?: RequestInit): Promise<T> {
 async function refreshSession() {
   try {
     const response = await rawRequest<AuthResponse>("/api/v1/auth/refresh", { method: "POST" });
-    storeSession(response);
+    storeSession(response, "");
     return true;
   } catch {
-    clearSession();
-    return false;
+    try {
+      const response = await rawRequest<AuthResponse>(`${API_ORIGIN}/api/v1/auth/refresh`, { method: "POST" });
+      storeSession(response, API_ORIGIN);
+      return true;
+    } catch {
+      clearSession();
+      return false;
+    }
   }
 }
 
-function storeSession(response: AuthResponse) {
-  window.sessionStorage.setItem("sc_access_token", response.access_token);
-  window.sessionStorage.setItem("sc_user", JSON.stringify(response.user));
+function storeSession(response: AuthResponse, sessionOrigin = "") {
+  activeAccessToken = response.access_token;
+  activeUser = response.user;
+  activeSessionOrigin = sessionOrigin;
 }

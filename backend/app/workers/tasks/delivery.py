@@ -103,8 +103,9 @@ async def _recipients(
                 WHERE users.tenant_id = :tenant_id AND users.status = 'ACTIVE'
                   AND COALESCE(preference.enabled, TRUE)
                   AND (
-                    (:user_id IS NOT NULL AND users.id = :user_id)
-                    OR (:user_id IS NULL AND (
+                    (CAST(:user_id AS UUID) IS NOT NULL
+                     AND users.id = CAST(:user_id AS UUID))
+                    OR (CAST(:user_id AS UUID) IS NULL AND (
                       cardinality(CAST(:owner_roles AS TEXT[])) = 0
                       OR lens.role_code = ANY(CAST(:owner_roles AS TEXT[]))
                     ))

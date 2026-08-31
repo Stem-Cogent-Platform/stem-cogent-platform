@@ -9,5 +9,5 @@ export function ModuleFailure({ message, retry }: { message?: string; retry: () 
 }
 
 export function ModuleLoading({ label = "Loading this section" }: { label?: string }) {
-  return <section className="module-loading" aria-label={label}><i /><i /><i /></section>;
+  return <section className="module-loading" aria-label={label} aria-live="polite" role="status"><span className="sr-only">{label}</span><i /><i /><i /><i /><i /></section>;
 }

@@ -119,7 +119,11 @@ app.include_router(health_router)
 app.include_router(auth_sessions_router)
 app.include_router(billing_router)
 app.include_router(compliance_router)
-app.include_router(context_router)
+# SC-DOC-006 defines /api/v1 as the global API base. Keep the older
+# unprefixed context routes as hidden compatibility aliases while clients
+# migrate to the canonical contract.
+app.include_router(context_router, prefix="/api/v1")
+app.include_router(context_router, include_in_schema=False)
 app.include_router(product_router)
 app.include_router(realtime_router)
 app.include_router(cil_router)
