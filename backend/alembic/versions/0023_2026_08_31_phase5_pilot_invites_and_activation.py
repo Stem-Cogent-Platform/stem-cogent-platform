@@ -59,7 +59,7 @@ def upgrade() -> None:
         CREATE TABLE auth.tenant_invitations (
             id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
             tenant_id UUID NOT NULL REFERENCES auth.tenants(id) ON DELETE CASCADE,
-            email CITEXT NOT NULL,
+            email VARCHAR(320) NOT NULL,
             permission_role VARCHAR(30) NOT NULL REFERENCES auth.roles(role_code),
             invited_by UUID,
             token_hash TEXT NOT NULL UNIQUE,
@@ -265,7 +265,7 @@ def upgrade() -> None:
         """
         CREATE FUNCTION auth.validate_tenant_invitation(p_token_hash TEXT)
         RETURNS TABLE (
-            invitation_id UUID, tenant_id UUID, email CITEXT,
+            invitation_id UUID, tenant_id UUID, email VARCHAR,
             permission_role VARCHAR, tenant_name VARCHAR, expires_at TIMESTAMPTZ
         )
         LANGUAGE SQL SECURITY DEFINER STABLE
@@ -287,7 +287,7 @@ def upgrade() -> None:
         """
         CREATE FUNCTION auth.accept_tenant_invitation(
             p_token_hash TEXT, p_password_hash TEXT, p_display_name TEXT
-        ) RETURNS TABLE (user_id UUID, tenant_id UUID, email CITEXT)
+        ) RETURNS TABLE (user_id UUID, tenant_id UUID, email VARCHAR)
         LANGUAGE plpgsql SECURITY DEFINER
         SET search_path = pg_catalog, auth, audit
         AS $$
