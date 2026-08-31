@@ -14,7 +14,7 @@ def _settings() -> SimpleNamespace:
         EMBEDDING_TIMEOUT_SECONDS=30.0,
         EMBEDDING_MAX_RETRIES=4,
         LLM_PRIMARY_PROVIDER="openai",
-        LLM_PRIMARY_MODEL="gpt-5-mini",
+        LLM_PRIMARY_MODEL="gpt-4.1-mini-2025-04-14",
         LLM_TIMEOUT_SECONDS=30.0,
         LLM_MAX_RETRIES=4,
     )
@@ -48,3 +48,4 @@ def test_synthesis_client_resolves_json_wrapped_api_key(monkeypatch) -> None:  #
 
     assert resolved == ["arn:openai"]
     assert client._key == "resolved-openai-key"
+    assert client.model == "gpt-4.1-mini-2025-04-14"
