@@ -83,3 +83,36 @@ async def test_run_rejects_partial_tenant_identity() -> None:
                 wait_seconds=0,
             )
         )
+
+
+@pytest.mark.asyncio
+async def test_run_seeds_source_and_reports_failed_pipeline(monkeypatch: Any) -> None:
+    job_id = uuid4()
+
+    async def seed(source_code: str, tenant_id: Any) -> Any:
+        assert source_code == "CBN_RSS"
+        assert tenant_id is None
+        return job_id
+
+    async def collect(*_: Any) -> dict[str, Any]:
+        return {"collection_job": {"status": "FAILED"}, "raw_signals": 0}
+
+    monkeypatch.setattr(verifier, "seed_source", seed)
+    monkeypatch.setattr(verifier, "collect_evidence", collect)
+    result = await verifier.run(
+        Namespace(
+            tenant_id=None,
+            user_id=None,
+            job_id=None,
+            seed_source="CBN_RSS",
+            wait_seconds=0,
+        )
+    )
+
+    assert result["job_id"] == str(job_id)
+    assert result["failed_checks"] == [
+        "raw signal archived",
+        "raw signal validated",
+        "normalized signal persisted",
+        "cited Global Output completed",
+    ]
