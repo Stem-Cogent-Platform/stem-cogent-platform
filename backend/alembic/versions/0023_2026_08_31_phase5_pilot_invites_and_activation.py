@@ -35,6 +35,13 @@ def upgrade() -> None:
         sa.Column("mfa_verified_at", sa.DateTime(timezone=True), nullable=True),
         schema="auth",
     )
+    op.execute("ALTER TABLE auth.roles DROP CONSTRAINT roles_role_code_check")
+    op.execute(
+        """
+        ALTER TABLE auth.roles ADD CONSTRAINT roles_role_code_check
+        CHECK (role_code IN ('ADMIN','ANALYST','VIEWER','API_CONSUMER','SYSTEM_ADMIN'))
+        """
+    )
     op.execute(
         """
         INSERT INTO auth.roles (role_code, description, permissions)
@@ -403,5 +410,16 @@ def downgrade() -> None:
         """
     )
     op.execute("DROP TABLE auth.tenant_invitations")
+    op.execute(
+        "UPDATE auth.users SET permission_role = 'ADMIN' "
+        "WHERE permission_role = 'SYSTEM_ADMIN'"
+    )
     op.execute("DELETE FROM auth.roles WHERE role_code = 'SYSTEM_ADMIN'")
+    op.execute("ALTER TABLE auth.roles DROP CONSTRAINT roles_role_code_check")
+    op.execute(
+        """
+        ALTER TABLE auth.roles ADD CONSTRAINT roles_role_code_check
+        CHECK (role_code IN ('ADMIN','ANALYST','VIEWER','API_CONSUMER'))
+        """
+    )
     op.drop_column("sessions", "mfa_verified_at", schema="auth")
