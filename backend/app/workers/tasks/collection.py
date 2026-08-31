@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import urlsplit
@@ -20,7 +21,7 @@ from app.ingestion.base_collector import (
 )
 from app.ingestion.discovery import build_rotating_discovery_url
 from app.ingestion.html_collector import HTMLCollector
-from app.ingestion.http import ApprovedHttpFetcher
+from app.ingestion.http import ApprovedHttpFetcher, SourceFetchError, UnsafeSourceUrl
 from app.ingestion.pdf_collector import PDFCollector
 from app.ingestion.rss_collector import RSSCollector
 from app.ingestion.upload_collector import UploadCollector
@@ -29,6 +30,7 @@ from app.workers.events import CeleryEventPublisher
 from app.workers.runtime import run_async_worker
 
 
+logger = logging.getLogger(__name__)
 _HTTP_COLLECTORS = {
     "RSS": RSSCollector,
     "API": APICollector,
@@ -36,6 +38,10 @@ _HTTP_COLLECTORS = {
     "PDF": PDFCollector,
     "LIVE_SEARCH": APICollector,
 }
+
+
+class InactiveCollectionSource(RuntimeError):
+    """The queued job belongs to a source retired after it was dispatched."""
 
 
 def _assert_registered_http_url(source_url: str, base_url: str | None) -> None:
@@ -58,16 +64,19 @@ async def _load_job(session: AsyncSession, event: dict[str, Any]) -> CollectionJ
                 """
                 SELECT j.id, j.source_id, j.trigger_type, j.priority, j.retry_count,
                        j.scheduled_at, s.source_code, s.source_type, s.base_url,
-                       s.schema_version, s.auth_type
+                       s.schema_version, s.auth_type, s.health_status
                 FROM pipeline.collection_jobs AS j
                 JOIN config.sources AS s ON s.id = j.source_id
                 WHERE j.id = :collection_job_id
-                  AND s.health_status = 'ACTIVE'
                 """
             ),
             {"collection_job_id": collection_job_id},
         )
     ).mappings().one()
+    if row["health_status"] != "ACTIVE":
+        raise InactiveCollectionSource(
+            f"Source {row['source_code']} is no longer active"
+        )
     if row["auth_type"] != "NO_AUTH" and row["source_type"] != "USER_UPLOAD":
         raise RuntimeError(
             f"Source {row['source_code']} requires an unconfigured auth adapter"
@@ -147,9 +156,33 @@ def _collector(
 
 async def run_collection(event: dict[str, Any]) -> str:
     async for session in get_session():
-        job = await _load_job(session, event)
+        try:
+            job = await _load_job(session, event)
+        except InactiveCollectionSource:
+            logger.info(
+                "Skipped collection job for inactive source",
+                extra={
+                    "event": "inactive_collection_source_skipped",
+                    "collection_job_id": event.get("payload", {}).get(
+                        "collection_job_id"
+                    ),
+                },
+            )
+            return "SKIPPED"
         s3_client = boto3.client("s3", region_name=get_settings().AWS_REGION)
-        record = await _collector(job, session, s3_client).collect(job)
+        try:
+            record = await _collector(job, session, s3_client).collect(job)
+        except (SourceFetchError, UnsafeSourceUrl) as exc:
+            logger.warning(
+                "Collection source unavailable after bounded attempts",
+                extra={
+                    "event": "collection_source_unavailable",
+                    "source_code": job.source_code,
+                    "collection_job_id": str(job.collection_job_id),
+                    "error_code": type(exc).__name__,
+                },
+            )
+            return f"FAILED:{job.collection_job_id}"
         return str(record.raw_signal_id)
     raise RuntimeError("Database session was not available")
 

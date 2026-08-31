@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.core.database import get_session
-from app.core.secrets import get_secret_string
+from app.core.secrets import get_scalar_secret
 from app.intelligence.synthesis import EvidenceItem, GlobalContextPackage, SynthesisService
 from app.intelligence.synthesis.client import OpenAIResponsesClient
 from app.workers.celery_app import celery_app
@@ -43,7 +43,7 @@ def _synthesis_client() -> OpenAIResponsesClient:
     if settings.LLM_PRIMARY_PROVIDER != "openai" or not settings.OPENAI_API_KEY_ARN:
         raise RuntimeError("Configured OpenAI synthesis provider is missing its secret ARN")
     return OpenAIResponsesClient(
-        api_key=get_secret_string(settings.OPENAI_API_KEY_ARN),
+        api_key=get_scalar_secret(settings.OPENAI_API_KEY_ARN),
         model=settings.LLM_PRIMARY_MODEL,
         timeout_seconds=settings.LLM_TIMEOUT_SECONDS,
         max_retries=settings.LLM_MAX_RETRIES,
@@ -95,16 +95,17 @@ async def _assemble_context(
         await session.execute(
             text(
                 """
-                SELECT signal.id, source.name AS source_name, signal.title,
+                SELECT signal.id, source.source_name AS source_name, signal.title,
                        signal.body_text, signal.source_url,
                        signal.published_at::TEXT AS published_at
                 FROM pipeline.signals AS signal
                 JOIN config.sources AS source ON source.id = signal.source_id
                 WHERE signal.id = ANY(CAST(:evidence_ids AS UUID[]))
                   AND (
-                    (:tenant_id IS NULL AND signal.tenant_id IS NULL)
-                    OR (:tenant_id IS NOT NULL AND (
-                      signal.tenant_id IS NULL OR signal.tenant_id = :tenant_id
+                    (CAST(:tenant_id AS UUID) IS NULL AND signal.tenant_id IS NULL)
+                    OR (CAST(:tenant_id AS UUID) IS NOT NULL AND (
+                      signal.tenant_id IS NULL
+                      OR signal.tenant_id = CAST(:tenant_id AS UUID)
                     ))
                   )
                 ORDER BY (signal.id = :signal_id) DESC, signal.created_at DESC
@@ -176,7 +177,7 @@ async def _persist_output(
                 ) VALUES (
                   :signal_id, :tenant_id, :cluster_id, :summary, :key_developments,
                   :global_implication, :confidence_note, CAST(:citations AS JSONB),
-                  :provider, :model, :prompt_version, 'COMPLETE', :failed,
+                  :provider, :model, :prompt_version, 'COMPLETED', :failed,
                   :historical_signal_ids, NOW()
                 )
                 ON CONFLICT (signal_id) DO UPDATE

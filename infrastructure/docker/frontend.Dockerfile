@@ -33,6 +33,7 @@ RUN mkdir -p /app/.next/cache \
 
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
+COPY --from=builder --chown=nextjs:nodejs /app/public ./public
 COPY --chown=nextjs:nodejs healthcheck.mjs ./healthcheck.mjs
 
 # ECS Fargate bind mounts otherwise default to root-owned mode 0755. Define

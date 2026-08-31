@@ -42,6 +42,7 @@ async def test_provision_creates_an_invite_only_trial_and_checkpoint_schedule(
         Result(),
         Result(scalar=user_id),
         Result(),
+        Result(),
         Result(scalar=engagement_id),
         Result(),
         Result(),

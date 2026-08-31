@@ -490,9 +490,51 @@ jobs:
         env:
           MIGRATION_TASK_DEFINITION: ${{ steps.migration-definition.outputs.arn }}
         run: |
+          mapfile -t worker_services < <(jq -r '.[] | select(.image == "worker") | .service' <<<"$ECS_SERVICE_DEPLOYMENTS")
+          declare -A worker_counts=()
+
+          restore_workers() {
+            local restore_status=0
+            for service in "${worker_services[@]}"; do
+              aws ecs update-service \
+                --cluster "$ECS_CLUSTER_NAME" \
+                --service "$service" \
+                --desired-count "${worker_counts[$service]}" >/dev/null || restore_status=$?
+            done
+            if [ "${#worker_services[@]}" -gt 0 ]; then
+              aws ecs wait services-stable \
+                --cluster "$ECS_CLUSTER_NAME" \
+                --services "${worker_services[@]}" || restore_status=$?
+            fi
+            return "$restore_status"
+          }
+
+          for service in "${worker_services[@]}"; do
+            worker_counts[$service]="$(aws ecs describe-services \
+              --cluster "$ECS_CLUSTER_NAME" \
+              --services "$service" \
+              --query 'services[0].desiredCount' \
+              --output text)"
+          done
+          trap 'restore_workers || true' EXIT
+
+          for service in "${worker_services[@]}"; do
+            aws ecs update-service \
+              --cluster "$ECS_CLUSTER_NAME" \
+              --service "$service" \
+              --desired-count 0 >/dev/null
+          done
+          if [ "${#worker_services[@]}" -gt 0 ]; then
+            aws ecs wait services-stable \
+              --cluster "$ECS_CLUSTER_NAME" \
+              --services "${worker_services[@]}"
+          fi
+
           bash .github/scripts/run-one-shot-ecs-task.sh alembic upgrade head
           bash .github/scripts/run-one-shot-ecs-task.sh \
             python alembic/seeds/seed_launch_sources.py
+          restore_workers
+          trap - EXIT
 
       - name: Register task definitions and start rolling deployments
         shell: bash

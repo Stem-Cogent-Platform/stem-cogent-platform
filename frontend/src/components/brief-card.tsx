@@ -4,7 +4,7 @@ import { Brief } from "@/lib/types";
 
 export function BriefCard({ brief }: { brief: Brief }) {
   return (
-    <article className="brief-card">
+    <article className={`brief-card urgency-${(brief.urgency_band ?? brief.relevance_band).toLowerCase()}`}>
       <div className="brief-meta">
         <span className={`priority-chip priority-${brief.relevance_band.toLowerCase()}`}>
           {brief.relevance_band}

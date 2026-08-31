@@ -29,8 +29,8 @@ def test_manifest_covers_launch_collectors_and_all_taxonomy_domains() -> None:
     data = runpy.run_path(DATA_PATH)
     sources = data["LAUNCH_SOURCES"]
 
-    assert data["MANIFEST_VERSION"] == "2026.08-v3"
-    assert len(sources) == 17
+    assert data["MANIFEST_VERSION"] == "2026.08-v4"
+    assert len(sources) == 16
     assert {source.source_type for source in sources} == {
         "RSS",
         "API",
@@ -54,7 +54,6 @@ def test_external_sources_are_official_https_endpoints_with_review_evidence() ->
         "status.paystack.com",
         "status.flutterwave.com",
         "ndpc.gov.ng",
-        "nibss-plc.com.ng",
         "flutterwave.com",
         "moniepoint.com",
         "techcabal.com",

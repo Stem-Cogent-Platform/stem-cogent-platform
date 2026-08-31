@@ -67,6 +67,8 @@ locals {
     "paystack_secret_key",
     "paystack_public_key",
     "paystack_webhook_secret",
+    "google_oauth_credentials",
+    "linkedin_oauth_credentials",
   ])
 
   queue_access = {
@@ -161,6 +163,8 @@ locals {
       "paystack_secret_key",
       "paystack_public_key",
       "paystack_webhook_secret",
+      "google_oauth_credentials",
+      "linkedin_oauth_credentials",
     ]
     frontend-service        = []
     scheduler-worker        = ["database_credentials", "redis_auth_token"]
@@ -188,6 +192,7 @@ locals {
   dynamic_secret_resources = {
     api-service = [
       "arn:${data.aws_partition.current.partition}:secretsmanager:${var.aws_region}:${var.aws_account_id}:secret:${var.resource_prefix}/${var.environment}/users/*/totp-secret-*",
+      "arn:${data.aws_partition.current.partition}:secretsmanager:${var.aws_region}:${var.aws_account_id}:secret:${var.resource_prefix}/${var.environment}/pilots/*/initial-password-*",
     ]
     frontend-service = []
     scheduler-worker = []

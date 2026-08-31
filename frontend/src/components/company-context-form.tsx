@@ -20,7 +20,7 @@ export function CompanyContextForm() {
     setMessage("");
     const form = new FormData(event.currentTarget);
     try {
-      await apiRequest("/context/company", {
+      await apiRequest("/api/v1/context/company", {
         method: "PUT",
         body: JSON.stringify({
           business_categories: values(form.get("categories")),

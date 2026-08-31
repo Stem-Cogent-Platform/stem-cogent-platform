@@ -4,27 +4,33 @@ import { resolve } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 
 vi.mock("next/navigation", () => ({
-  useRouter: () => ({ push: vi.fn() })
+  useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
+  useSearchParams: () => new URLSearchParams()
 }));
 
 import RootLayout, { metadata } from "./layout";
 import HomePage from "./page";
 
 describe("HomePage", () => {
-  it("renders the locked legal-consent onboarding checkpoint", () => {
+  it("renders public account creation rather than legal consent", () => {
     const markup = renderToStaticMarkup(<HomePage />);
 
-    expect(markup).toContain("Secure workspace setup");
-    expect(markup).toContain("Legal consent");
-    expect(markup).toContain("Preparing the current documents");
-    expect(markup).not.toContain("Company Context is now available");
+    expect(markup).toContain("Start your workspace");
+    expect(markup).toContain("Create workspace");
+    expect(markup).toContain("No invitation or card is required");
+    expect(markup).not.toContain("Legal consent");
   });
 });
 
 describe("RootLayout", () => {
   it("defines the platform metadata", () => {
-    expect(metadata.title).toEqual({ default: "Stem", template: "%s · Stem" });
+    expect(metadata.title).toEqual({
+      default: "Stem Cogent | Decision Intelligence for Nigerian Fintech",
+      template: "%s · Stem Cogent"
+    });
     expect(metadata.description).toContain("Evidence-backed decision intelligence");
+    expect(metadata.alternates).toEqual({ canonical: "/" });
+    expect(metadata.icons).toBeDefined();
   });
 
   it("renders an English document with its children", () => {
@@ -47,6 +53,15 @@ describe("Visual token contract", () => {
     expect(css).toContain("--bg-page: #f5f6fa");
     expect(css).toContain("--accent: #2a4bff");
     expect(css).toContain("--text-primary: #0b0f1a");
+    expect(css).toContain("height: 100dvh");
+    expect(css).toContain("grid-template-rows: 64px minmax(0, 1fr)");
+    expect(css).toContain("overflow-y: auto");
+    expect(css).toContain("@media (max-width: 860px)");
+    expect(css).toContain("@media (max-width: 560px)");
+    expect(css).toContain("@media (min-width: 861px) and (max-width: 1280px)");
+    expect(css).toContain(".two-column, .detail-grid, .settings-layout { grid-template-columns: minmax(0, 1fr);");
+    expect(css).toContain("min-height: 44px");
+    expect(css).not.toContain("#111831");
     expect(`${css}\n${source}`).not.toMatch(/linear-gradient|radial-gradient|dark:|neon|text-shadow|filter:\s*drop-shadow/i);
   });
 });

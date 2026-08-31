@@ -98,6 +98,22 @@ variable "frontend_hostname" {
   }
 }
 
+variable "frontend_redirect_hostnames" {
+  description = "Additional public hostnames that redirect to the canonical frontend hostname."
+  type        = set(string)
+  default     = []
+
+  validation {
+    condition = alltrue([
+      for hostname in var.frontend_redirect_hostnames :
+      can(regex("^[A-Za-z0-9.-]+\\.[A-Za-z]{2,}$", hostname)) &&
+      hostname != var.api_hostname &&
+      hostname != var.frontend_hostname
+    ])
+    error_message = "frontend_redirect_hostnames must contain distinct fully qualified aliases, not the canonical API or frontend hostname."
+  }
+}
+
 variable "api_health_check_path" {
   description = "API path used by the target group to determine container liveness."
   type        = string
