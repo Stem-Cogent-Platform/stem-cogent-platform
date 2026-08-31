@@ -18,8 +18,34 @@ export type Brief = {
   confidence_band?: string;
   created_at: string;
   decision_window?: string;
+  first_published_at?: string;
+  last_material_change_at?: string;
+  material_change_count?: number;
+  published_at?: string;
+  detected_at?: string;
+  exposure_types?: string[];
+  stakes_types?: string[];
+  gaps_summary?: string;
+  response_options?: DecisionPath[];
+  next_validation_steps?: string[];
+  guidance_status?: string;
+  timeline?: BriefTimelineEvent[];
   evidence?: Evidence[];
   actions?: DecisionAction[];
+};
+
+export type DecisionPath = {
+  option_code: string;
+  title: string;
+  description: string;
+  tradeoffs?: string[];
+  evidence_signal_ids?: string[];
+};
+
+export type BriefTimelineEvent = {
+  event_type: string;
+  event_metadata?: Record<string, unknown>;
+  created_at: string;
 };
 
 export type Evidence = {

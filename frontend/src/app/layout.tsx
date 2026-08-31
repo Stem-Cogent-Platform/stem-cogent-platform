@@ -31,7 +31,7 @@ export const metadata: Metadata = {
     description:
       "Verified signals, contextual briefs, and auditable recommendations for Nigerian fintech leaders."
   },
-  robots: { index: true, follow: true }
+  robots: { index: false, follow: false, nocache: true }
 };
 
 export default function RootLayout({

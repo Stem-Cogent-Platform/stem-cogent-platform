@@ -18,6 +18,8 @@ from app.context.cache import (
     invalidate_user,
 )
 from app.compliance import require_current_legal_acceptance
+from app.core.config import get_settings
+from app.workers.celery_app import celery_app
 
 
 router = APIRouter(tags=["context"])
@@ -322,6 +324,7 @@ async def put_decision_lens(
     await _audit(context, "DECISION_LENS_UPDATED", "DECISION_LENS", row["id"])
     await context.session.commit()
     await invalidate_user(context.principal.tenant_id, context.principal.user_id)
+    _queue_personalisation(context)
     return jsonable_encoder(dict(row))
 
 
@@ -382,6 +385,7 @@ async def create_focus_area(
     await _audit(context, "FOCUS_AREA_CREATED", "FOCUS_AREA", row["id"])
     await context.session.commit()
     await invalidate_user(context.principal.tenant_id, context.principal.user_id)
+    _queue_personalisation(context)
     return jsonable_encoder(dict(row))
 
 
@@ -415,6 +419,7 @@ async def patch_focus_area(
     await _audit(context, "FOCUS_AREA_UPDATED", "FOCUS_AREA", focus_id)
     await context.session.commit()
     await invalidate_user(context.principal.tenant_id, context.principal.user_id)
+    _queue_personalisation(context)
     return jsonable_encoder(dict(row))
 
 
@@ -443,7 +448,30 @@ async def delete_focus_area(
     await _audit(context, "FOCUS_AREA_DELETED", "FOCUS_AREA", focus_id)
     await context.session.commit()
     await invalidate_user(context.principal.tenant_id, context.principal.user_id)
+    _queue_personalisation(context)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+def _queue_personalisation(context: RequestContext) -> None:
+    settings = get_settings()
+    if not settings.PHASE5_FIRST_VALUE_ACTIVATION_ENABLED:
+        return
+    queue_url = settings.SQS_PIPELINE_SYNTHESIZED_URL
+    if not queue_url:
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "Personal briefing preparation is temporarily unavailable",
+        )
+    celery_app.send_task(
+        "app.workers.tasks.pilot_activation.personalise_user",
+        args=[
+            {
+                "tenant_id": str(context.principal.tenant_id),
+                "user_id": str(context.principal.user_id),
+            }
+        ],
+        queue=queue_url.rstrip("/").rsplit("/", 1)[-1],
+    )
 
 
 async def _audit(

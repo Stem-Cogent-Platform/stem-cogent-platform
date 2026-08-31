@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 
 import { ModuleFailure, ModuleLoading } from "@/components/module-state";
 import { WorkspaceShell } from "@/components/workspace-shell";
-import { apiRequest } from "@/lib/api";
+import { apiRequest, recordProductEvent } from "@/lib/api";
 import { LoadState } from "@/lib/types";
 
 type Intelligence = {
@@ -30,6 +30,7 @@ export default function IntelligencePage() {
     try {
       setState({ status: "loading" });
       setState({ status: "ready", data: await apiRequest<Intelligence[]>("/api/v1/signals") });
+      void recordProductEvent("WIDER_INTELLIGENCE_VIEWED");
     } catch (error) {
       setState({
         status: "error",
@@ -62,7 +63,7 @@ export default function IntelligencePage() {
             <h1>Wider Intelligence</h1>
             <p>Verified developments that do not currently require a Decision Brief.</p>
           </div>
-          {state.status === "ready" && <div className="page-status"><i />Live query completed</div>}
+          {state.status === "ready" && <div className="page-status"><i />Evidence current</div>}
         </div>
         {state.status === "loading" && <ModuleLoading label="Loading Wider Intelligence" />}
         {state.status === "error" && <ModuleFailure message={state.message} retry={() => void load()} />}
@@ -107,7 +108,7 @@ export default function IntelligencePage() {
                   <p>
                     {items.length
                       ? "Choose another domain or include standard monitoring items."
-                      : "The API query completed successfully and returned zero Global Intelligence Outputs. Results will appear after verified signals complete synthesis."}
+                      : "Stem is preparing verified market developments. New intelligence will appear here when the evidence is ready."}
                   </p>
                 </section>
               )}

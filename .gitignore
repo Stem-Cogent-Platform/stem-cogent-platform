@@ -7,6 +7,8 @@ bandit-report.json
 frontend/node_modules/
 frontend/.next/
 frontend/coverage/
+frontend/playwright-report/
+frontend/test-results/
 frontend/*.tsbuildinfo
 # Terraform working data and sensitive plan/state files
 **/.terraform/*

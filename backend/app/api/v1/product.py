@@ -7,11 +7,12 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.encoders import jsonable_encoder
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy import text
 
 from app.api.auth import RequestContext, get_request_context, require_permission
 from app.billing import require_feature
+from app.core.config import get_settings
 
 router = APIRouter(prefix="/api/v1", tags=["product"])
 
@@ -59,6 +60,35 @@ class CheckpointInput(BaseModel):
     evidence: dict[str, Any]
 
 
+_PRODUCT_EVENTS = Literal[
+    "SESSION_STARTED", "BRIEFING_VIEWED", "BRIEF_OPENED", "BRIEF_UPDATED_VIEWED",
+    "EVIDENCE_PANEL_OPENED", "CIL_OPENED", "CIL_QUERY_SUBMITTED",
+    "BRIEF_ACKNOWLEDGED", "BRIEF_WATCHED", "BRIEF_ESCALATED", "BRIEF_ACTED_ON",
+    "BRIEF_DISMISSED", "WIDER_INTELLIGENCE_VIEWED", "WATCHLIST_ITEM_VIEWED",
+    "FOCUS_AREA_ADDED", "FOCUS_AREA_UPDATED", "SEARCH_PERFORMED", "ALERT_OPENED",
+    "DIGEST_OPENED", "DECISION_PATHS_VIEWED",
+]
+
+
+class ProductEventInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    event_name: _PRODUCT_EVENTS
+    object_type: str | None = Field(default=None, max_length=40)
+    object_id: UUID | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    occurred_at: datetime | None = None
+
+    @field_validator("metadata")
+    @classmethod
+    def minimise_metadata(cls, value: dict[str, Any]) -> dict[str, Any]:
+        forbidden = {"query", "query_text", "email", "token", "password", "note"}
+        if forbidden & {key.casefold() for key in value}:
+            raise ValueError("Sensitive or free-text product-event metadata is not allowed")
+        if len(json.dumps(value, separators=(",", ":"))) > 4000:
+            raise ValueError("Product-event metadata is too large")
+        return value
+
+
 @router.get("/briefs")
 async def list_briefs(
     status_filter: str | None = Query(default=None, alias="status", max_length=30),
@@ -75,6 +105,8 @@ async def list_briefs(
                        brief.owner_roles, brief.decision_window, brief.uncertainties,
                        brief.evidence_signal_ids, brief.brief_status,
                        brief.personal_priority_score, brief.created_at,
+                       brief.first_published_at, brief.last_material_change_at,
+                       brief.material_change_count, brief.guidance_status,
                        assessment.relevance_band, assessment.relevance_score,
                        assessment.quantification_status, assessment.decision_required,
                        signal.primary_domain, signal.urgency_band, signal.confidence_band,
@@ -178,10 +210,37 @@ async def get_brief(
             {"tenant_id": context.principal.tenant_id, "brief_id": brief_id},
         )
     ).mappings().all()
+    timeline = (
+        await context.session.execute(
+            text(
+                """
+                SELECT event_type,event_metadata,created_at
+                FROM decision.brief_events
+                WHERE tenant_id=:tenant_id AND brief_id=:brief_id
+                ORDER BY created_at
+                """
+            ),
+            {"tenant_id": context.principal.tenant_id, "brief_id": brief_id},
+        )
+    ).mappings().all()
     await _audit(context, "DECISION_BRIEF_VIEWED", "DECISION_BRIEF", brief_id, {})
+    if get_settings().PHASE5_PRODUCT_ANALYTICS_ENABLED:
+        await _record_product_event(
+            context,
+            ProductEventInput(
+                event_name=(
+                    "BRIEF_UPDATED_VIEWED"
+                    if int(row.get("material_change_count") or 0) > 0
+                    else "BRIEF_OPENED"
+                ),
+                object_type="DECISION_BRIEF",
+                object_id=brief_id,
+            ),
+        )
     await context.session.commit()
     return jsonable_encoder({**dict(row), "evidence": [dict(item) for item in evidence],
-                             "actions": [dict(item) for item in actions]})
+                             "actions": [dict(item) for item in actions],
+                             "timeline": [dict(item) for item in timeline]})
 
 
 @router.post("/briefs/{brief_id}/actions", status_code=status.HTTP_201_CREATED)
@@ -213,11 +272,46 @@ async def record_decision_action(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Decision Brief not found")
     next_status = "WATCHING" if body.action_type == "ACKNOWLEDGED" else body.action_type
     await context.session.execute(
-        text("UPDATE decision.briefs SET brief_status = :status, updated_at = NOW() WHERE id = :brief_id AND tenant_id = :tenant_id"),
+        text("UPDATE decision.briefs SET brief_status=:status,updated_at=NOW(),"
+             "last_material_change_at=NOW(),material_change_count=material_change_count+1 "
+             "WHERE id=:brief_id AND tenant_id=:tenant_id"),
         {"status": next_status, "brief_id": brief_id, "tenant_id": context.principal.tenant_id},
+    )
+    await context.session.execute(
+        text(
+            """
+            INSERT INTO decision.brief_events (
+                tenant_id,brief_id,event_type,event_metadata
+            ) VALUES (
+                :tenant_id,:brief_id,'STATUS_CHANGED',
+                jsonb_build_object('status',:status,'action_type',:action_type)
+            )
+            """
+        ),
+        {"tenant_id": context.principal.tenant_id, "brief_id": brief_id,
+         "status": next_status, "action_type": body.action_type},
     )
     await _audit(context, "DECISION_ACTION_RECORDED", "DECISION_BRIEF", brief_id,
                  {"action_type": body.action_type, "action_id": str(row["id"])})
+    if body.action_type in {"ESCALATED", "ACTED_ON"}:
+        await _audit(context, f"BRIEF_{body.action_type}", "DECISION_BRIEF", brief_id,
+                     {"action_id": str(row["id"])})
+    if get_settings().PHASE5_PRODUCT_ANALYTICS_ENABLED:
+        event_names = {
+            "ACKNOWLEDGED": "BRIEF_ACKNOWLEDGED",
+            "WATCHING": "BRIEF_WATCHED",
+            "ESCALATED": "BRIEF_ESCALATED",
+            "ACTED_ON": "BRIEF_ACTED_ON",
+            "DISMISSED": "BRIEF_DISMISSED",
+        }
+        await _record_product_event(
+            context,
+            ProductEventInput(
+                event_name=event_names[body.action_type],
+                object_type="DECISION_BRIEF",
+                object_id=brief_id,
+            ),
+        )
     await context.session.commit()
     return jsonable_encoder(dict(row))
 
@@ -620,6 +714,11 @@ async def pilot_status(context: RequestContext = Depends(get_request_context)) -
 async def start_pilot(
     body: PilotStartInput, context: RequestContext = Depends(get_request_context)
 ) -> dict[str, Any]:
+    if get_settings().PHASE5_FIRST_VALUE_ACTIVATION_ENABLED:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "The guided pilot starts automatically when setup and First Value are ready",
+        )
     require_permission(context, "CONFIGURE_COMPANY_CONTEXT")
     started = datetime.now(UTC)
     engagement = (
@@ -710,6 +809,131 @@ async def complete_checkpoint(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Pilot checkpoint not found")
     await context.session.commit()
     return jsonable_encoder(dict(row))
+
+
+@router.get("/relevant-monitoring")
+async def relevant_monitoring(
+    limit: int = Query(default=50, ge=1, le=100),
+    context: RequestContext = Depends(get_request_context),
+) -> list[dict[str, Any]]:
+    rows = (
+        await context.session.execute(
+            text(
+                """
+                SELECT monitoring.*,signal.primary_domain,signal.urgency_band,
+                       signal.confidence_band,signal.published_at
+                FROM context.relevant_monitoring monitoring
+                JOIN pipeline.signals signal ON signal.id=monitoring.signal_id
+                WHERE monitoring.tenant_id=:tenant_id
+                  AND (monitoring.user_id=:user_id OR monitoring.user_id IS NULL)
+                ORDER BY (monitoring.user_id IS NOT NULL) DESC,
+                         monitoring.relevance_score DESC,monitoring.detected_at DESC
+                LIMIT :limit
+                """
+            ),
+            {"tenant_id": context.principal.tenant_id,
+             "user_id": context.principal.user_id, "limit": limit},
+        )
+    ).mappings().all()
+    return jsonable_encoder([dict(row) for row in rows])
+
+
+@router.get("/briefing/changes")
+async def briefing_changes(
+    since: datetime | None = Query(default=None),
+    context: RequestContext = Depends(get_request_context),
+) -> dict[str, Any]:
+    if since is None:
+        since = (
+            await context.session.execute(
+                text(
+                    """
+                    SELECT MAX(occurred_at) FROM feedback.product_events
+                    WHERE tenant_id=:tenant_id AND user_id=:user_id
+                      AND event_name='BRIEFING_VIEWED'
+                    """
+                ),
+                {"tenant_id": context.principal.tenant_id,
+                 "user_id": context.principal.user_id},
+            )
+        ).scalar_one_or_none()
+    since = since or datetime.now(UTC)
+    values = (
+        await context.session.execute(
+            text(
+                """
+                SELECT
+                  (SELECT COUNT(*) FROM decision.briefs brief
+                   WHERE brief.tenant_id=:tenant_id
+                     AND (brief.user_id=:user_id OR brief.user_id IS NULL)
+                     AND brief.first_published_at>:since) new_briefs,
+                  (SELECT COUNT(*) FROM decision.briefs brief
+                   WHERE brief.tenant_id=:tenant_id
+                     AND (brief.user_id=:user_id OR brief.user_id IS NULL)
+                     AND brief.first_published_at<=:since
+                     AND brief.last_material_change_at>:since) updated_briefs,
+                  (SELECT COUNT(*) FROM decision.brief_events event
+                   WHERE event.tenant_id=:tenant_id AND event.event_type='EVIDENCE_ADDED'
+                     AND event.created_at>:since) new_evidence_items,
+                  (SELECT COUNT(*) FROM context.relevant_monitoring monitoring
+                   WHERE monitoring.tenant_id=:tenant_id
+                     AND (monitoring.user_id=:user_id OR monitoring.user_id IS NULL)
+                     AND monitoring.detected_at>:since) new_relevant_monitoring,
+                  (SELECT COUNT(*) FROM decision.briefs brief
+                   JOIN decision.assessments assessment ON assessment.id=brief.assessment_id
+                   WHERE brief.tenant_id=:tenant_id
+                     AND (brief.user_id=:user_id OR brief.user_id IS NULL)
+                     AND assessment.relevance_band='CRITICAL'
+                     AND brief.last_material_change_at>:since) critical_count
+                """
+            ),
+            {"tenant_id": context.principal.tenant_id,
+             "user_id": context.principal.user_id, "since": since},
+        )
+    ).mappings().one()
+    if get_settings().PHASE5_PRODUCT_ANALYTICS_ENABLED:
+        await _record_product_event(
+            context,
+            ProductEventInput(event_name="BRIEFING_VIEWED", occurred_at=datetime.now(UTC)),
+        )
+        await context.session.commit()
+    return jsonable_encoder({**dict(values), "since": since})
+
+
+@router.post("/events", status_code=status.HTTP_202_ACCEPTED)
+async def record_product_event(
+    body: ProductEventInput,
+    context: RequestContext = Depends(get_request_context),
+) -> dict[str, bool]:
+    if not get_settings().PHASE5_PRODUCT_ANALYTICS_ENABLED:
+        return {"accepted": False}
+    await _record_product_event(context, body)
+    await context.session.commit()
+    return {"accepted": True}
+
+
+async def _record_product_event(
+    context: RequestContext, body: ProductEventInput
+) -> None:
+    await context.session.execute(
+        text(
+            """
+            INSERT INTO feedback.product_events (
+                tenant_id,user_id,event_name,object_type,object_id,metadata,occurred_at
+            ) VALUES (
+                :tenant_id,:user_id,:event_name,:object_type,:object_id,
+                CAST(:metadata AS JSONB),:occurred_at
+            )
+            """
+        ),
+        {"tenant_id": context.principal.tenant_id,
+         "user_id": context.principal.user_id,
+         "event_name": body.event_name,
+         "object_type": body.object_type,
+         "object_id": body.object_id,
+         "metadata": json.dumps(body.metadata, separators=(",", ":")),
+         "occurred_at": body.occurred_at or datetime.now(UTC)},
+    )
 
 
 async def _audit(

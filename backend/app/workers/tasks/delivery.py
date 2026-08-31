@@ -81,7 +81,7 @@ async def run_decision_brief_delivery(event: dict[str, Any]) -> str:
             delivered += 1
             await _upsert_digest(session, tenant_id, recipient["id"], brief_id, brief)
         await session.commit()
-        await _publish(tenant_id, brief_id, brief, recipients)
+        await _publish(tenant_id, brief_id, brief, recipients, event["event_type"])
         return f"DELIVERED:{delivered}"
     raise RuntimeError("Database session was not available")
 
@@ -146,12 +146,16 @@ async def _upsert_digest(
 
 
 async def _publish(
-    tenant_id: UUID, brief_id: UUID, brief: Any, recipients: list[Any]
+    tenant_id: UUID,
+    brief_id: UUID,
+    brief: Any,
+    recipients: list[Any],
+    event_type: str,
 ) -> None:
     redis = get_redis_client()
     if redis is None:
         return
-    message = json.dumps({"type": "NEW_BRIEF", "brief_id": str(brief_id),
+    message = json.dumps({"type": "BRIEF_UPDATED" if event_type == "BRIEF_UPDATED" else "BRIEF_CREATED", "brief_id": str(brief_id),
                           "what_changed": brief["what_changed"],
                           "priority": brief["relevance_band"]})
     if brief["user_id"] is None:

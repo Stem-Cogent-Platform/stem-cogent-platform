@@ -648,7 +648,10 @@ resource "aws_ecs_service" "phase_two_worker" {
   }
 
   lifecycle {
-    ignore_changes = [task_definition, desired_count]
+    # Worker capacity is an availability control and must remain reconciled by
+    # Terraform. Task definitions are still advanced by the application CD
+    # workflow, so only that field is intentionally ignored here.
+    ignore_changes = [task_definition]
   }
 
   tags = merge(local.common_tags, {

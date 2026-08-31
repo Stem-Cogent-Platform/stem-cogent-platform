@@ -30,14 +30,18 @@ from app.core.database import get_engine
 
 
 QUERIES = {
+    "alembic_version": "SELECT version_num FROM alembic_version",
     "active_sources": "SELECT COUNT(*) FROM config.sources WHERE health_status = 'ACTIVE'",
     "signals": "SELECT COUNT(*) FROM pipeline.signals",
+    "signals_last_24h": "SELECT COUNT(*) FROM pipeline.signals WHERE detected_at >= NOW() - INTERVAL '24 hours'",
+    "latest_signal_detected_at": "SELECT MAX(detected_at) FROM pipeline.signals",
     "signals_classified": "SELECT COUNT(*) FROM pipeline.signals WHERE classified_at IS NOT NULL",
     "signals_scored": "SELECT COUNT(*) FROM pipeline.signals WHERE confidence_score IS NOT NULL AND urgency_score IS NOT NULL",
     "signals_clustered": "SELECT COUNT(*) FROM pipeline.signals WHERE trend_cluster_id IS NOT NULL",
     "signal_embeddings": "SELECT COUNT(*) FROM intelligence.signal_embeddings",
     "signal_clusters": "SELECT COUNT(*) FROM intelligence.signal_clusters",
     "global_outputs_completed": "SELECT COUNT(*) FROM intelligence.global_outputs WHERE synthesis_status = 'COMPLETED'",
+    "global_outputs_last_24h": "SELECT COUNT(*) FROM intelligence.global_outputs WHERE synthesis_status = 'COMPLETED' AND synthesized_at >= NOW() - INTERVAL '24 hours'",
     "global_outputs_with_citations": "SELECT COUNT(*) FROM intelligence.global_outputs WHERE synthesis_status = 'COMPLETED' AND citations IS NOT NULL AND citations NOT IN ('{}'::jsonb, '[]'::jsonb)",
     "assessments": "SELECT COUNT(*) FROM decision.assessments",
     "briefs": "SELECT COUNT(*) FROM decision.briefs",
@@ -55,6 +59,8 @@ QUERIES = {
 }
 
 PATHS = [
+    "/health/live",
+    "/health/ready",
     "/api/v1/auth/me",
     "/api/v1/briefs",
     "/api/v1/company/briefs",
@@ -75,6 +81,9 @@ PATHS = [
     "/api/v1/integrations",
     "/api/v1/billing/status",
     "/api/v1/billing/plans",
+    "/api/v1/relevant-monitoring",
+    "/api/v1/briefing/changes",
+    "/api/v1/internal/admin/tenants",
 ]
 
 
@@ -106,6 +115,41 @@ async def main():
             except Exception as exc:
                 database[name] = {"query_error": type(exc).__name__, "message": str(exc)[:180]}
                 await connection.rollback()
+        phase5_relations = (
+            await connection.execute(
+                text(
+                    """
+                    SELECT jsonb_build_object(
+                      'tenant_invitations', to_regclass('auth.tenant_invitations') IS NOT NULL,
+                      'activation_runs', to_regclass('context.activation_runs') IS NOT NULL,
+                      'relevant_monitoring', to_regclass('context.relevant_monitoring') IS NOT NULL,
+                      'brief_events', to_regclass('decision.brief_events') IS NOT NULL,
+                      'product_events', to_regclass('feedback.product_events') IS NOT NULL
+                    )
+                    """
+                )
+            )
+        ).scalar_one()
+        database["phase5_relations"] = phase5_relations
+        requested_admin = (
+            await connection.execute(
+                text(
+                    """
+                    SELECT users.permission_role, users.status, tenants.name AS tenant_name
+                    FROM auth.users users
+                    JOIN auth.tenants tenants ON tenants.id=users.tenant_id
+                    WHERE LOWER(users.email)=LOWER(:email)
+                    ORDER BY users.created_at DESC LIMIT 1
+                    """
+                ),
+                {"email": ADMIN_EMAIL},
+            )
+        ).mappings().one_or_none()
+        database["requested_admin_access"] = (
+            {"found": True, **dict(requested_admin)}
+            if requested_admin
+            else {"found": False}
+        )
         target = (
             await connection.execute(
                 text(
@@ -151,6 +195,10 @@ async def main():
                 responses[path] = {
                     "status": response.status_code,
                     "content_type": response.headers.get("content-type", ""),
+                    "strict_transport_security": bool(response.headers.get("strict-transport-security")),
+                    "content_security_policy": bool(response.headers.get("content-security-policy")),
+                    "x_content_type_options": response.headers.get("x-content-type-options"),
+                    "referrer_policy": response.headers.get("referrer-policy"),
                     **summarize_payload(payload),
                 }
             except Exception as exc:
@@ -176,7 +224,13 @@ def _environment_names(environment: str) -> tuple[str, str, str]:
     return cluster, service, api_base
 
 
-def _run(profile: str, environment: str, region: str, timeout: int) -> dict[str, Any]:
+def _run(
+    profile: str,
+    environment: str,
+    region: str,
+    timeout: int,
+    admin_email: str = "",
+) -> dict[str, Any]:
     cluster, service_name, api_base = _environment_names(environment)
     session = boto3.Session(profile_name=profile, region_name=region)
     ecs = session.client("ecs")
@@ -190,7 +244,7 @@ def _run(profile: str, environment: str, region: str, timeout: int) -> dict[str,
         item for item in task_definition["containerDefinitions"] if item["name"] == "api"
     )
     log_options = api_container["logConfiguration"]["options"]
-    remote = f"API_BASE = {api_base!r}\n" + _REMOTE_AUDIT
+    remote = f"API_BASE = {api_base!r}\nADMIN_EMAIL = {admin_email!r}\n" + _REMOTE_AUDIT
     encoded = base64.b64encode(zlib.compress(remote.encode(), level=9)).decode()
     command = [
         "python",
@@ -261,8 +315,15 @@ def main() -> None:
     parser.add_argument("--environment", choices=("staging", "production"), required=True)
     parser.add_argument("--region", default="eu-west-1")
     parser.add_argument("--timeout", type=int, default=600)
+    parser.add_argument(
+        "--admin-email",
+        default="",
+        help="Optional exact email whose role should be reported without exposing it.",
+    )
     args = parser.parse_args()
-    result = _run(args.profile, args.environment, args.region, args.timeout)
+    result = _run(
+        args.profile, args.environment, args.region, args.timeout, args.admin_email
+    )
     print(json.dumps(result, indent=2, sort_keys=True))
 
 
