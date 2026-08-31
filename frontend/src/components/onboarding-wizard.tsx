@@ -73,7 +73,7 @@ export function OnboardingWizard() {
         router.replace("/login?next=%2Fonboarding");
         return;
       }
-      await apiRequest("/context/company", { method: "PUT", body: JSON.stringify({
+      await apiRequest("/api/v1/context/company", { method: "PUT", body: JSON.stringify({
         business_categories: state.categories,
         operating_markets: state.markets,
         customer_segments: state.segments,
@@ -85,14 +85,14 @@ export function OnboardingWizard() {
         ...list(state.dependencies).map((name) => ({ object_type: "DEPENDENCY", name, importance: "HIGH" })),
         ...list(state.competitors).map((name) => ({ object_type: "COMPETITOR", name }))
       ];
-      await Promise.all(objects.map((object) => apiRequest("/context/company/objects", { method: "POST", body: JSON.stringify(object) })));
-      await apiRequest("/me/decision-lens", { method: "PUT", body: JSON.stringify({
+      await Promise.all(objects.map((object) => apiRequest("/api/v1/context/company/objects", { method: "POST", body: JSON.stringify(object) })));
+      await apiRequest("/api/v1/me/decision-lens", { method: "PUT", body: JSON.stringify({
         role_code: state.role,
         responsibility_tags: list(state.responsibilities),
         priority_domains: state.domains.slice(0, 5),
         delivery_preference: state.delivery
       }) });
-      await Promise.all(list(state.focus).map((label) => apiRequest("/me/focus-areas", { method: "POST", body: JSON.stringify({ focus_type: "TOPIC", label, query_text: label, weight: 1 }) })));
+      await Promise.all(list(state.focus).map((label) => apiRequest("/api/v1/me/focus-areas", { method: "POST", body: JSON.stringify({ focus_type: "TOPIC", label, query_text: label, weight: 1 }) })));
       router.replace("/briefing");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Your setup could not be saved. Please try again.");

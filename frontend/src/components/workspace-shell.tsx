@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { FormEvent, ReactNode, useEffect, useState } from "react";
+import { FormEvent, ReactNode, useCallback, useEffect, useState } from "react";
 
 import { StemMark } from "@/components/stem-mark";
 import { apiRequest, bootstrapSession, currentUser, logout } from "@/lib/api";
@@ -48,6 +48,17 @@ export function WorkspaceShell({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<Record<string, unknown>>({});
   const [query, setQuery] = useState("");
   const [alerts, setAlerts] = useState<ShellAlert[]>([]);
+  const [alertsError, setAlertsError] = useState("");
+  const [openingAlert, setOpeningAlert] = useState<string | null>(null);
+
+  const loadAlerts = useCallback(async () => {
+    setAlertsError("");
+    try {
+      setAlerts(await apiRequest<ShellAlert[]>("/api/v1/alerts"));
+    } catch (error) {
+      setAlertsError(error instanceof Error ? error.message : "Notifications could not be loaded.");
+    }
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -59,14 +70,22 @@ export function WorkspaceShell({ children }: { children: ReactNode }) {
       }
       setUser(currentUser() ?? {});
       setReady(true);
-      void apiRequest<ShellAlert[]>("/api/v1/alerts")
-        .then((alerts) => {
-          if (active) setAlerts(alerts);
-        })
-        .catch(() => undefined);
+      void loadAlerts();
     });
     return () => { active = false; };
-  }, [pathname, router]);
+  }, [loadAlerts, pathname, router]);
+
+  useEffect(() => {
+    if (!mobileOpen && !notificationsOpen) return;
+    function close(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setMobileOpen(false);
+        setNotificationsOpen(false);
+      }
+    }
+    document.addEventListener("keydown", close);
+    return () => document.removeEventListener("keydown", close);
+  }, [mobileOpen, notificationsOpen]);
 
   async function signOut() {
     await logout();
@@ -80,15 +99,23 @@ export function WorkspaceShell({ children }: { children: ReactNode }) {
   }
 
   async function openAlert(alert: ShellAlert) {
-    if (!alert.read_at) {
-      await apiRequest(`/api/v1/alerts/${alert.id}/read`, { method: "POST" });
-      setAlerts((items) => items.map((item) => item.id === alert.id ? { ...item, read_at: new Date().toISOString() } : item));
+    setOpeningAlert(alert.id);
+    setAlertsError("");
+    try {
+      if (!alert.read_at) {
+        await apiRequest(`/api/v1/alerts/${alert.id}/read`, { method: "POST" });
+        setAlerts((items) => items.map((item) => item.id === alert.id ? { ...item, read_at: new Date().toISOString() } : item));
+      }
+      setNotificationsOpen(false);
+      router.push(`/briefs/${alert.brief_id}`);
+    } catch (error) {
+      setAlertsError(error instanceof Error ? error.message : "This notification could not be opened.");
+    } finally {
+      setOpeningAlert(null);
     }
-    setNotificationsOpen(false);
-    router.push(`/briefs/${alert.brief_id}`);
   }
 
-  if (!ready) return <main className="centered-state"><p>Opening your workspace…</p></main>;
+  if (!ready) return <main aria-busy="true" aria-label="Opening your workspace" className="workspace-loading"><div><i /><i /><i /><i /></div><section><i /><i /><i /><i /><i /></section></main>;
 
   const displayName = String(user.display_name ?? "Stem user");
   const workspaceName = String(user.workspace_name ?? "Workspace");
@@ -135,7 +162,7 @@ export function WorkspaceShell({ children }: { children: ReactNode }) {
         <button aria-label="Close notifications" className="notification-scrim" onClick={() => setNotificationsOpen(false)} type="button" />
         <aside aria-label="Notifications" className="notification-drawer">
           <header><div><p className="eyebrow">Live workspace</p><h2>Notifications</h2></div><button aria-label="Close notifications" onClick={() => setNotificationsOpen(false)} type="button">×</button></header>
-          <div className="notification-stack">{alerts.slice(0, 8).map((alert) => <button className={alert.read_at ? "" : "unread"} key={alert.id} onClick={() => void openAlert(alert)} type="button"><span className={`priority-chip priority-${alert.priority.toLowerCase()}`}>{alert.priority}</span><strong>{alert.subject}</strong><small>{alert.payload?.why_delivered || "Matched your configured Decision Lens."}</small></button>)}{alerts.length === 0 && <p>No notifications yet. New evidence-backed alerts will appear here.</p>}</div>
+          <div className="notification-stack">{alertsError && <div className="notification-error" role="alert"><p>{alertsError}</p><button onClick={() => void loadAlerts()} type="button">Try again</button></div>}{alerts.slice(0, 8).map((alert) => <button className={alert.read_at ? "" : "unread"} disabled={openingAlert === alert.id} key={alert.id} onClick={() => void openAlert(alert)} type="button"><span className={`priority-chip priority-${alert.priority.toLowerCase()}`}>{alert.priority}</span><strong>{alert.subject}</strong><small>{openingAlert === alert.id ? "Opening Decision Brief…" : alert.payload?.why_delivered || "Matched your configured Decision Lens."}</small></button>)}{!alertsError && alerts.length === 0 && <p>The alerts query completed successfully. New evidence-backed alerts will appear here when delivery thresholds are met.</p>}</div>
           <Link href="/alerts" onClick={() => setNotificationsOpen(false)}>View alert history →</Link>
         </aside>
       </>}

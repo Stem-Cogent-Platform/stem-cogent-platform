@@ -31,7 +31,7 @@ export function DecisionLensForm() {
     setMessage("");
     const form = new FormData(event.currentTarget);
     try {
-      await apiRequest("/me/decision-lens", {
+      await apiRequest("/api/v1/me/decision-lens", {
         method: "PUT",
         body: JSON.stringify({
           role_code: form.get("role"),
@@ -42,7 +42,7 @@ export function DecisionLensForm() {
       });
       const focus = String(form.get("focus") ?? "").trim();
       if (focus) {
-        await apiRequest("/me/focus-areas", {
+        await apiRequest("/api/v1/me/focus-areas", {
           method: "POST",
           body: JSON.stringify({ focus_type: "TOPIC", label: focus, query_text: focus, weight: 1 })
         });

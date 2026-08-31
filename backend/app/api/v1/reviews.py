@@ -109,7 +109,8 @@ async def list_review_cases(
                 """
                 SELECT * FROM feedback.review_cases
                 WHERE tenant_id = :tenant_id
-                  AND (:status IS NULL OR status = :status)
+                  AND (CAST(:status AS VARCHAR) IS NULL
+                       OR status = CAST(:status AS VARCHAR))
                 ORDER BY CASE status WHEN 'OPEN' THEN 0 WHEN 'IN_REVIEW' THEN 1 ELSE 2 END,
                          created_at
                 LIMIT 200

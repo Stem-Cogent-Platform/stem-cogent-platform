@@ -1,21 +1,22 @@
 "use client";
 
 import Link from "next/link";
-import { FormEvent, useCallback, useEffect, useState } from "react";
-import type { ReactNode } from "react";
+import { FormEvent, ReactNode, useCallback, useEffect, useState } from "react";
 
 import { ModuleFailure, ModuleLoading } from "@/components/module-state";
 import { WorkspaceShell } from "@/components/workspace-shell";
 import { apiRequest } from "@/lib/api";
 import { LoadState } from "@/lib/types";
 
-type SettingsData = {
-  me: { display_name: string; email: string; workspace_name: string; permission_role: string; plan_code: string; billing_status: string };
-  lens: null | { role_code: string; responsibility_tags: string[]; priority_domains: string[]; delivery_preference: string };
-  focus: { id: string; label: string; focus_type: string; weight: number }[];
-  company: { profile: null | { profile_completeness: number; operating_markets: string[]; strategic_priorities: string[] }; objects: { id: string; name: string; object_type: string }[] };
-  alerts: { domain_codes: string[]; urgency_bands: string[]; delivery_channels: string[]; digest_frequency: string; enabled: boolean };
-};
+type Me = { display_name: string; email: string; workspace_name: string; permission_role: string; plan_code: string; billing_status: string };
+type Lens = null | { role_code: string; responsibility_tags: string[]; priority_domains: string[]; delivery_preference: string };
+type Focus = { id: string; label: string; focus_type: string; weight: number }[];
+type Company = { profile: null | { profile_completeness: number; operating_markets: string[]; strategic_priorities: string[] }; objects: { id: string; name: string; object_type: string }[] };
+type Alerts = { domain_codes: string[]; urgency_bands: string[]; delivery_channels: string[]; digest_frequency: string; enabled: boolean };
+type TeamMember = { id: string; email: string; display_name?: string; permission_role: string; status: string; mfa_enabled: boolean; last_login_at?: string };
+type Integrations = { plan_code: string; api_enabled: boolean; private_uploads: boolean | number; api_keys: { id: string; name: string; key_prefix: string; status: string; last_used_at?: string }[] };
+type Resource<T> = { data: T; error?: never } | { data?: never; error: string };
+type SettingsData = { me: Me; lens: Resource<Lens>; focus: Resource<Focus>; company: Resource<Company>; alerts: Resource<Alerts>; team: Resource<TeamMember[] | null>; integrations: Resource<Integrations> };
 
 const tabs = ["Profile", "Decision Lens", "Focus Areas", "Company Context", "Alerts & Digests", "Team", "Billing", "API / Integrations"] as const;
 const alertDomains = [["REGULATORY_POLICY", "Regulatory"], ["COMPETITIVE_PRODUCT", "Competitive product"], ["INFRASTRUCTURE_RELIABILITY", "Infrastructure"], ["CUSTOMER_MARKET", "Customer & market"], ["FINANCIAL_ECONOMIC", "Financial & economic"], ["CAPITAL_PARTNERSHIP", "Capital & partnership"], ["MARKET_EXPANSION", "Market expansion"], ["FRAUD_RISK_TRUST", "Fraud, risk & trust"]] as const;
@@ -24,24 +25,38 @@ function permissionLabel(role: string) {
   return role === "ADMIN" ? "Workspace owner" : role.replaceAll("_", " ");
 }
 
+async function resource<T>(request: Promise<T>): Promise<Resource<T>> {
+  try {
+    return { data: await request };
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : "This settings section could not be loaded." };
+  }
+}
+
 export default function SettingsPage() {
   const [tab, setTab] = useState<(typeof tabs)[number]>("Profile");
   const [state, setState] = useState<LoadState<SettingsData>>({ status: "loading" });
   const [message, setMessage] = useState("");
+  const [savingAlerts, setSavingAlerts] = useState(false);
+
   const load = useCallback(async () => {
     try {
-      const [me, lens, focus, company, alerts] = await Promise.all([
-        apiRequest<SettingsData["me"]>("/api/v1/auth/me"),
-        apiRequest<SettingsData["lens"]>("/me/decision-lens"),
-        apiRequest<SettingsData["focus"]>("/me/focus-areas"),
-        apiRequest<SettingsData["company"]>("/context/company"),
-        apiRequest<SettingsData["alerts"]>("/api/v1/alert-preferences")
+      setState({ status: "loading" });
+      const me = await apiRequest<Me>("/api/v1/auth/me");
+      const [lens, focus, company, alerts, team, integrations] = await Promise.all([
+        resource(apiRequest<Lens>("/api/v1/me/decision-lens")),
+        resource(apiRequest<Focus>("/api/v1/me/focus-areas")),
+        resource(apiRequest<Company>("/api/v1/context/company")),
+        resource(apiRequest<Alerts>("/api/v1/alert-preferences")),
+        me.permission_role === "ADMIN" ? resource(apiRequest<TeamMember[]>("/api/v1/team")) : Promise.resolve<Resource<null>>({ data: null }),
+        resource(apiRequest<Integrations>("/api/v1/integrations"))
       ]);
-      setState({ status: "ready", data: { me, lens, focus, company, alerts } });
+      setState({ status: "ready", data: { me, lens, focus, company, alerts, team, integrations } });
     } catch (error) {
       setState({ status: "error", message: error instanceof Error ? error.message : "Settings could not be loaded." });
     }
   }, []);
+
   useEffect(() => {
     const timer = window.setTimeout(() => void load(), 0);
     return () => window.clearTimeout(timer);
@@ -51,6 +66,7 @@ export default function SettingsPage() {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
     setMessage("");
+    setSavingAlerts(true);
     try {
       await apiRequest("/api/v1/alert-preferences", { method: "PUT", body: JSON.stringify({
         domain_codes: form.getAll("domain"), urgency_bands: form.getAll("urgency"),
@@ -58,26 +74,50 @@ export default function SettingsPage() {
         digest_frequency: form.get("digest"), enabled: true
       }) });
       setMessage("Alert and digest preferences saved.");
-      await load();
-    } catch (error) { setMessage(error instanceof Error ? error.message : "Preferences could not be saved."); }
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Preferences could not be saved.");
+    } finally {
+      setSavingAlerts(false);
+    }
   }
 
-  return <WorkspaceShell><section className="settings-page"><div className="page-heading"><div><p className="eyebrow">Workspace controls</p><h1>Settings</h1><p>Manage your relevance profile, delivery preferences, team, and plan.</p></div></div>
-    <div className="settings-layout"><nav className="settings-tabs" aria-label="Settings sections">{tabs.map((item) => <button aria-current={tab === item ? "page" : undefined} className={tab === item ? "active" : ""} onClick={() => setTab(item)} type="button" key={item}>{item}</button>)}</nav><div className="settings-content">
-      {state.status === "loading" && <ModuleLoading />}{state.status === "error" && <ModuleFailure message={state.message} retry={() => void load()} />}
-      {state.status === "ready" && <>
-        {tab === "Profile" && <SettingsPanel title="Profile" description="Your identity and active company workspace."><dl className="settings-definition"><div><dt>Name</dt><dd>{state.data.me.display_name}</dd></div><div><dt>Work email</dt><dd>{state.data.me.email}</dd></div><div><dt>Company</dt><dd>{state.data.me.workspace_name}</dd></div><div><dt>Workspace access</dt><dd>{permissionLabel(state.data.me.permission_role)}</dd></div></dl></SettingsPanel>}
-        {tab === "Decision Lens" && <SettingsPanel title="Decision Lens" description="Controls how Decision Briefs are ranked and explained for your role.">{state.data.lens ? <dl className="settings-definition"><div><dt>Role</dt><dd>{state.data.lens.role_code.replaceAll("_", " ")}</dd></div><div><dt>Priorities</dt><dd>{state.data.lens.priority_domains.join(", ") || "Not configured"}</dd></div><div><dt>Responsibilities</dt><dd>{state.data.lens.responsibility_tags.join(", ") || "Not configured"}</dd></div><div><dt>Delivery</dt><dd>{state.data.lens.delivery_preference.replaceAll("_", " ")}</dd></div></dl> : <EmptySettings text="Your Decision Lens is not configured." action="Configure now" href="/onboarding" />}</SettingsPanel>}
-        {tab === "Focus Areas" && <SettingsPanel title="Focus Areas" description="Temporary or persistent subjects that deserve extra attention.">{state.data.focus.length ? <div className="settings-tag-list">{state.data.focus.map((item) => <span key={item.id}>{item.label}<small>{item.focus_type.replaceAll("_", " ")}</small></span>)}</div> : <EmptySettings text="No personal Focus Areas are active." action="Add focus areas" href="/onboarding" />}</SettingsPanel>}
-        {tab === "Company Context" && <SettingsPanel title="Company Context" description="Shared business context used to establish company-specific relevance."><div className="context-completeness"><span><i style={{width:`${Math.round((state.data.company.profile?.profile_completeness ?? 0)*100)}%`}} /></span><strong>{Math.round((state.data.company.profile?.profile_completeness ?? 0)*100)}% complete</strong></div><div className="settings-tag-list">{state.data.company.objects.map((item) => <span key={item.id}>{item.name}<small>{item.object_type.replaceAll("_", " ")}</small></span>)}</div>{!state.data.company.objects.length && <EmptySettings text="No company products, dependencies, or competitors are configured." action="Complete context" href="/onboarding" />}</SettingsPanel>}
-        {tab === "Alerts & Digests" && <SettingsPanel title="Alerts & Digests" description="Choose what interrupts you and how summaries are delivered."><form className="preferences-form" onSubmit={saveAlerts}><fieldset><legend>Domains</legend>{alertDomains.map(([value,label]) => <label key={value}><input defaultChecked={state.data.alerts.domain_codes.includes(value)} name="domain" type="checkbox" value={value}/><span>{label}</span></label>)}</fieldset><fieldset><legend>Urgency</legend>{["CRITICAL","HIGH","MEDIUM"].map((item) => <label key={item}><input defaultChecked={state.data.alerts.urgency_bands.includes(item)} name="urgency" type="checkbox" value={item}/><span>{item}</span></label>)}</fieldset><fieldset><legend>Channels</legend>{[["IN_APP","In app"],["EMAIL","Email"]].map(([value,label]) => <label key={value}><input defaultChecked={state.data.alerts.delivery_channels.includes(value)} name="channel" type="checkbox" value={value}/><span>{label}</span></label>)}</fieldset><label className="select-field"><span>Digest frequency</span><select defaultValue={state.data.alerts.digest_frequency} name="digest"><option value="DAILY">Daily</option><option value="WEEKLY">Weekly</option><option value="NONE">None</option></select></label><button className="primary-button" type="submit">Save preferences</button>{message && <p className="form-message">{message}</p>}</form></SettingsPanel>}
-        {tab === "Team" && <SettingsPanel title="Team" description="Workspace membership is isolated to your company."><div className="access-summary"><strong>{permissionLabel(state.data.me.permission_role)} access</strong><p>The account that creates a workspace owns its company configuration. This does not grant Stem platform administration.</p><button className="secondary-button" disabled type="button">Invite team member</button><small>Team invitations become available on Team plans.</small></div></SettingsPanel>}
-        {tab === "Billing" && <SettingsPanel title="Billing" description="Review your trial, plan, and secure Paystack checkout."><div className="billing-summary"><p className="eyebrow">Current plan</p><h3>{state.data.me.plan_code}</h3><span>{state.data.me.billing_status.replaceAll("_", " ")}</span><Link className="primary-button" href="/settings/billing">View plans & billing</Link></div></SettingsPanel>}
-        {tab === "API / Integrations" && <SettingsPanel title="API / Integrations" description="Connect approved data and delivery systems."><div className="integration-list"><article><strong>Stem Cogent API</strong><span>Available on plans with API access.</span><i>Plan gated</i></article><article><strong>Private company data</strong><span>Security review required before connection.</span><i>Review required</i></article></div></SettingsPanel>}
-      </>}
-    </div></div>
-  </section></WorkspaceShell>;
+  return (
+    <WorkspaceShell>
+      <section className="settings-page">
+        <div className="page-heading"><div><p className="eyebrow">Workspace controls</p><h1>Settings</h1><p>Manage your relevance profile, delivery preferences, team, and plan.</p></div></div>
+        <div className="settings-layout">
+          <nav aria-label="Settings sections" className="settings-tabs">{tabs.map((item) => <button aria-current={tab === item ? "page" : undefined} className={tab === item ? "active" : ""} key={item} onClick={() => setTab(item)} type="button">{item}</button>)}</nav>
+          <div className="settings-content">
+            {state.status === "loading" && <ModuleLoading label="Loading settings" />}
+            {state.status === "error" && <ModuleFailure message={state.message} retry={() => void load()} />}
+            {state.status === "ready" && (
+              <>
+                {tab === "Profile" && <SettingsPanel title="Profile" description="Your identity and active company workspace."><dl className="settings-definition"><div><dt>Name</dt><dd>{state.data.me.display_name}</dd></div><div><dt>Work email</dt><dd>{state.data.me.email}</dd></div><div><dt>Company</dt><dd>{state.data.me.workspace_name}</dd></div><div><dt>Workspace access</dt><dd>{permissionLabel(state.data.me.permission_role)}</dd></div></dl></SettingsPanel>}
+                {tab === "Decision Lens" && <ResourcePanel resource={state.data.lens} retry={load}>{(lens) => <SettingsPanel title="Decision Lens" description="Controls how Decision Briefs are ranked and explained for your role.">{lens ? <dl className="settings-definition"><div><dt>Role</dt><dd>{lens.role_code.replaceAll("_", " ")}</dd></div><div><dt>Priorities</dt><dd>{lens.priority_domains.join(", ") || "Not configured"}</dd></div><div><dt>Responsibilities</dt><dd>{lens.responsibility_tags.join(", ") || "Not configured"}</dd></div><div><dt>Delivery</dt><dd>{lens.delivery_preference.replaceAll("_", " ")}</dd></div></dl> : <EmptySettings text="Your Decision Lens is not configured." action="Configure now" href="/onboarding" />}</SettingsPanel>}</ResourcePanel>}
+                {tab === "Focus Areas" && <ResourcePanel resource={state.data.focus} retry={load}>{(focus) => <SettingsPanel title="Focus Areas" description="Temporary or persistent subjects that deserve extra attention.">{focus.length ? <div className="settings-tag-list">{focus.map((item) => <span key={item.id}>{item.label}<small>{item.focus_type.replaceAll("_", " ")}</small></span>)}</div> : <EmptySettings text="No personal Focus Areas are active." action="Add focus areas" href="/onboarding" />}</SettingsPanel>}</ResourcePanel>}
+                {tab === "Company Context" && <ResourcePanel resource={state.data.company} retry={load}>{(company) => <SettingsPanel title="Company Context" description="Shared business context used to establish company-specific relevance."><div className="context-completeness"><span><i style={{ width: `${Math.round((company.profile?.profile_completeness ?? 0) * 100)}%` }} /></span><strong>{Math.round((company.profile?.profile_completeness ?? 0) * 100)}% complete</strong></div><div className="settings-tag-list">{company.objects.map((item) => <span key={item.id}>{item.name}<small>{item.object_type.replaceAll("_", " ")}</small></span>)}</div>{!company.objects.length && <EmptySettings text="No company products, dependencies, or competitors are configured." action="Complete context" href="/onboarding" />}</SettingsPanel>}</ResourcePanel>}
+                {tab === "Alerts & Digests" && <ResourcePanel resource={state.data.alerts} retry={load}>{(alerts) => <SettingsPanel title="Alerts & Digests" description="Choose what interrupts you and how summaries are delivered."><form className="preferences-form" onSubmit={saveAlerts}><fieldset><legend>Domains</legend>{alertDomains.map(([value, label]) => <label key={value}><input defaultChecked={alerts.domain_codes.includes(value)} name="domain" type="checkbox" value={value} /><span>{label}</span></label>)}</fieldset><fieldset><legend>Urgency</legend>{["CRITICAL", "HIGH", "MEDIUM"].map((item) => <label key={item}><input defaultChecked={alerts.urgency_bands.includes(item)} name="urgency" type="checkbox" value={item} /><span>{item}</span></label>)}</fieldset><fieldset><legend>Channels</legend>{[["IN_APP", "In app"], ["EMAIL", "Email"]].map(([value, label]) => <label key={value}><input defaultChecked={alerts.delivery_channels.includes(value)} name="channel" type="checkbox" value={value} /><span>{label}</span></label>)}</fieldset><label className="select-field"><span>Digest frequency</span><select defaultValue={alerts.digest_frequency} name="digest"><option value="DAILY">Daily</option><option value="WEEKLY">Weekly</option><option value="NONE">None</option></select></label><button className="primary-button" disabled={savingAlerts} type="submit">{savingAlerts ? "Saving…" : "Save preferences"}</button>{message && <p aria-live="polite" className="form-message">{message}</p>}</form></SettingsPanel>}</ResourcePanel>}
+                {tab === "Team" && <ResourcePanel resource={state.data.team} retry={load}>{(team) => <SettingsPanel title="Team" description="Workspace membership is isolated to your company.">{team === null ? <div className="settings-empty"><p>Team membership is available to workspace administrators.</p></div> : <div className="team-list">{team.map((member) => <article key={member.id}><div><strong>{member.display_name || member.email}</strong><span>{member.email}</span></div><i>{permissionLabel(member.permission_role)}</i><span>{member.status}</span></article>)}</div>}<div className="access-summary"><button className="secondary-button" disabled type="button">Invite team member</button><small>Invitation mutation is not implemented in the current backend contract.</small></div></SettingsPanel>}</ResourcePanel>}
+                {tab === "Billing" && <SettingsPanel title="Billing" description="Review your trial, plan, and secure Paystack checkout."><div className="billing-summary"><p className="eyebrow">Current plan</p><h3>{state.data.me.plan_code}</h3><span>{state.data.me.billing_status.replaceAll("_", " ")}</span><Link className="primary-button" href="/settings/billing">View plans & billing</Link></div></SettingsPanel>}
+                {tab === "API / Integrations" && <ResourcePanel resource={state.data.integrations} retry={load}>{(integrations) => <SettingsPanel title="API / Integrations" description="Persisted keys and plan-controlled connection availability."><div className="integration-list"><article><strong>Stem Cogent API</strong><span>{integrations.api_enabled ? `${integrations.api_keys.length} persisted API key${integrations.api_keys.length === 1 ? "" : "s"}` : `Not included in ${integrations.plan_code}`}</span><i>{integrations.api_enabled ? "Enabled" : "Plan gated"}</i></article><article><strong>Private company data</strong><span>{integrations.private_uploads ? "Plan entitlement is active; upload UI/backend completion is still required." : `Not included in ${integrations.plan_code}`}</span><i>{integrations.private_uploads ? "Entitled" : "Plan gated"}</i></article></div></SettingsPanel>}</ResourcePanel>}
+              </>
+            )}
+          </div>
+        </div>
+      </section>
+    </WorkspaceShell>
+  );
 }
 
-function SettingsPanel({ title, description, children }: { title: string; description: string; children: ReactNode }) { return <section className="settings-panel"><header><h2>{title}</h2><p>{description}</p></header>{children}</section>; }
-function EmptySettings({ text, action, href }: { text: string; action: string; href: string }) { return <div className="settings-empty"><p>{text}</p><Link href={href}>{action} →</Link></div>; }
+function ResourcePanel<T>({ resource: value, retry, children }: { resource: Resource<T>; retry: () => Promise<void>; children: (data: T) => ReactNode }) {
+  if ("error" in value) return <ModuleFailure message={value.error} retry={() => void retry()} />;
+  return <>{children(value.data)}</>;
+}
+
+function SettingsPanel({ title, description, children }: { title: string; description: string; children: ReactNode }) {
+  return <section className="settings-panel"><header><h2>{title}</h2><p>{description}</p></header>{children}</section>;
+}
+
+function EmptySettings({ text, action, href }: { text: string; action: string; href: string }) {
+  return <div className="settings-empty"><p>{text}</p><Link href={href}>{action} →</Link></div>;
+}

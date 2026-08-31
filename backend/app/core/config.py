@@ -72,7 +72,10 @@ class Settings(BaseSettings):
     SEMANTIC_SEARCH_LIMIT: int = 10
 
     LLM_PRIMARY_PROVIDER: str = "openai"
-    LLM_PRIMARY_MODEL: str = "gpt-5-mini"
+    # Pin a model that the deployed OpenAI project can use with strict
+    # structured outputs. gpt-5-mini is listed but rejects this project's
+    # requests until the OpenAI organization is verified.
+    LLM_PRIMARY_MODEL: str = "gpt-4.1-mini-2025-04-14"
     LLM_TIMEOUT_SECONDS: float = 45.0
     LLM_MAX_RETRIES: int = 4
     GLOBAL_SYNTHESIS_PROMPT_VERSION: str = "2026.08-v2"

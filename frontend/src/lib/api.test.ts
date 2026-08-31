@@ -22,7 +22,7 @@ describe("apiRequest", () => {
     await login({ email: "person@example.com", password: "twelve-characters" });
 
     await expect(
-      apiRequest<{ saved: boolean }>("/context/company", {
+      apiRequest<{ saved: boolean }>("/api/v1/context/company", {
         method: "PUT",
         body: JSON.stringify({ market: "NG" }),
         headers: { "X-Request-ID": "request-1" }
@@ -30,7 +30,7 @@ describe("apiRequest", () => {
     ).resolves.toEqual({ saved: true });
 
     expect(fetchMock).toHaveBeenLastCalledWith(
-      "/context/company",
+      "/api/v1/context/company",
       expect.objectContaining({
         credentials: "include",
         headers: expect.objectContaining({
@@ -66,6 +66,21 @@ describe("apiRequest", () => {
   it("handles a non-JSON success body without client failure", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response(null, { status: 204 })));
     await expect(apiRequest("/health")).resolves.toEqual({});
+  });
+
+  it("rejects frontend HTML returned in place of API JSON", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response("<html>frontend fallback</html>", {
+        status: 200,
+        headers: { "Content-Type": "text/html" }
+      }))
+    );
+
+    await expect(apiRequest("/api/v1/briefs")).rejects.toMatchObject({
+      status: 200,
+      code: "INVALID_API_RESPONSE"
+    });
   });
 
   it("turns browser transport failures into an actionable API error", async () => {
@@ -172,13 +187,13 @@ describe("apiRequest", () => {
       );
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(apiRequest<{ saved: boolean }>("/context/company")).resolves.toEqual({
+    await expect(apiRequest<{ saved: boolean }>("/api/v1/context/company")).resolves.toEqual({
       saved: true
     });
     expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
-      "/context/company",
+      "/api/v1/context/company",
       "/api/v1/auth/refresh",
-      "/context/company"
+      "/api/v1/context/company"
     ]);
     expect(accessToken()).toBe("restored-token");
   });

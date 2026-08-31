@@ -19,6 +19,7 @@ export default function BriefingPage() {
 
   const load = useCallback(async () => {
     try {
+      setBriefs({ status: "loading" });
       setBriefs({ status: "ready", data: await apiRequest<Brief[]>("/api/v1/briefs") });
       setNewCount(0);
     } catch (error) {
@@ -68,12 +69,24 @@ export default function BriefingPage() {
   const data = briefs.status === "ready" ? briefs.data : [];
   const priorityIds = new Set(data.filter((brief) => ["CRITICAL", "HIGH"].includes(brief.urgency_band ?? brief.relevance_band)).map((brief) => brief.id));
   const standardBriefs = data.filter((brief) => !priorityIds.has(brief.id));
+  const domains = new Set(data.map((brief) => brief.primary_domain).filter(Boolean)).size;
+  const evidenceCount = data.reduce((total, brief) => total + (brief.evidence_signal_ids?.length ?? 0), 0);
+  const averageMatch = data.length
+    ? Math.round(data.reduce((total, brief) => total + Number(brief.personal_priority_score ?? brief.relevance_score ?? 0), 0) / data.length * 100)
+    : 0;
   return (
     <WorkspaceShell>
       <section className="briefing-heading">
         <div><p className="eyebrow">My Decision Briefing</p><h1>Developments requiring attention</h1></div>
         <span className="connection-status"><i /> {connection}</span>
       </section>
+      {briefs.status === "ready" && <section aria-label="Briefing overview" className="briefing-command">
+        <div><span>Priority queue</span><strong>{priorityIds.size}</strong><small>critical or high</small></div>
+        <div><span>Active intelligence</span><strong>{data.length}</strong><small>decision briefs</small></div>
+        <div><span>Evidence coverage</span><strong>{evidenceCount}</strong><small>linked signals</small></div>
+        <div><span>Decision Lens</span><strong>{averageMatch}%</strong><small>average match</small></div>
+        <div><span>Domains monitored</span><strong>{domains}</strong><small>in this briefing</small></div>
+      </section>}
       {newCount > 0 && <button className="new-brief-banner" onClick={() => void load()} type="button">{newCount} new brief{newCount === 1 ? " is" : "s are"} ready — review updates</button>}
       {briefs.status === "ready" && <PriorityAlertMatrix briefs={data} />}
       <section className="briefing-grid">

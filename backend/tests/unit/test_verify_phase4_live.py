@@ -1,0 +1,138 @@
+from argparse import Namespace
+from typing import Any
+from uuid import uuid4
+
+import pytest
+
+from app.ops import verify_phase4_live as verifier
+from app.ops.verify_phase4_live import failed_checks
+
+
+def test_global_pipeline_checks_require_real_cited_output() -> None:
+    evidence = {
+        "raw_signals": 1,
+        "validated_raw_signals": 1,
+        "signals": 1,
+        "cited_global_outputs": 0,
+    }
+
+    assert failed_checks(evidence, require_tenant_delivery=False) == [
+        "cited Global Output completed"
+    ]
+
+
+def test_tenant_delivery_checks_cover_every_persisted_surface() -> None:
+    evidence = {
+        "raw_signals": 1,
+        "validated_raw_signals": 1,
+        "signals": 1,
+        "cited_global_outputs": 1,
+        "assessments": 1,
+        "company_briefs": 1,
+        "personal_briefs": 1,
+        "alerts": 1,
+        "digests": 0,
+    }
+
+    assert failed_checks(evidence, require_tenant_delivery=True) == [
+        "digest containing the brief persisted"
+    ]
+
+
+@pytest.mark.asyncio
+async def test_run_accepts_existing_completed_job(monkeypatch: Any) -> None:
+    job_id = uuid4()
+    evidence = {
+        "collection_job": {"status": "COMPLETED"},
+        "raw_signals": 1,
+        "validated_raw_signals": 1,
+        "signals": 1,
+        "cited_global_outputs": 1,
+    }
+
+    async def collect(*_: Any) -> dict[str, Any]:
+        return evidence
+
+    monkeypatch.setattr(verifier, "collect_evidence", collect)
+    result = await verifier.run(
+        Namespace(
+            tenant_id=None,
+            user_id=None,
+            job_id=str(job_id),
+            seed_source=None,
+            wait_seconds=0,
+        )
+    )
+
+    assert result == {
+        "job_id": str(job_id),
+        "evidence": evidence,
+        "failed_checks": [],
+    }
+
+
+@pytest.mark.asyncio
+async def test_run_rejects_partial_tenant_identity() -> None:
+    with pytest.raises(RuntimeError, match="supplied together"):
+        await verifier.run(
+            Namespace(
+                tenant_id=str(uuid4()),
+                user_id=None,
+                job_id=str(uuid4()),
+                seed_source=None,
+                wait_seconds=0,
+            )
+        )
+
+
+@pytest.mark.asyncio
+async def test_run_seeds_source_and_reports_failed_pipeline(monkeypatch: Any) -> None:
+    job_id = uuid4()
+
+    async def seed(source_code: str, tenant_id: Any) -> Any:
+        assert source_code == "CBN_RSS"
+        assert tenant_id is None
+        return job_id
+
+    async def collect(*_: Any) -> dict[str, Any]:
+        return {"collection_job": {"status": "FAILED"}, "raw_signals": 0}
+
+    monkeypatch.setattr(verifier, "seed_source", seed)
+    monkeypatch.setattr(verifier, "collect_evidence", collect)
+    result = await verifier.run(
+        Namespace(
+            tenant_id=None,
+            user_id=None,
+            job_id=None,
+            seed_source="CBN_RSS",
+            wait_seconds=0,
+        )
+    )
+
+    assert result["job_id"] == str(job_id)
+    assert result["failed_checks"] == [
+        "raw signal archived",
+        "raw signal validated",
+        "normalized signal persisted",
+        "cited Global Output completed",
+    ]
+
+
+def test_main_returns_success_for_completed_evidence(monkeypatch: Any, capsys: Any) -> None:
+    async def completed(_: Any) -> dict[str, Any]:
+        return {"job_id": str(uuid4()), "evidence": {}, "failed_checks": []}
+
+    async def close() -> None:
+        return None
+
+    monkeypatch.setattr(verifier, "run", completed)
+    monkeypatch.setattr(verifier, "close_database_connection", close)
+    monkeypatch.setattr(
+        "sys.argv",
+        ["verify_phase4_live", "--job-id", str(uuid4()), "--wait-seconds", "0"],
+    )
+
+    assert verifier.main() == 0
+    output = capsys.readouterr().out
+    assert '"passed": true' in output
+    assert "PHASE4_LIVE_EVIDENCE=" in output

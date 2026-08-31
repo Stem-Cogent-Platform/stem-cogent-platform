@@ -6,6 +6,7 @@ import pytest
 
 from app.intelligence.synthesis import EvidenceItem, GlobalContextPackage
 from app.intelligence.synthesis.service import (
+    GLOBAL_INTELLIGENCE_SYSTEM_PROMPT,
     Citation,
     GlobalSynthesis,
     SynthesisService,
@@ -15,6 +16,14 @@ from app.intelligence.synthesis.service import (
 
 
 SIGNAL_ID = UUID("00000000-0000-0000-0000-000000000001")
+
+
+def test_prompt_defines_complete_claim_index_citation_contract() -> None:
+    assert "summary is claim 0" in GLOBAL_INTELLIGENCE_SYSTEM_PROMPT
+    assert "citation for every claim_index" in GLOBAL_INTELLIGENCE_SYSTEM_PROMPT
+    assert "Copy each source_signal_id and source_name exactly" in (
+        GLOBAL_INTELLIGENCE_SYSTEM_PROMPT
+    )
 
 
 def _context() -> GlobalContextPackage:

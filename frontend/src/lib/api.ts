@@ -7,6 +7,7 @@ export class ApiError extends Error {
     readonly code?: string
   ) {
     super(message);
+    this.name = "ApiError";
   }
 }
 
@@ -95,26 +96,41 @@ export async function apiRequest<T>(path: string, init?: RequestInit): Promise<T
 
 async function rawRequest<T>(path: string, init?: RequestInit): Promise<T> {
   const token = activeAccessToken;
+  const requestId = globalThis.crypto?.randomUUID?.() ?? `stem-${Date.now().toString(36)}`;
   let response: globalThis.Response;
   try {
     response = await fetch(path, {
       ...init,
       credentials: "include",
+      signal: init?.signal ?? AbortSignal.timeout(20_000),
       headers: {
         Accept: "application/json",
+        "X-Request-ID": requestId,
         ...(init?.body ? { "Content-Type": "application/json" } : {}),
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
         ...init?.headers
       }
     });
-  } catch {
+  } catch (error) {
+    const timedOut = error instanceof DOMException && error.name === "TimeoutError";
     throw new ApiError(
-      "Stem could not reach the intelligence service. Check your connection and try again.",
+      timedOut
+        ? "The intelligence service took too long to respond. Please try again."
+        : "Stem could not reach the intelligence service. Check your connection and try again.",
       0,
-      "NETWORK_UNAVAILABLE"
+      timedOut ? "REQUEST_TIMEOUT" : "NETWORK_UNAVAILABLE"
     );
   }
-  const payload = await response.json().catch(() => ({}));
+  const isEmpty = response.status === 204 || response.headers.get("content-length") === "0";
+  const contentType = response.headers.get("content-type")?.toLowerCase() ?? "";
+  if (response.ok && !isEmpty && !contentType.includes("application/json")) {
+    throw new ApiError(
+      "The intelligence service returned an invalid response. Please try again.",
+      response.status,
+      "INVALID_API_RESPONSE"
+    );
+  }
+  const payload = isEmpty ? {} : await response.json().catch(() => ({}));
   if (!response.ok) {
     const detail = payload.detail;
     const message =
