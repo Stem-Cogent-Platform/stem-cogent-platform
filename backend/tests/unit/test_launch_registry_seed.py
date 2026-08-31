@@ -54,6 +54,8 @@ def test_registry_covers_required_launch_entities() -> None:
         "Nigeria Data Protection Commission",
         "Securities and Exchange Commission Nigeria",
         "Nigeria Inter-Bank Settlement System",
+        "MainOne",
+        "Providus Bank",
         "Pan-African Payment and Settlement System",
         "National Identity Management Commission",
         "Paystack",

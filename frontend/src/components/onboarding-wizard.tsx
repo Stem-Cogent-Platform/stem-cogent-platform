@@ -102,7 +102,7 @@ export function OnboardingWizard() {
   }
 
   if (!sessionReady) {
-    return <main className="centered-state"><p>Restoring your secure workspace sessionâ€¦</p></main>;
+    return <main className="centered-state"><p>Restoring your secure workspace session...</p></main>;
   }
 
   return (

@@ -39,12 +39,21 @@ jobs:
         run: npm run test:unit -- --coverage
         working-directory: frontend/
 
+      - name: Install Playwright browser
+        run: npx playwright install --with-deps chromium
+        working-directory: frontend/
+
       - name: Build (verify production build succeeds)
         run: npm run build
         working-directory: frontend/
         env:
           NEXT_PUBLIC_API_URL: https://api.staging.stem-cogent.com
           NEXT_PUBLIC_WS_URL: wss://api.staging.stem-cogent.com
+          NEXT_PUBLIC_PHASE5_PILOT_INVITES_ENABLED: 'true'
+
+      - name: Pilot end-to-end tests (Playwright)
+        run: npm run test:e2e
+        working-directory: frontend/
 
       - name: Bundle size check
         run: node scripts/check-bundle-size.js --max-kb=200

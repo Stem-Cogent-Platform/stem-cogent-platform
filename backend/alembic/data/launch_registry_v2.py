@@ -45,6 +45,7 @@ _BASE_LAUNCH_ENTITIES = (
     LaunchEntity("Amazon Web Services", "INFRASTRUCTURE_PROVIDER", ("AWS",), ("GLOBAL",), ("CLOUD_INCIDENT", "CLOUD")),
     LaunchEntity("Microsoft Azure", "INFRASTRUCTURE_PROVIDER", ("Azure",), ("GLOBAL",), ("CLOUD_INCIDENT", "CLOUD")),
     LaunchEntity("Google Cloud", "INFRASTRUCTURE_PROVIDER", ("GCP", "Google Cloud Platform"), ("GLOBAL",), ("CLOUD_INCIDENT", "CLOUD")),
+    LaunchEntity("MainOne", "INFRASTRUCTURE_PROVIDER", ("MainOne Data Centre", "MainOne DC", "MDXi"), ("NG", "AF"), ("CLOUD_INCIDENT", "TELCO_INCIDENT")),
 
     # Card and payment schemes named as launch payment dependencies.
     LaunchEntity("AfriGo", "CARD_NETWORK", ("AfriGo Card Scheme",), ("NG",), ("CARD_NETWORK_INCIDENT", "CARD_INFRASTRUCTURE", "CARDS")),
@@ -65,6 +66,7 @@ _BASE_LAUNCH_ENTITIES = (
     LaunchEntity("Sterling Bank", "BANK", (), ("NG",), ("BANK_INTEGRATION_FAILURE", "DIGITAL_BANKING")),
     LaunchEntity("Union Bank of Nigeria", "BANK", ("Union Bank",), ("NG",), ("BANK_INTEGRATION_FAILURE", "DIGITAL_BANKING")),
     LaunchEntity("Ecobank Nigeria", "BANK", ("Ecobank",), ("NG", "AF"), ("BANK_INTEGRATION_FAILURE", "DIGITAL_BANKING")),
+    LaunchEntity("Providus Bank", "BANK", ("ProvidusBank",), ("NG",), ("BANK_INTEGRATION_FAILURE", "DIGITAL_BANKING")),
 
     # Legislation anchoring regulatory, privacy, AML, consumer, and cyber events.
     LaunchEntity("Nigeria Data Protection Act 2023", "LEGISLATION", ("NDPA 2023", "NDP Act"), ("NG",), ("DATA_PROTECTION_RULE_CHANGED", "DATA_PROTECTION_ENFORCEMENT")),

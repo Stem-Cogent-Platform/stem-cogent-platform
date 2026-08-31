@@ -1,34 +1,41 @@
 locals {
   api_environment_variables = merge(
     {
-      DATABASE_HOST                  = module.rds.primary_address
-      DATABASE_PORT                  = tostring(module.rds.port)
-      DATABASE_NAME                  = module.rds.database_name
-      DATABASE_REPLICA_HOST          = coalesce(module.rds.read_replica_address, module.rds.primary_address)
-      DATABASE_CREDENTIALS_ARN       = module.secrets.secret_arns["database_credentials"]
-      DATABASE_SSL_MODE              = "require"
-      DATABASE_RUNTIME_ROLE          = "sc_app_runtime"
-      DATABASE_POOL_SIZE             = "3"
-      DATABASE_MAX_OVERFLOW          = "2"
-      DATABASE_POOL_TIMEOUT_SECONDS  = "10"
-      DATABASE_POOL_RECYCLE_SECONDS  = "300"
-      FRONTEND_PUBLIC_URL            = var.frontend_public_url
-      REDIS_HOST                     = module.elasticache.primary_endpoint_address
-      REDIS_PORT                     = tostring(module.elasticache.port)
-      REDIS_AUTH_TOKEN_ARN           = module.secrets.secret_arns["redis_auth_token"]
-      REDIS_TLS_ENABLED              = "true"
-      JWT_SIGNING_SECRET_ARN         = module.secrets.secret_arns["jwt_signing_secret"]
-      OPENAI_API_KEY_ARN             = module.secrets.secret_arns["openai_api_key"]
-      GROQ_API_KEY_ARN               = module.secrets.secret_arns["groq_api_key"]
-      RESEND_API_KEY_ARN             = module.secrets.secret_arns["resend_api_key"]
-      PAYSTACK_SECRET_KEY_ARN        = module.secrets.secret_arns["paystack_secret_key"]
-      PAYSTACK_PUBLIC_KEY_ARN        = module.secrets.secret_arns["paystack_public_key"]
-      PAYSTACK_WEBHOOK_SECRET_ARN    = module.secrets.secret_arns["paystack_webhook_secret"]
-      GOOGLE_OAUTH_CREDENTIALS_ARN   = module.secrets.secret_arns["google_oauth_credentials"]
-      LINKEDIN_OAUTH_CREDENTIALS_ARN = module.secrets.secret_arns["linkedin_oauth_credentials"]
-      SYNTHESIS_ENABLED              = "true"
-      CIL_ENABLED                    = "true"
-      CLICKHOUSE_ENABLED             = "false"
+      DATABASE_HOST                         = module.rds.primary_address
+      DATABASE_PORT                         = tostring(module.rds.port)
+      DATABASE_NAME                         = module.rds.database_name
+      DATABASE_REPLICA_HOST                 = coalesce(module.rds.read_replica_address, module.rds.primary_address)
+      DATABASE_CREDENTIALS_ARN              = module.secrets.secret_arns["database_credentials"]
+      DATABASE_SSL_MODE                     = "require"
+      DATABASE_RUNTIME_ROLE                 = "sc_app_runtime"
+      DATABASE_POOL_SIZE                    = "3"
+      DATABASE_MAX_OVERFLOW                 = "2"
+      DATABASE_POOL_TIMEOUT_SECONDS         = "10"
+      DATABASE_POOL_RECYCLE_SECONDS         = "300"
+      FRONTEND_PUBLIC_URL                   = var.frontend_public_url
+      REDIS_HOST                            = module.elasticache.primary_endpoint_address
+      REDIS_PORT                            = tostring(module.elasticache.port)
+      REDIS_AUTH_TOKEN_ARN                  = module.secrets.secret_arns["redis_auth_token"]
+      REDIS_TLS_ENABLED                     = "true"
+      JWT_SIGNING_SECRET_ARN                = module.secrets.secret_arns["jwt_signing_secret"]
+      SYSTEM_ADMIN_MFA_SECRET_ARN           = module.secrets.secret_arns["system_admin_mfa_secret"]
+      OPENAI_API_KEY_ARN                    = module.secrets.secret_arns["openai_api_key"]
+      GROQ_API_KEY_ARN                      = module.secrets.secret_arns["groq_api_key"]
+      RESEND_API_KEY_ARN                    = module.secrets.secret_arns["resend_api_key"]
+      PAYSTACK_SECRET_KEY_ARN               = module.secrets.secret_arns["paystack_secret_key"]
+      PAYSTACK_PUBLIC_KEY_ARN               = module.secrets.secret_arns["paystack_public_key"]
+      PAYSTACK_WEBHOOK_SECRET_ARN           = module.secrets.secret_arns["paystack_webhook_secret"]
+      GOOGLE_OAUTH_CREDENTIALS_ARN          = module.secrets.secret_arns["google_oauth_credentials"]
+      LINKEDIN_OAUTH_CREDENTIALS_ARN        = module.secrets.secret_arns["linkedin_oauth_credentials"]
+      SYNTHESIS_ENABLED                     = "true"
+      CIL_ENABLED                           = "true"
+      CLICKHOUSE_ENABLED                    = "false"
+      PHASE5_PILOT_INVITES_ENABLED          = "false"
+      PHASE5_FIRST_VALUE_ACTIVATION_ENABLED = "false"
+      PHASE5_BRIEF_LIFECYCLE_ENABLED        = "false"
+      PHASE5_DECISION_PATHS_ENABLED         = "false"
+      PHASE5_NEW_UI_ENABLED                 = "false"
+      PHASE5_PRODUCT_ANALYTICS_ENABLED      = "false"
     },
     {
       for queue_name, queue_url in module.sqs.queue_urls :
@@ -57,6 +64,16 @@ module "ecs" {
   frontend_target_group_arn  = module.alb.frontend_target_group_arn
   task_role_arns             = module.iam.task_role_arns
   execution_role_arns        = module.iam.execution_role_arns
+  phase_two_worker_desired_counts = {
+    scheduler      = 1
+    collector      = 2
+    validation     = 2
+    normalization  = 2
+    classification = 2
+    enrichment     = 2
+    clustering     = 1
+    synthesis      = 2
+  }
   phase_one_log_group_names = {
     api            = module.observability.log_group_names["api"]
     infrastructure = module.observability.log_group_names["infrastructure"]

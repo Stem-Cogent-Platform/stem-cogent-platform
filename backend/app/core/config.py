@@ -89,12 +89,23 @@ class Settings(BaseSettings):
     PAYSTACK_WEBHOOK_SECRET_ARN: str | None = None
     GOOGLE_OAUTH_CREDENTIALS_ARN: str | None = None
     LINKEDIN_OAUTH_CREDENTIALS_ARN: str | None = None
+    SYSTEM_ADMIN_MFA_SECRET_ARN: str | None = None
     CBN_USD_NGN_RATE_URL: str = "https://www.cbn.gov.ng/api/GetNFEM_Rates_TOP"
     FX_QUOTE_TIMEOUT_SECONDS: float = 15.0
 
     SYNTHESIS_ENABLED: bool = True
     CIL_ENABLED: bool = True
     CLICKHOUSE_ENABLED: bool = True
+
+    # Phase 5 capabilities are deliberately fail-closed. Deployment
+    # configuration may enable them independently after staging acceptance.
+    PHASE5_PILOT_INVITES_ENABLED: bool = False
+    PHASE5_FIRST_VALUE_ACTIVATION_ENABLED: bool = False
+    PHASE5_BRIEF_LIFECYCLE_ENABLED: bool = False
+    PHASE5_DECISION_PATHS_ENABLED: bool = False
+    PHASE5_NEW_UI_ENABLED: bool = False
+    PHASE5_PRODUCT_ANALYTICS_ENABLED: bool = False
+    PILOT_ACTIVATION_LOOKBACK_DAYS: int = 45
 
 
 @lru_cache

@@ -15,6 +15,11 @@ locals {
       description       = "Stem Cogent JWT signing secret"
       rotation_schedule = "180-days-rolling"
     }
+    system_admin_mfa_secret = {
+      path              = "auth/system-admin-mfa-secret"
+      description       = "Base32 TOTP seed for the separately authenticated Stem operator console"
+      rotation_schedule = "manual-controlled"
+    }
     openai_api_key = {
       path              = "llm/openai/api-key"
       description       = "OpenAI API key used by Stem Cogent synthesis services"
@@ -70,7 +75,7 @@ locals {
 
 check "complete_secret_inventory" {
   assert {
-    condition     = length(local.secret_definitions) == 11
+    condition     = length(local.secret_definitions) == 12
     error_message = "All managed application secret definitions must be present."
   }
 }

@@ -6,7 +6,8 @@ import { useCallback, useEffect, useState } from "react";
 
 import { ModuleFailure, ModuleLoading } from "@/components/module-state";
 import { WorkspaceShell } from "@/components/workspace-shell";
-import { apiRequest } from "@/lib/api";
+import { apiRequest, recordProductEvent } from "@/lib/api";
+import { stateMessages } from "@/lib/product-copy/stateMessages";
 import { LoadState } from "@/lib/types";
 
 type Alert = {
@@ -47,6 +48,7 @@ export default function AlertsPage() {
       if (!item.read_at) {
         await apiRequest(`/api/v1/alerts/${item.id}/read`, { method: "POST" });
       }
+      void recordProductEvent("ALERT_OPENED", { object_type: "ALERT", object_id: item.id });
       router.push(`/briefs/${item.brief_id}`);
     } catch (error) {
       setActionError(error instanceof Error ? error.message : "This alert could not be opened.");
@@ -76,8 +78,8 @@ export default function AlertsPage() {
             ))}
             {!state.data.length && (
               <section className="empty-brief">
-                <h2>No alerts have been delivered.</h2>
-                <p>The alerts query completed successfully. Evidence-backed Decision Brief notifications will appear here when delivery thresholds are met.</p>
+                <h2>{stateMessages.alertsEmpty.title}</h2>
+                <p>{stateMessages.alertsEmpty.body}</p>
                 <Link href="/briefing">Return to briefing</Link>
               </section>
             )}

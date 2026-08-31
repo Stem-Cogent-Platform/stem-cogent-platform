@@ -9,8 +9,16 @@ run "creates_paths_without_secret_values" {
   }
 
   assert {
-    condition     = length(aws_secretsmanager_secret.this) == 11
+    condition     = length(aws_secretsmanager_secret.this) == 12
     error_message = "The module must create all required secret definitions."
+  }
+
+  assert {
+    condition = (
+      aws_secretsmanager_secret.this["system_admin_mfa_secret"].name ==
+      "sc/staging/auth/system-admin-mfa-secret"
+    )
+    error_message = "The system-admin TOTP seed must have a dedicated environment path."
   }
 
   assert {
