@@ -159,4 +159,3 @@ def test_celery_entrypoints_delegate_and_acknowledge(monkeypatch) -> None:
     assert pilot_activation.activate_pilot({}) == "delegated"
     assert pilot_activation.personalise_pilot_user({}) == "delegated"
     assert pilot_activation.activation_completed({}) == "ACKNOWLEDGED"
-

@@ -283,4 +283,3 @@ async def test_entity_review_pipeline_and_metrics_paths() -> None:
     assert metrics["time_to_first_value_seconds"] == 1800
     assert metrics["brief_open_rate"] == 0.5
     assert metrics["action_rate"] == 1.0
-

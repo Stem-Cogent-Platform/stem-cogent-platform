@@ -150,4 +150,3 @@ async def test_accept_invitation_issues_session_and_hides_database_errors(monkey
         await invitations.accept_invitation(body, request(), Response())
     assert rejected.value.status_code == 400
     assert failed_session.rollbacks == 1
-
