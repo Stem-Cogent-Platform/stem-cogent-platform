@@ -1,7 +1,7 @@
 export function ModuleFailure({ message, retry }: { message?: string; retry: () => void }) {
   return (
-    <section className="module-failure" role="status">
-      <h3>This feature is temporarily resting.</h3>
+    <section className="module-failure" role="alert">
+      <h3>This view could not refresh.</h3>
       <p>{message ?? "We could not load this section. The rest of your workspace is still available."}</p>
       <button className="secondary-button" onClick={retry} type="button">Try again</button>
     </section>

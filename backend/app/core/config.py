@@ -25,6 +25,10 @@ class Settings(BaseSettings):
     DATABASE_URL: str | None = None
     DATABASE_SSL_MODE: str = "require"
     DATABASE_RUNTIME_ROLE: str = "sc_app_runtime"
+    DATABASE_POOL_SIZE: int = 3
+    DATABASE_MAX_OVERFLOW: int = 2
+    DATABASE_POOL_TIMEOUT_SECONDS: int = 10
+    DATABASE_POOL_RECYCLE_SECONDS: int = 300
 
     REDIS_HOST: str | None = None
     REDIS_PORT: int = 6379
@@ -83,6 +87,8 @@ class Settings(BaseSettings):
     PAYSTACK_SECRET_KEY_ARN: str | None = None
     PAYSTACK_PUBLIC_KEY_ARN: str | None = None
     PAYSTACK_WEBHOOK_SECRET_ARN: str | None = None
+    GOOGLE_OAUTH_CREDENTIALS_ARN: str | None = None
+    LINKEDIN_OAUTH_CREDENTIALS_ARN: str | None = None
     CBN_USD_NGN_RATE_URL: str = "https://www.cbn.gov.ng/api/GetNFEM_Rates_TOP"
     FX_QUOTE_TIMEOUT_SECONDS: float = 15.0
 

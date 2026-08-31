@@ -1,7 +1,16 @@
 import type { NextConfig } from "next";
 
+const apiOrigin = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+
 const nextConfig: NextConfig = {
   output: "standalone",
+  async rewrites() {
+    return [
+      { source: "/api/:path*", destination: `${apiOrigin}/api/:path*` },
+      { source: "/context/:path*", destination: `${apiOrigin}/context/:path*` },
+      { source: "/me/:path*", destination: `${apiOrigin}/me/:path*` }
+    ];
+  },
   async headers() {
     return [
       {
@@ -13,7 +22,13 @@ const nextConfig: NextConfig = {
           },
           { key: "X-Content-Type-Options", value: "nosniff" },
           { key: "X-Frame-Options", value: "DENY" },
-          { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" }
+          { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
+          { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=(), payment=()" },
+          { key: "X-DNS-Prefetch-Control", value: "off" },
+          {
+            key: "Content-Security-Policy",
+            value: "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self' https: wss:"
+          }
         ]
       }
     ];

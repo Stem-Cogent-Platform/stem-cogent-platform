@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { FormEvent, useEffect, useState } from "react";
 
-import { ApiError, apiRequest } from "@/lib/api";
+import { ApiError, apiRequest, bootstrapSession } from "@/lib/api";
 
 type LegalDocument = {
   code: string;
@@ -39,6 +39,10 @@ export function LegalConsentCard() {
     setState("loading");
     setMessage("");
     try {
+      if (!(await bootstrapSession())) {
+        router.replace("/login?next=%2Fonboarding%2Flegal");
+        return;
+      }
       const result = await apiRequest<LegalBundle>("/api/v1/compliance/documents");
       setBundle(result);
       setState("ready");
@@ -50,7 +54,14 @@ export function LegalConsentCard() {
 
   useEffect(() => {
     let active = true;
-    void apiRequest<LegalBundle>("/api/v1/compliance/documents")
+    void bootstrapSession()
+      .then((authenticated) => {
+        if (!authenticated) {
+          router.replace("/login?next=%2Fonboarding%2Flegal");
+          throw new ApiError("Your session has ended", 401);
+        }
+        return apiRequest<LegalBundle>("/api/v1/compliance/documents");
+      })
       .then((result) => {
         if (!active) return;
         setBundle(result);
@@ -64,7 +75,7 @@ export function LegalConsentCard() {
     return () => {
       active = false;
     };
-  }, []);
+  }, [router]);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -88,7 +99,7 @@ export function LegalConsentCard() {
       });
       setState("saved");
       setMessage("Your acceptance is securely recorded. Company Context is now available.");
-      window.setTimeout(() => router.push("/onboarding/company"), 500);
+      window.setTimeout(() => router.push("/onboarding"), 500);
     } catch (error) {
       setState("ready");
       if (error instanceof ApiError && error.status === 401) {

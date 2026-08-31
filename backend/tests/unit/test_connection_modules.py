@@ -21,7 +21,9 @@ def test_database_url_is_none_when_not_configured(monkeypatch) -> None:
     monkeypatch.setattr(
         database,
         "get_settings",
-        lambda: SimpleNamespace(DATABASE_URL=None, DATABASE_CREDENTIALS_ARN=None, DATABASE_HOST=None),
+        lambda: SimpleNamespace(
+            DATABASE_URL=None, DATABASE_CREDENTIALS_ARN=None, DATABASE_HOST=None
+        ),
     )
 
     assert database._database_url() is None
@@ -61,6 +63,40 @@ def test_database_session_requires_configuration(monkeypatch) -> None:
             await anext(database.get_session())
 
     asyncio.run(get_session())
+
+
+def test_database_engine_uses_bounded_production_pool(monkeypatch) -> None:
+    engine = object()
+    create_engine = Mock(return_value=engine)
+    session_maker = Mock()
+    monkeypatch.setattr(database, "_engine", None)
+    monkeypatch.setattr(database, "_session_factory", None)
+    monkeypatch.setattr(database, "create_async_engine", create_engine)
+    monkeypatch.setattr(database, "async_sessionmaker", session_maker)
+    monkeypatch.setattr(
+        database, "get_database_url", lambda: "postgresql+asyncpg://db/app"
+    )
+    monkeypatch.setattr(
+        database,
+        "get_settings",
+        lambda: SimpleNamespace(
+            DATABASE_POOL_SIZE=3,
+            DATABASE_MAX_OVERFLOW=2,
+            DATABASE_POOL_TIMEOUT_SECONDS=10,
+            DATABASE_POOL_RECYCLE_SECONDS=300,
+        ),
+    )
+
+    assert database.get_engine() is engine
+    create_engine.assert_called_once_with(
+        "postgresql+asyncpg://db/app",
+        pool_pre_ping=True,
+        pool_size=3,
+        max_overflow=2,
+        pool_timeout=10,
+        pool_recycle=300,
+    )
+    session_maker.assert_called_once_with(engine, expire_on_commit=False)
 
 
 def test_database_health_is_not_configured_without_engine(monkeypatch) -> None:
@@ -105,14 +141,19 @@ def test_redis_url_uses_host_and_port(monkeypatch) -> None:
     )
     monkeypatch.setattr(redis, "get_secret_string", lambda _arn: "token/value")
 
-    assert redis._redis_url() == "rediss://:token%2Fvalue@cache:6380/0?ssl_cert_reqs=required"
+    assert (
+        redis._redis_url()
+        == "rediss://:token%2Fvalue@cache:6380/0?ssl_cert_reqs=required"
+    )
 
 
 def test_redis_url_is_none_when_not_configured(monkeypatch) -> None:
     monkeypatch.setattr(
         redis,
         "get_settings",
-        lambda: SimpleNamespace(REDIS_URL=None, REDIS_HOST=None, REDIS_AUTH_TOKEN_ARN=None),
+        lambda: SimpleNamespace(
+            REDIS_URL=None, REDIS_HOST=None, REDIS_AUTH_TOKEN_ARN=None
+        ),
     )
 
     assert redis._redis_url() is None

@@ -5,10 +5,12 @@ and protected-route checks. The task creates an invite-only 21-day Trial workspa
 administrator, the pilot engagement, and days 7, 14, and 21 checkpoints in one database
 transaction.
 
-Create the initial password as a dedicated AWS Secrets Manager scalar secret. Do not place
-the password in a shell command, GitHub variable, issue, log, or source file. Authorised
-operators retrieve the secret value through IAM and deliver it to the pilot through a
-separate secure channel. Record the returned workspace UUID; it is required at sign-in.
+Create the initial password as a dedicated AWS Secrets Manager scalar secret named under
+`sc/<environment>/pilots/<pilot-slug>/initial-password`. The API task role is restricted to
+that exact namespace. Do not place the password in a shell command, GitHub variable, issue,
+log, or source file. Authorised operators retrieve the secret value through IAM and deliver
+it to the pilot through a separate secure channel. Record the returned workspace UUID; it
+is required at sign-in.
 
 For the approved first pilot, run the current production API task with:
 

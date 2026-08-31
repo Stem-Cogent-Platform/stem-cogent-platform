@@ -80,3 +80,31 @@ resource "aws_lb_listener_rule" "frontend" {
     Name = "${var.resource_prefix}-frontend-host-${var.environment}"
   })
 }
+
+resource "aws_lb_listener_rule" "frontend_redirect" {
+  count = length(var.frontend_redirect_hostnames) > 0 ? 1 : 0
+
+  listener_arn = aws_lb_listener.https.arn
+  priority     = 30
+
+  action {
+    type = "redirect"
+
+    redirect {
+      host        = var.frontend_hostname
+      port        = "443"
+      protocol    = "HTTPS"
+      status_code = "HTTP_301"
+    }
+  }
+
+  condition {
+    host_header {
+      values = sort(tolist(var.frontend_redirect_hostnames))
+    }
+  }
+
+  tags = merge(local.common_tags, {
+    Name = "${var.resource_prefix}-frontend-redirect-${var.environment}"
+  })
+}

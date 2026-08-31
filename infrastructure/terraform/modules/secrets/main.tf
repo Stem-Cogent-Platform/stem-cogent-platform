@@ -45,6 +45,16 @@ locals {
       description       = "Paystack webhook signature verification secret"
       rotation_schedule = "manual"
     }
+    google_oauth_credentials = {
+      path              = "auth/google-oauth-credentials"
+      description       = "Google OpenID Connect client ID and client secret"
+      rotation_schedule = "manual"
+    }
+    linkedin_oauth_credentials = {
+      path              = "auth/linkedin-oauth-credentials"
+      description       = "LinkedIn OpenID Connect client ID and client secret"
+      rotation_schedule = "manual"
+    }
   }
 
   common_tags = merge(
@@ -60,8 +70,8 @@ locals {
 
 check "complete_secret_inventory" {
   assert {
-    condition     = length(local.secret_definitions) == 9
-    error_message = "All nine secret definitions required by SC-DOC-010 Task 1.3.5 must be present."
+    condition     = length(local.secret_definitions) == 11
+    error_message = "All managed application secret definitions must be present."
   }
 }
 

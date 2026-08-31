@@ -63,15 +63,17 @@ variables {
   }
 
   secret_arns = {
-    database_credentials    = "arn:aws:secretsmanager:eu-west-1:123456789012:secret:sc/staging/rds/stemcogent/credentials-a"
-    redis_auth_token        = "arn:aws:secretsmanager:eu-west-1:123456789012:secret:sc/staging/elasticache/redis/auth-token-a"
-    jwt_signing_secret      = "arn:aws:secretsmanager:eu-west-1:123456789012:secret:sc/staging/auth/jwt-signing-secret-a"
-    openai_api_key          = "arn:aws:secretsmanager:eu-west-1:123456789012:secret:sc/staging/llm/openai/api-key-a"
-    groq_api_key            = "arn:aws:secretsmanager:eu-west-1:123456789012:secret:sc/staging/llm/groq/api-key-a"
-    resend_api_key          = "arn:aws:secretsmanager:eu-west-1:123456789012:secret:sc/staging/email/resend/api-key-a"
-    paystack_secret_key     = "arn:aws:secretsmanager:eu-west-1:123456789012:secret:sc/staging/paystack/secret-key-a"
-    paystack_public_key     = "arn:aws:secretsmanager:eu-west-1:123456789012:secret:sc/staging/paystack/public-key-a"
-    paystack_webhook_secret = "arn:aws:secretsmanager:eu-west-1:123456789012:secret:sc/staging/paystack/webhook-secret-a"
+    database_credentials       = "arn:aws:secretsmanager:eu-west-1:123456789012:secret:sc/staging/rds/stemcogent/credentials-a"
+    redis_auth_token           = "arn:aws:secretsmanager:eu-west-1:123456789012:secret:sc/staging/elasticache/redis/auth-token-a"
+    jwt_signing_secret         = "arn:aws:secretsmanager:eu-west-1:123456789012:secret:sc/staging/auth/jwt-signing-secret-a"
+    openai_api_key             = "arn:aws:secretsmanager:eu-west-1:123456789012:secret:sc/staging/llm/openai/api-key-a"
+    groq_api_key               = "arn:aws:secretsmanager:eu-west-1:123456789012:secret:sc/staging/llm/groq/api-key-a"
+    resend_api_key             = "arn:aws:secretsmanager:eu-west-1:123456789012:secret:sc/staging/email/resend/api-key-a"
+    paystack_secret_key        = "arn:aws:secretsmanager:eu-west-1:123456789012:secret:sc/staging/paystack/secret-key-a"
+    paystack_public_key        = "arn:aws:secretsmanager:eu-west-1:123456789012:secret:sc/staging/paystack/public-key-a"
+    paystack_webhook_secret    = "arn:aws:secretsmanager:eu-west-1:123456789012:secret:sc/staging/paystack/webhook-secret-a"
+    google_oauth_credentials   = "arn:aws:secretsmanager:eu-west-1:123456789012:secret:sc/staging/auth/google-oauth-credentials-a"
+    linkedin_oauth_credentials = "arn:aws:secretsmanager:eu-west-1:123456789012:secret:sc/staging/auth/linkedin-oauth-credentials-a"
   }
   secrets_kms_key_arn = "arn:aws:kms:eu-west-1:123456789012:key/audit"
 
@@ -80,6 +82,7 @@ variables {
     worker   = "arn:aws:ecr:eu-west-1:123456789012:repository/sc-worker-staging"
     frontend = "arn:aws:ecr:eu-west-1:123456789012:repository/sc-frontend-staging"
   }
+  api_log_group_arn = "arn:aws:logs:eu-west-1:123456789012:log-group:/sc/api-service/staging"
 
   ecs_cluster_arn            = "arn:aws:ecs:eu-west-1:123456789012:cluster/sc-cluster-staging"
   github_repository_id       = "1254005582"
@@ -317,7 +320,15 @@ run "enforces_application_cd_least_privilege_boundaries" {
   }
 
   assert {
-    condition     = local.application_deploy_policy_statements[6].Condition.StringEquals["iam:PassedToService"] == "ecs-tasks.amazonaws.com"
+    condition = one([
+      for statement in local.application_deploy_policy_statements : statement
+      if statement.Sid == "ReadMigrationFailureLogs"
+    ]).Resource == ["arn:aws:logs:eu-west-1:123456789012:log-group:/sc/api-service/staging:log-stream:api-service/migration/*"]
+    error_message = "Migration diagnostics must read only the migration streams in the API log group."
+  }
+
+  assert {
+    condition     = one([for statement in local.application_deploy_policy_statements : statement if statement.Sid == "PassOnlyApplicationTaskRoles"]).Condition.StringEquals["iam:PassedToService"] == "ecs-tasks.amazonaws.com"
     error_message = "PassRole must be restricted to the ECS tasks service."
   }
 }

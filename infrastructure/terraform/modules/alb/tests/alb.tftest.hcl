@@ -34,6 +34,18 @@ mock_provider "aws" {
           resource_record_type  = "CNAME"
           resource_record_value = "_api.acm-validations.aws"
         },
+        {
+          domain_name           = "stem-cogent.com"
+          resource_record_name  = "_apex.stem-cogent.com"
+          resource_record_type  = "CNAME"
+          resource_record_value = "_apex.acm-validations.aws"
+        },
+        {
+          domain_name           = "www.stem-cogent.com"
+          resource_record_name  = "_www.stem-cogent.com"
+          resource_record_type  = "CNAME"
+          resource_record_value = "_www.acm-validations.aws"
+        },
       ]
     }
   }
@@ -73,6 +85,10 @@ variables {
   hosted_zone_name  = "stem-cogent.com"
   api_hostname      = "api.staging.stem-cogent.com"
   frontend_hostname = "app.staging.stem-cogent.com"
+  frontend_redirect_hostnames = [
+    "stem-cogent.com",
+    "www.stem-cogent.com",
+  ]
 }
 
 run "creates_tls_only_application_routing" {
@@ -102,6 +118,30 @@ run "creates_tls_only_application_routing" {
       one(one(one(aws_lb_listener_rule.frontend.condition).host_header).values) == "app.staging.stem-cogent.com"
     )
     error_message = "Only the canonical API and frontend hostnames may forward to containers."
+  }
+
+  assert {
+    condition = (
+      toset(aws_acm_certificate.this.subject_alternative_names) ==
+      toset(["api.staging.stem-cogent.com", "stem-cogent.com", "www.stem-cogent.com"]) &&
+      toset(keys(aws_route53_record.frontend_redirect)) ==
+      toset(["stem-cogent.com", "www.stem-cogent.com"]) &&
+      aws_route53_record.frontend.allow_overwrite &&
+      alltrue([for record in aws_route53_record.frontend_redirect : record.allow_overwrite])
+    )
+    error_message = "Frontend aliases must be covered by TLS and safely reconcile canonical-host migrations."
+  }
+
+  assert {
+    condition = (
+      toset(one(one(one(aws_lb_listener_rule.frontend_redirect).condition).host_header).values) ==
+      toset(["stem-cogent.com", "www.stem-cogent.com"]) &&
+      one(one(one(aws_lb_listener_rule.frontend_redirect).action).redirect).host ==
+      "app.staging.stem-cogent.com" &&
+      one(one(one(aws_lb_listener_rule.frontend_redirect).action).redirect).status_code ==
+      "HTTP_301"
+    )
+    error_message = "Frontend aliases must permanently redirect to the canonical application hostname."
   }
 }
 
