@@ -153,3 +153,26 @@ def test_task_registration_reports_unchanged_values_without_tags() -> None:
 
     assert changed == []
     assert "tags" not in registration
+
+
+def test_main_reports_dry_run(monkeypatch: Any, capsys: Any) -> None:
+    monkeypatch.setattr(
+        pool,
+        "rollout",
+        lambda args: {"applied": args.apply, "services": []},
+    )
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "rollout_worker_database_pool",
+            "--profile",
+            "production",
+            "--cluster",
+            "sc-cluster-prod",
+            "--environment",
+            "prod",
+        ],
+    )
+
+    assert pool.main() == 0
+    assert '"applied": false' in capsys.readouterr().out

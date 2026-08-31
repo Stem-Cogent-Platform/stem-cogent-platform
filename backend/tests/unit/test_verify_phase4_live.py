@@ -116,3 +116,23 @@ async def test_run_seeds_source_and_reports_failed_pipeline(monkeypatch: Any) ->
         "normalized signal persisted",
         "cited Global Output completed",
     ]
+
+
+def test_main_returns_success_for_completed_evidence(monkeypatch: Any, capsys: Any) -> None:
+    async def completed(_: Any) -> dict[str, Any]:
+        return {"job_id": str(uuid4()), "evidence": {}, "failed_checks": []}
+
+    async def close() -> None:
+        return None
+
+    monkeypatch.setattr(verifier, "run", completed)
+    monkeypatch.setattr(verifier, "close_database_connection", close)
+    monkeypatch.setattr(
+        "sys.argv",
+        ["verify_phase4_live", "--job-id", str(uuid4()), "--wait-seconds", "0"],
+    )
+
+    assert verifier.main() == 0
+    output = capsys.readouterr().out
+    assert '"passed": true' in output
+    assert "PHASE4_LIVE_EVIDENCE=" in output
