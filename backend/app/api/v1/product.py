@@ -297,7 +297,7 @@ async def record_decision_action(
         await _audit(context, f"BRIEF_{body.action_type}", "DECISION_BRIEF", brief_id,
                      {"action_id": str(row["id"])})
     if get_settings().PHASE5_PRODUCT_ANALYTICS_ENABLED:
-        event_names = {
+        event_names: dict[str, _PRODUCT_EVENTS] = {
             "ACKNOWLEDGED": "BRIEF_ACKNOWLEDGED",
             "WATCHING": "BRIEF_WATCHED",
             "ESCALATED": "BRIEF_ESCALATED",
