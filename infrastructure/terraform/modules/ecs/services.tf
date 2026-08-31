@@ -106,12 +106,18 @@ locals {
     XRAY_ENABLED = "false"
   })
 
+  # Each Celery child executes one task at a time. Giving every prefork child
+  # the API's three-connection pool multiplied the seven worker services to
+  # the PostgreSQL connection ceiling. Keep one connection per child and no
+  # overflow; API request pools retain the independently configured 3 + 2.
   worker_environment_variables = merge(var.api_environment_variables, {
-    AWS_REGION   = var.aws_region
-    ENVIRONMENT  = var.environment
-    LOG_LEVEL    = "INFO"
-    SERVICE_NAME = ""
-    TMPDIR       = "/dev/shm"
+    AWS_REGION            = var.aws_region
+    DATABASE_MAX_OVERFLOW = "0"
+    DATABASE_POOL_SIZE    = "1"
+    ENVIRONMENT           = var.environment
+    LOG_LEVEL             = "INFO"
+    SERVICE_NAME          = ""
+    TMPDIR                = "/dev/shm"
   })
 
   bootstrap_images = {

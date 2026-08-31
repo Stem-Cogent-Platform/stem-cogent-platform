@@ -63,6 +63,7 @@ def context(session: Session) -> RequestContext:
                 "READ_INTELLIGENCE",
                 "CONFIGURE_ALERTS",
                 "CONFIGURE_COMPANY_CONTEXT",
+                "MANAGE_USERS",
             }
         ),
         tos_accepted_at=accepted_at,
@@ -85,8 +86,10 @@ async def test_brief_listing_detail_and_action_paths() -> None:
     brief_id = uuid4()
     row = {"id": brief_id, "evidence_signal_ids": [uuid4()], "brief_status": "NEW"}
 
-    listing = context(Session(Result(rows=[row])))
-    assert (await product.list_briefs("NEW", 20, listing))[0]["id"] == str(brief_id)
+    listing_session = Session(Result(rows=[row]))
+    listing = context(listing_session)
+    assert (await product.list_briefs(None, 20, listing))[0]["id"] == str(brief_id)
+    assert "CAST(:status_filter AS VARCHAR) IS NULL" in listing_session.statements[0]
 
     detail_session = Session(
         Result(row=row),
@@ -118,11 +121,13 @@ async def test_brief_listing_detail_and_action_paths() -> None:
 
 @pytest.mark.asyncio
 async def test_company_intelligence_entity_and_alert_paths() -> None:
-    company = context(Session(Result(row={"name": "Stem"}), Result(rows=[{"id": uuid4()}])))
+    company = context(Session(Result(row={"name": "Stem"}), Result(rows=[{"id": uuid4(), "evidence_signal_ids": [uuid4()]}])))
     assert (await product.company_lens(company))["profile"]["name"] == "Stem"
 
-    intelligence = context(Session(Result(rows=[{"id": uuid4(), "summary": "Change"}])))
+    intelligence_session = Session(Result(rows=[{"id": uuid4(), "summary": "Change", "citations": [{"source_signal_id": str(uuid4())}]}]))
+    intelligence = context(intelligence_session)
     assert (await product.wider_intelligence(12, intelligence))[0]["summary"] == "Change"
+    assert "source.source_name AS source_name" in intelligence_session.statements[0]
 
     entity_id = uuid4()
     entity = context(
@@ -140,6 +145,17 @@ async def test_company_intelligence_entity_and_alert_paths() -> None:
     with pytest.raises(HTTPException) as rejected:
         await product.entity_profile(uuid4(), missing_entity)
     assert rejected.value.status_code == 404
+
+    watchlist = await product.watchlist(
+        context(
+            Session(
+                Result(rows=[{"id": uuid4(), "name": "NIBSS", "recent_activity_count": 2}]),
+                Result(rows=[{"id": uuid4(), "label": "Settlement", "recent_activity_count": None}]),
+            )
+        )
+    )
+    assert watchlist["company"][0]["recent_activity_count"] == 2
+    assert watchlist["focus"][0]["label"] == "Settlement"
 
     alert_id = uuid4()
     alerts = context(Session(Result(rows=[{"id": alert_id, "status": "PENDING"}])))
@@ -231,4 +247,18 @@ async def test_preferences_digests_and_complete_pilot_lifecycle() -> None:
             context(Session(Result(row=None))),
         )
     assert missing_checkpoint.value.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_team_and_integration_settings_read_persisted_state() -> None:
+    team = await product.list_team_members(
+        context(Session(Result(rows=[{"id": uuid4(), "email": "owner@example.com"}])))
+    )
+    assert team[0]["email"] == "owner@example.com"
+
+    integrations = await product.integration_status(
+        context(Session(Result(rows=[{"id": uuid4(), "name": "Pilot key"}])))
+    )
+    assert integrations["api_keys"][0]["name"] == "Pilot key"
+    assert integrations["plan_code"] == "BUSINESS"
 

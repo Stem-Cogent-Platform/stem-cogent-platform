@@ -54,9 +54,10 @@ async def find_similar_signals(
                   AND signal.primary_domain = :primary_domain
                   AND candidate.embedded_at >= :history_start
                   AND (
-                    (:tenant_id IS NULL AND candidate.tenant_id IS NULL)
-                    OR (:tenant_id IS NOT NULL AND (
-                      candidate.tenant_id IS NULL OR candidate.tenant_id = :tenant_id
+                    (CAST(:tenant_id AS UUID) IS NULL AND candidate.tenant_id IS NULL)
+                    OR (CAST(:tenant_id AS UUID) IS NOT NULL AND (
+                      candidate.tenant_id IS NULL
+                      OR candidate.tenant_id = CAST(:tenant_id AS UUID)
                     ))
                   )
                   AND (

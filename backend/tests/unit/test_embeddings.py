@@ -149,7 +149,8 @@ async def test_similarity_search_is_tenant_domain_entity_time_and_limit_bounded(
     )
 
     assert matches[0].distance == 0.04
-    assert "candidate.tenant_id IS NULL OR candidate.tenant_id = :tenant_id" in session.statement
+    assert "CAST(:tenant_id AS UUID) IS NULL" in session.statement
+    assert "candidate.tenant_id = CAST(:tenant_id AS UUID)" in session.statement
     assert "signal.primary_domain = :primary_domain" in session.statement
     assert "link.entity_id = ANY" in session.statement
     assert "candidate.embedded_at >= :history_start" in session.statement

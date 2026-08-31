@@ -123,7 +123,7 @@ async def _retrieve_signal(
                 SELECT signal.id, signal.title, signal.body_text,
                        signal.primary_domain, signal.subcategory_tags,
                        signal.confidence_score, signal.urgency_score,
-                       signal.published_at, source.name AS source_name,
+                       signal.published_at, source.source_name AS source_name,
                        signal.source_url, output.id AS output_id,
                        output.summary, output.global_implication
                 FROM pipeline.signals AS signal
@@ -211,7 +211,8 @@ async def _load_citations(
     rows = (await session.execute(
         text(
             """
-            SELECT DISTINCT ON (signal.id) signal.id, source.name AS source_name,
+            SELECT DISTINCT ON (signal.id) signal.id,
+                   source.source_name AS source_name,
                    signal.source_url
             FROM pipeline.signals AS signal
             JOIN config.sources AS source ON source.id = signal.source_id
