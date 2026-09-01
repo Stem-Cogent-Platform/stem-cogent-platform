@@ -56,12 +56,13 @@ async def grant(email: str, expected_tenant: str, confirmed_email: str) -> dict[
             text(
                 """
                 INSERT INTO audit.events (
-                    tenant_id,actor_user_id,event_type,entity_type,entity_id,event_data
+                    tenant_id,actor_user_id,event_type,entity_type,entity_id,event_data,
+                    occurred_at
                 ) VALUES (
                     :tenant_id,:user_id,'SYSTEM_ADMIN_GRANTED','USER',:user_id,
                     jsonb_build_object(
                         'previous_role',CAST(:previous_role AS TEXT),'bootstrap',true
-                    )
+                    ),NOW()
                 )
                 """
             ),
