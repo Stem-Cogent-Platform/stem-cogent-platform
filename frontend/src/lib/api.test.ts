@@ -1,6 +1,21 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { ApiError, accessToken, apiRequest, beginSso, bootstrapSession, clearSession, currentUser, login, logout, register } from "./api";
+import {
+  ApiError,
+  acceptInvitation,
+  accessToken,
+  adminMfaLogin,
+  apiRequest,
+  beginSso,
+  bootstrapSession,
+  clearSession,
+  currentUser,
+  login,
+  logout,
+  recordProductEvent,
+  register,
+  validateInvitation
+} from "./api";
 import { legalCopy } from "./legal-copy";
 
 afterEach(() => {
@@ -127,6 +142,42 @@ describe("apiRequest", () => {
     expect(accessToken()).toBe("trial-token");
     expect(fetchMock.mock.calls[0][0]).toBe("/api/v1/auth/register");
     expect(fetchMock.mock.calls[1][0]).toBe("http://localhost:8000/api/v1/auth/sso/google/start?intent=signup");
+  });
+
+  it("validates and accepts a tenant invitation", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ valid: true, workspace_name: "Acme", email: "invitee@example.com", expires_at: "2026-09-01T00:00:00Z" }), { status: 200, headers: { "Content-Type": "application/json" } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ access_token: "invited-token", expires_in: 900, user: { display_name: "Invitee" } }), { status: 201, headers: { "Content-Type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(validateInvitation("token with spaces")).resolves.toMatchObject({ valid: true, workspace_name: "Acme" });
+    await expect(acceptInvitation({ token: "token", display_name: "Invitee", password: "long-secure-password" })).resolves.toMatchObject({ access_token: "invited-token" });
+
+    expect(fetchMock.mock.calls[0][0]).toBe("/api/v1/auth/invitations/validate?token=token%20with%20spaces");
+    expect(fetchMock.mock.calls[1][0]).toBe("/api/v1/auth/invitations/accept");
+    expect(accessToken()).toBe("invited-token");
+  });
+
+  it("creates an MFA-verified internal operator session", async () => {
+    const fetchMock = vi.fn(async () =>
+      new Response(JSON.stringify({ access_token: "operator-token", expires_in: 900, user: { permission_role: "SYSTEM_ADMIN" } }), { status: 200, headers: { "Content-Type": "application/json" } })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(adminMfaLogin({ email: "operator@example.com", password: "long-secure-password", totp_code: "123456" })).resolves.toMatchObject({ access_token: "operator-token" });
+    expect(fetchMock).toHaveBeenCalledWith("/api/v1/auth/admin/mfa", expect.objectContaining({ method: "POST" }));
+    expect(currentUser()).toMatchObject({ permission_role: "SYSTEM_ADMIN" });
+  });
+
+  it("records analytics without blocking the primary action when delivery fails", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ access_token: "session-token", expires_in: 900, user: {} }), { status: 200, headers: { "Content-Type": "application/json" } }))
+      .mockRejectedValueOnce(new TypeError("Failed to fetch"));
+    vi.stubGlobal("fetch", fetchMock);
+    await login({ email: "pilot@example.com", password: "correct-password" });
+
+    await expect(recordProductEvent("BRIEFING_VIEWED", { object_type: "BRIEF", object_id: "brief-1", metadata: { source: "home" } })).resolves.toBeUndefined();
+    expect(fetchMock.mock.calls[1][0]).toBe("/api/v1/events");
   });
 
   it("refreshes once after an authenticated 401 and retries the request", async () => {

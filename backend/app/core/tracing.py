@@ -88,7 +88,12 @@ def configure_tracing(app: FastAPI) -> None:
     xray_recorder.configure(
         service=settings.SERVICE_NAME,
         context=AsyncContext(),
-        context_missing="LOG_ERROR",
+        # Starlette executes response work across child tasks. Patched client
+        # libraries may therefore look up a subsegment after the request
+        # segment has been retained by this middleware. The request segment is
+        # still emitted below; treating that expected lookup as an application
+        # error created high-volume false alarms in both live environments.
+        context_missing="IGNORE_ERROR",
         daemon_address=settings.XRAY_DAEMON_ADDRESS,
     )
     patch_all()

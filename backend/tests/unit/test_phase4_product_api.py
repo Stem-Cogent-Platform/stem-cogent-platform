@@ -95,6 +95,7 @@ async def test_brief_listing_detail_and_action_paths() -> None:
         Result(row=row),
         Result(rows=[{"id": row["evidence_signal_ids"][0], "source_name": "CBN"}]),
         Result(rows=[{"id": uuid4(), "action_type": "WATCHING"}]),
+        Result(rows=[{"event_type": "BRIEF_CREATED"}]),
         Result(),
     )
     detail = await product.get_brief(brief_id, context(detail_session))
@@ -103,7 +104,12 @@ async def test_brief_listing_detail_and_action_paths() -> None:
     assert detail_session.commits == 1
 
     action_id = uuid4()
-    action_session = Session(Result(row={"id": action_id, "action_type": "ACKNOWLEDGED"}), Result(), Result())
+    action_session = Session(
+        Result(row={"id": action_id, "action_type": "ACKNOWLEDGED"}),
+        Result(),
+        Result(),
+        Result(),
+    )
     action = await product.record_decision_action(
         brief_id,
         product.DecisionActionInput(action_type="ACKNOWLEDGED", note="Reviewed"),

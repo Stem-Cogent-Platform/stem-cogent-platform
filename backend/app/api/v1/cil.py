@@ -14,6 +14,7 @@ from app.api.auth import RequestContext, get_request_context, require_permission
 from app.cil import retrieve_context
 from app.cil.answering import answer_query
 from app.billing import require_feature
+from app.core.config import get_settings
 
 
 router = APIRouter(prefix="/api/v1/cil", tags=["cil"])
@@ -99,6 +100,23 @@ async def query_cil(
             "latency_ms": round((monotonic() - started) * 1000),
         },
     )
+    if get_settings().PHASE5_PRODUCT_ANALYTICS_ENABLED:
+        await context.session.execute(
+            text(
+                """
+                INSERT INTO feedback.product_events (
+                    tenant_id,user_id,event_name,object_type,object_id,metadata
+                ) VALUES (
+                    :tenant_id,:user_id,'CIL_QUERY_SUBMITTED',:object_type,
+                    :object_id,jsonb_build_object('grounded',:grounded)
+                )
+                """
+            ),
+            {"tenant_id": context.principal.tenant_id,
+             "user_id": context.principal.user_id,
+             "object_type": payload.anchor_type, "object_id": payload.anchor_id,
+             "grounded": grounded},
+        )
     await context.session.execute(
         text(
             """

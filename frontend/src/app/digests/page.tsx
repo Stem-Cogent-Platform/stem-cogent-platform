@@ -6,6 +6,7 @@ import { ModuleFailure, ModuleLoading } from "@/components/module-state";
 import { WorkspaceShell } from "@/components/workspace-shell";
 import { apiRequest } from "@/lib/api";
 import { LoadState } from "@/lib/types";
+import { stateMessages } from "@/lib/product-copy/stateMessages";
 
 type Digest = {
   id: string;
@@ -49,8 +50,10 @@ export default function DigestsPage() {
             ))}
             {!state.data.length && (
               <section className="empty-brief">
-                <h2>No digest has been generated.</h2>
-                <p>The digests query completed successfully and returned zero records. A digest will appear after qualifying Decision Briefs reach the configured delivery window.</p>
+                <p className="eyebrow">Monday · 08:00</p>
+                <h2>{stateMessages.digestEmpty.title}</h2>
+                <p>{stateMessages.digestEmpty.body}</p>
+                <ul><li>Decisions requiring attention</li><li>Unresolved watched briefs</li><li>Important Focus Area changes</li><li>Selected Wider Intelligence</li></ul>
               </section>
             )}
           </div>

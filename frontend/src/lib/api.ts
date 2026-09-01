@@ -59,6 +59,57 @@ export async function register(input: {
   return response;
 }
 
+export async function adminMfaLogin(input: {
+  email: string;
+  password: string;
+  totp_code: string;
+  workspace_id?: string;
+}) {
+  const response = await rawRequest<AuthResponse>("/api/v1/auth/admin/mfa", {
+    method: "POST",
+    body: JSON.stringify(input)
+  });
+  storeSession(response, "");
+  return response;
+}
+
+export async function validateInvitation(token: string) {
+  return rawRequest<{ valid: true; workspace_name: string; email: string; expires_at: string }>(
+    `/api/v1/auth/invitations/validate?token=${encodeURIComponent(token)}`
+  );
+}
+
+export async function acceptInvitation(input: { token: string; display_name: string; password: string }) {
+  const response = await rawRequest<AuthResponse>("/api/v1/auth/invitations/accept", {
+    method: "POST",
+    body: JSON.stringify(input)
+  });
+  storeSession(response, "");
+  return response;
+}
+
+export type ProductEventName =
+  | "SESSION_STARTED" | "BRIEFING_VIEWED" | "BRIEF_OPENED" | "BRIEF_UPDATED_VIEWED"
+  | "EVIDENCE_PANEL_OPENED" | "CIL_OPENED" | "CIL_QUERY_SUBMITTED"
+  | "BRIEF_ACKNOWLEDGED" | "BRIEF_WATCHED" | "BRIEF_ESCALATED" | "BRIEF_ACTED_ON"
+  | "BRIEF_DISMISSED" | "WIDER_INTELLIGENCE_VIEWED" | "WATCHLIST_ITEM_VIEWED"
+  | "FOCUS_AREA_ADDED" | "FOCUS_AREA_UPDATED" | "SEARCH_PERFORMED" | "ALERT_OPENED"
+  | "DIGEST_OPENED" | "DECISION_PATHS_VIEWED";
+
+export async function recordProductEvent(
+  eventName: ProductEventName,
+  input: { object_type?: string; object_id?: string; metadata?: Record<string, string | number | boolean> } = {}
+) {
+  try {
+    await apiRequest("/api/v1/events", {
+      method: "POST",
+      body: JSON.stringify({ event_name: eventName, ...input })
+    });
+  } catch {
+    // Analytics is deliberately non-blocking; primary product actions still complete.
+  }
+}
+
 export async function beginSso(provider: "google" | "linkedin", intent: "login" | "signup") {
   return rawRequest<{ authorization_url: string }>(
     `${API_ORIGIN}/api/v1/auth/sso/${provider}/start?intent=${intent}`

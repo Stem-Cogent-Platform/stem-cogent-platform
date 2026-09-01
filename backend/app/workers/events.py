@@ -16,6 +16,8 @@ EVENT_TASKS = {
     "SIGNAL_CONTEXT_READY": "app.workers.tasks.synthesis.synthesize_global_output",
     "INTELLIGENCE_SYNTHESIZED": "app.workers.tasks.decision.create_decision_briefs",
     "DECISION_BRIEF_READY": "app.workers.tasks.delivery.handle_decision_brief_ready",
+    "BRIEF_UPDATED": "app.workers.tasks.delivery.handle_decision_brief_ready",
+    "ACTIVATION_COMPLETED": "app.workers.tasks.pilot_activation.activation_completed",
     "CLASSIFICATION_REVIEW_REQUIRED": "app.workers.tasks.review.review_classification",
     "ENTITY_RESOLUTION_REQUIRED": "app.workers.tasks.review.review_entity_resolution",
 }

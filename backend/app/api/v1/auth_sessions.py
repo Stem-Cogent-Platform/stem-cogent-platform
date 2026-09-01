@@ -17,7 +17,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy import text
 
 from app.api.auth import RequestContext, get_request_context
-from app.authn import hash_password, verify_password
+from app.authn import hash_password, verify_password, verify_totp
 from app.core.config import get_settings
 from app.core.database import get_session
 from app.core.redis import get_redis_client
@@ -43,6 +43,10 @@ class LoginInput(BaseModel):
         if "@" not in email or email.startswith("@") or email.endswith("@"):
             raise ValueError("A valid email address is required")
         return email
+
+
+class AdminMfaLoginInput(LoginInput):
+    totp_code: str = Field(min_length=6, max_length=8)
 
 
 class RegisterInput(BaseModel):
@@ -77,6 +81,9 @@ async def register(
     body: RegisterInput, request: Request, response: Response
 ) -> AccessTokenResponse:
     """Create a public trial workspace and sign its first administrator in."""
+
+    if get_settings().PHASE5_PILOT_INVITES_ENABLED:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Registration is unavailable")
 
     await _enforce_rate_limit(request, body.email)
     tenant_id = uuid4()
@@ -225,6 +232,83 @@ async def login(
     )
 
 
+@router.post("/admin/mfa", response_model=AccessTokenResponse)
+async def admin_mfa_login(
+    body: AdminMfaLoginInput, request: Request, response: Response
+) -> AccessTokenResponse:
+    """Issue an admin session only after password and a separate TOTP factor."""
+
+    await _enforce_rate_limit(request, body.email)
+    secret_arn = get_settings().SYSTEM_ADMIN_MFA_SECRET_ARN
+    if not secret_arn:
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "System administrator authentication is unavailable",
+        )
+    async for session in get_session():
+        tenant_id = body.workspace_id
+        if tenant_id is None:
+            tenant_id = (
+                await session.execute(
+                    text("SELECT tenant_id FROM auth.login_identities WHERE email=:email"),
+                    {"email": body.email},
+                )
+            ).scalar_one_or_none()
+        if tenant_id is None:
+            raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Authentication failed")
+        await session.execute(
+            text("SELECT set_config('app.current_tenant_id', :tenant_id, true)"),
+            {"tenant_id": str(tenant_id)},
+        )
+        row = (
+            await session.execute(
+                text(
+                    """
+                    SELECT users.id,users.tenant_id,users.email,users.display_name,
+                           users.permission_role,users.password_hash,
+                           tenants.name AS tenant_name
+                    FROM auth.users users
+                    JOIN auth.tenants tenants ON tenants.id=users.tenant_id
+                    WHERE users.tenant_id=:tenant_id AND LOWER(users.email)=:email
+                      AND users.status='ACTIVE' AND users.permission_role='SYSTEM_ADMIN'
+                      AND tenants.status IN ('TRIAL','ACTIVE')
+                    """
+                ),
+                {"tenant_id": tenant_id, "email": body.email},
+            )
+        ).mappings().one_or_none()
+        factor_valid = verify_totp(
+            get_secret_string(secret_arn), body.totp_code
+        )
+        if (
+            row is None
+            or not verify_password(body.password, row["password_hash"])
+            or not factor_valid
+        ):
+            logger.warning("Rejected system administrator MFA login")
+            raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Authentication failed")
+        await session.execute(
+            text(
+                """
+                INSERT INTO audit.events (
+                    tenant_id,actor_user_id,event_type,entity_type,entity_id,event_data
+                ) VALUES (
+                    :tenant_id,:user_id,'SYSTEM_ADMIN_LOGIN','USER',:user_id,
+                    jsonb_build_object('mfa',true)
+                )
+                """
+            ),
+            {"tenant_id": tenant_id, "user_id": row["id"]},
+        )
+        return await _issue_session(
+            session, row, request, response, mfa_verified=True
+        )
+    raise HTTPException(
+        status.HTTP_503_SERVICE_UNAVAILABLE,
+        "System administrator authentication is unavailable",
+    )
+
+
 @router.post("/refresh", response_model=AccessTokenResponse)
 async def refresh(
     response: Response,
@@ -243,7 +327,7 @@ async def refresh(
                         """
                     SELECT users.id, users.tenant_id, users.email, users.display_name,
                            users.permission_role, tenants.name AS tenant_name,
-                           sessions.refresh_token_hash
+                           sessions.refresh_token_hash, sessions.mfa_verified_at
                     FROM auth.sessions AS sessions
                     JOIN auth.users AS users
                       ON users.tenant_id = sessions.tenant_id AND users.id = sessions.user_id
@@ -269,7 +353,11 @@ async def refresh(
             )
         _set_refresh_cookie(response, refresh_cookie or "")
         return AccessTokenResponse(
-            access_token=_access_token(row["id"], row["tenant_id"]),
+            access_token=_access_token(
+                row["id"], row["tenant_id"],
+                authentication_methods=("pwd", "mfa")
+                if row.get("mfa_verified_at") else ("pwd",),
+            ),
             user=_public_user(row),
         )
     raise HTTPException(
@@ -347,7 +435,11 @@ async def me(context: RequestContext = Depends(get_request_context)) -> dict[str
     }
 
 
-def _access_token(user_id: UUID, tenant_id: UUID) -> str:
+def _access_token(
+    user_id: UUID,
+    tenant_id: UUID,
+    authentication_methods: tuple[str, ...] = ("pwd",),
+) -> str:
     now = int(time.time())
     header = _encode(
         json.dumps({"alg": "HS256", "typ": "JWT"}, separators=(",", ":")).encode()
@@ -359,6 +451,7 @@ def _access_token(user_id: UUID, tenant_id: UUID) -> str:
                 "tenant_id": str(tenant_id),
                 "iat": now,
                 "exp": now + _ACCESS_SECONDS,
+                "amr": list(authentication_methods),
             },
             separators=(",", ":"),
         ).encode()
@@ -415,7 +508,7 @@ def _public_user(row: Any) -> dict[str, Any]:
 
 
 async def _issue_session(
-    session: Any, row: Any, request: Request, response: Response
+    session: Any, row: Any, request: Request, response: Response, *, mfa_verified: bool = False
 ) -> AccessTokenResponse:
     refresh_secret = secrets.token_urlsafe(48)
     refresh_hash = hashlib.sha256(refresh_secret.encode()).hexdigest()
@@ -426,10 +519,11 @@ async def _issue_session(
                 """
                 INSERT INTO auth.sessions (
                     user_id, tenant_id, refresh_token_hash, ip_address,
-                    user_agent, expires_at
+                    user_agent, expires_at, mfa_verified_at
                 ) VALUES (
                     :user_id, :tenant_id, :refresh_hash, CAST(:ip_address AS INET),
-                    :user_agent, :expires_at
+                    :user_agent, :expires_at,
+                    CASE WHEN :mfa_verified THEN NOW() ELSE NULL END
                 ) RETURNING id
                 """
             ),
@@ -444,6 +538,7 @@ async def _issue_session(
                 ),
                 "user_agent": request.headers.get("user-agent", "")[:2000],
                 "expires_at": expires_at,
+                "mfa_verified": mfa_verified,
             },
         )
     ).scalar_one()
@@ -454,10 +549,27 @@ async def _issue_session(
         ),
         {"user_id": row["id"], "tenant_id": row["tenant_id"]},
     )
+    if getattr(get_settings(), "PHASE5_PRODUCT_ANALYTICS_ENABLED", False):
+        await session.execute(
+            text(
+                """
+                INSERT INTO feedback.product_events (
+                    tenant_id,user_id,event_name,object_type,object_id,metadata
+                ) VALUES (
+                    :tenant_id,:user_id,'SESSION_STARTED','SESSION',:session_id,'{}'::JSONB
+                )
+                """
+            ),
+            {"tenant_id": row["tenant_id"], "user_id": row["id"],
+             "session_id": session_id},
+        )
     await session.commit()
     _set_refresh_cookie(response, f"{row['tenant_id']}.{session_id}.{refresh_secret}")
     return AccessTokenResponse(
-        access_token=_access_token(row["id"], row["tenant_id"]),
+        access_token=_access_token(
+            row["id"], row["tenant_id"],
+            authentication_methods=("pwd", "mfa") if mfa_verified else ("pwd",),
+        ),
         user=_public_user(row),
     )
 

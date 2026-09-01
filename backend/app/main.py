@@ -9,9 +9,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api.v1.cil import router as cil_router
 from app.api.v1.auth_sessions import router as auth_sessions_router
 from app.api.v1.billing import router as billing_router
+from app.api.v1.admin import router as admin_router
 from app.api.v1.compliance import router as compliance_router
 from app.api.v1.context import router as context_router
 from app.api.v1.health import router as health_router
+from app.api.v1.invitations import router as invitations_router
 from app.api.v1.product import router as product_router
 from app.api.v1.realtime import router as realtime_router
 from app.api.v1.reviews import router as reviews_router
@@ -122,7 +124,9 @@ async def add_security_headers(request: Request, call_next) -> Response:
 
 
 app.include_router(health_router)
+app.include_router(admin_router)
 app.include_router(auth_sessions_router)
+app.include_router(invitations_router)
 app.include_router(billing_router)
 app.include_router(compliance_router)
 # SC-DOC-006 defines /api/v1 as the global API base. Keep the older

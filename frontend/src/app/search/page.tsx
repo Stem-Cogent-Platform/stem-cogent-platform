@@ -6,7 +6,7 @@ import { Suspense, useCallback, useEffect, useState } from "react";
 
 import { ModuleFailure, ModuleLoading } from "@/components/module-state";
 import { WorkspaceShell } from "@/components/workspace-shell";
-import { apiRequest } from "@/lib/api";
+import { apiRequest, recordProductEvent } from "@/lib/api";
 import { LoadState } from "@/lib/types";
 
 type SearchItem = { id: string; title: string; summary?: string; domain?: string; urgency?: string };
@@ -23,6 +23,7 @@ function Results() {
     }
     try {
       setState({ status: "ready", data: await apiRequest<SearchResults>(`/api/v1/search?q=${encodeURIComponent(query)}`) });
+      void recordProductEvent("SEARCH_PERFORMED", { metadata: { result_scope: "workspace" } });
     } catch (error) {
       setState({ status: "error", message: error instanceof Error ? error.message : "Search could not be completed." });
     }

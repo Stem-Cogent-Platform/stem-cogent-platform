@@ -36,6 +36,7 @@ class Principal:
     tenant_id: UUID
     permission_role: str
     permissions: frozenset[str]
+    authentication_methods: frozenset[str] = field(default_factory=frozenset)
     tos_accepted_at: datetime | None = None
     tos_version: str | None = None
     privacy_policy_accepted_at: datetime | None = None
@@ -125,6 +126,9 @@ async def get_request_context(
             tenant_id=row["tenant_id"],
             permission_role=row["permission_role"],
             permissions=frozenset(row["permissions"]),
+            authentication_methods=frozenset(
+                value for value in claims.get("amr", []) if isinstance(value, str)
+            ),
             tos_accepted_at=row["tos_accepted_at"],
             tos_version=row["tos_version"],
             privacy_policy_accepted_at=row["privacy_policy_accepted_at"],

@@ -2,6 +2,8 @@ FROM node:20-alpine AS dependencies
 
 WORKDIR /app
 
+RUN npm install --global npm@11.6.2
+
 COPY package.json package-lock.json ./
 RUN npm ci --no-audit --no-fund --fetch-retries=5 --fetch-retry-mintimeout=20000 --fetch-retry-maxtimeout=120000
 
@@ -11,9 +13,11 @@ WORKDIR /app
 
 ARG NEXT_PUBLIC_API_URL
 ARG NEXT_PUBLIC_WS_URL
+ARG NEXT_PUBLIC_PHASE5_PILOT_INVITES_ENABLED=false
 
 ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL} \
-    NEXT_PUBLIC_WS_URL=${NEXT_PUBLIC_WS_URL}
+    NEXT_PUBLIC_WS_URL=${NEXT_PUBLIC_WS_URL} \
+    NEXT_PUBLIC_PHASE5_PILOT_INVITES_ENABLED=${NEXT_PUBLIC_PHASE5_PILOT_INVITES_ENABLED}
 
 COPY --from=dependencies /app/node_modules ./node_modules
 COPY . .
