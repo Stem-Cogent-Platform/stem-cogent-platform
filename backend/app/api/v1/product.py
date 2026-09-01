@@ -288,20 +288,26 @@ async def record_decision_action(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Decision Brief not found")
     next_status = "WATCHING" if body.action_type == "ACKNOWLEDGED" else body.action_type
     lifecycle_enabled = get_settings().PHASE5_BRIEF_LIFECYCLE_ENABLED
-    update_fields = (
-        "brief_status=:status,updated_at=NOW(),last_material_change_at=NOW(),"
-        "material_change_count=material_change_count+1"
-        if lifecycle_enabled
-        else "brief_status=:status,updated_at=NOW()"
-    )
-    await context.session.execute(
-        text(
-            f"UPDATE decision.briefs SET {update_fields} "
-            "WHERE id=:brief_id AND tenant_id=:tenant_id"
-        ),
-        {"status": next_status, "brief_id": brief_id,
-         "tenant_id": context.principal.tenant_id},
-    )
+    update_parameters = {"status": next_status, "brief_id": brief_id,
+                         "tenant_id": context.principal.tenant_id}
+    if lifecycle_enabled:
+        await context.session.execute(
+            text(
+                "UPDATE decision.briefs SET brief_status=:status,updated_at=NOW(),"
+                "last_material_change_at=NOW(),"
+                "material_change_count=material_change_count+1 "
+                "WHERE id=:brief_id AND tenant_id=:tenant_id"
+            ),
+            update_parameters,
+        )
+    else:
+        await context.session.execute(
+            text(
+                "UPDATE decision.briefs SET brief_status=:status,updated_at=NOW() "
+                "WHERE id=:brief_id AND tenant_id=:tenant_id"
+            ),
+            update_parameters,
+        )
     if lifecycle_enabled:
         await context.session.execute(
             text(
