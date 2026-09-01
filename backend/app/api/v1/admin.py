@@ -300,7 +300,8 @@ async def _tenant_detail(context: RequestContext, tenant_id: UUID) -> dict[str, 
                         WHERE object.tenant_id=tenant.id AND object.active) AS object_count,
                        (SELECT COUNT(*) FROM context.company_objects object
                         WHERE object.tenant_id=tenant.id AND object.active
-                          AND object.resolution_status='RESOLVED') AS resolved_count,
+                          AND object.resolution_status IN ('RESOLVED','NOT_APPLICABLE'))
+                         AS resolved_count,
                        (SELECT COUNT(*) FROM decision.briefs brief
                         WHERE brief.tenant_id=tenant.id AND brief.user_id IS NULL) AS company_briefs,
                        (SELECT COUNT(*) FROM context.relevant_monitoring monitoring
