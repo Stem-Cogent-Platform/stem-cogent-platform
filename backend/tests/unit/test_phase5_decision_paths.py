@@ -12,6 +12,13 @@ def test_brief_event_audit_types_polymorphic_json_value() -> None:
     assert "CAST(:evidence_count AS INTEGER)" in source
 
 
+def test_brief_lifecycle_worker_writes_are_feature_gated() -> None:
+    source = inspect.getsource(decision._persist_brief)
+    assert "settings.PHASE5_BRIEF_LIFECYCLE_ENABLED" in source
+    assert "if event_type and lifecycle_enabled" in source
+    assert "CAST(:lifecycle_enabled AS BOOLEAN)" in source
+
+
 @pytest.mark.parametrize(
     "decision_type,expected",
     (

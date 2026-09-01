@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
@@ -82,7 +83,16 @@ def context(session: Session) -> RequestContext:
 
 
 @pytest.mark.asyncio
-async def test_brief_listing_detail_and_action_paths() -> None:
+async def test_brief_listing_detail_and_action_paths(monkeypatch) -> None:
+    monkeypatch.setattr(
+        product,
+        "get_settings",
+        lambda: SimpleNamespace(
+            PHASE5_BRIEF_LIFECYCLE_ENABLED=True,
+            PHASE5_NEW_UI_ENABLED=True,
+            PHASE5_PRODUCT_ANALYTICS_ENABLED=False,
+        ),
+    )
     brief_id = uuid4()
     row = {"id": brief_id, "evidence_signal_ids": [uuid4()], "brief_status": "NEW"}
 
@@ -125,6 +135,42 @@ async def test_brief_listing_detail_and_action_paths() -> None:
     with pytest.raises(HTTPException) as rejected:
         await product.get_brief(uuid4(), missing)
     assert rejected.value.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_brief_lifecycle_flag_is_an_effective_rollback_gate(monkeypatch) -> None:
+    monkeypatch.setattr(
+        product,
+        "get_settings",
+        lambda: SimpleNamespace(
+            PHASE5_BRIEF_LIFECYCLE_ENABLED=False,
+            PHASE5_NEW_UI_ENABLED=False,
+            PHASE5_PRODUCT_ANALYTICS_ENABLED=False,
+        ),
+    )
+    capabilities = await product.product_capabilities(context(Session()))
+    assert capabilities == {
+        "phase5_brief_lifecycle_enabled": False,
+        "phase5_new_ui_enabled": False,
+    }
+
+    disabled = await product.briefing_changes(None, context(Session()))
+    assert disabled["enabled"] is False
+    assert disabled["new_briefs"] == 0
+
+    brief_id = uuid4()
+    action_session = Session(
+        Result(row={"id": uuid4(), "action_type": "WATCHING"}),
+        Result(),
+        Result(),
+    )
+    await product.record_decision_action(
+        brief_id,
+        product.DecisionActionInput(action_type="WATCHING"),
+        context(action_session),
+    )
+    assert not any("decision.brief_events" in item for item in action_session.statements)
+    assert not any("material_change_count" in item for item in action_session.statements)
 
 
 @pytest.mark.asyncio

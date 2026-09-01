@@ -17,6 +17,7 @@ type BriefingData = {
   briefs: Brief[];
   monitoring: MonitoringItem[];
   changes: { new_briefs: number; updated_briefs: number; new_evidence_items: number; new_relevant_monitoring: number };
+  phase5UiEnabled: boolean;
 };
 
 function greeting() {
@@ -41,12 +42,17 @@ export default function BriefingPage() {
   const load = useCallback(async () => {
     try {
       setState({ status: "loading" });
-      const [briefs, monitoring, changes] = await Promise.all([
+      const [briefs, capabilities] = await Promise.all([
         apiRequest<Brief[]>("/api/v1/briefs"),
-        apiRequest<MonitoringItem[]>("/api/v1/relevant-monitoring?limit=8"),
-        apiRequest<BriefingData["changes"]>("/api/v1/briefing/changes")
+        apiRequest<{ phase5_new_ui_enabled: boolean }>("/api/v1/capabilities"),
       ]);
-      setState({ status: "ready", data: { briefs, monitoring, changes } });
+      const [monitoring, changes] = capabilities.phase5_new_ui_enabled
+        ? await Promise.all([
+            apiRequest<MonitoringItem[]>("/api/v1/relevant-monitoring?limit=8"),
+            apiRequest<BriefingData["changes"]>("/api/v1/briefing/changes"),
+          ])
+        : [[], { new_briefs: 0, updated_briefs: 0, new_evidence_items: 0, new_relevant_monitoring: 0 }];
+      setState({ status: "ready", data: { briefs, monitoring, changes, phase5UiEnabled: capabilities.phase5_new_ui_enabled } });
       setNewCount(0);
     } catch (error) {
       setState({ status: "error", message: friendlyError(error, "We couldn't load this briefing. Try again.") });
@@ -83,6 +89,13 @@ export default function BriefingPage() {
 
   const firstName = String(currentUser()?.display_name ?? "").trim().split(/\s+/)[0];
   const data = state.status === "ready" ? state.data : null;
+
+  if (data && !data.phase5UiEnabled) {
+    return <WorkspaceShell><section className="briefing-heading"><div><p className="eyebrow">My Decision Briefing</p><h1>Developments requiring attention</h1></div><span className="connection-status"><i /> {connection}</span></section>
+      {newCount > 0 && <button className="new-brief-banner" onClick={() => void load()} type="button">{newCount} new brief{newCount === 1 ? " is" : "s are"} ready</button>}
+      <section className="briefing-grid"><div className="brief-column"><div className="section-heading"><h2>Decision briefs</h2><span>{data.briefs.length} evidence-backed</span></div>{data.briefs.map((brief) => <BriefCard brief={brief} key={brief.id} phase5Ui={false} />)}{!data.briefs.length && <article className="empty-brief"><h3>No developments currently meet your Decision Brief threshold.</h3><p>Wider Intelligence remains available while Stem continues monitoring your Focus Areas.</p><Link className="secondary-button" href="/intelligence">Review Wider Intelligence</Link></article>}</div><aside className="focus-panel"><p className="eyebrow">Watching</p><h2>Your Focus Areas</h2><p>Your configured Focus Areas influence ranking while factual evidence remains shared and unchanged.</p><Link className="text-link" href="/watchlist">Review focus and watchlist</Link></aside></section>
+    </WorkspaceShell>;
+  }
 
   return <WorkspaceShell>
     <section className="briefing-heading briefing-heading-v2"><div><p className="eyebrow">My Decision Briefing</p><h1>{greeting()}{firstName ? `, ${firstName}` : ""}</h1>{data && <p className="briefing-lead"><strong>{data.briefs.length}</strong> decision{data.briefs.length === 1 ? "" : "s"} require your attention <span /> <strong>{data.monitoring.length}</strong> relevant development{data.monitoring.length === 1 ? " is" : "s are"} being monitored</p>}</div><span className="page-status"><i />{connection}</span></section>

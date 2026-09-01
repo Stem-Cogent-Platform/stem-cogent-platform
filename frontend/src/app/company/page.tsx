@@ -14,8 +14,13 @@ type Company = { profile: null | { company_type?: string; headquarters_country?:
 
 export default function CompanyPage() {
   const [state, setState] = useState<LoadState<Company>>({ status: "loading" });
-  const load = useCallback(async () => { try { setState({ status: "loading" }); setState({ status: "ready", data: await apiRequest<Company>("/api/v1/company/briefs") }); } catch (error) { setState({ status: "error", message: error instanceof Error ? error.message : "Company Lens could not be loaded." }); } }, []);
+  const [phase5Ui, setPhase5Ui] = useState(false);
+  const load = useCallback(async () => { try { setState({ status: "loading" }); const [data, capabilities] = await Promise.all([apiRequest<Company>("/api/v1/company/briefs"), apiRequest<{ phase5_new_ui_enabled: boolean }>("/api/v1/capabilities")]); setPhase5Ui(capabilities.phase5_new_ui_enabled); setState({ status: "ready", data }); } catch (error) { setState({ status: "error", message: error instanceof Error ? error.message : "Company Lens could not be loaded." }); } }, []);
   useEffect(() => { const timer = window.setTimeout(() => void load(), 0); return () => window.clearTimeout(timer); }, [load]);
+
+  if (state.status === "ready" && !phase5Ui) {
+    return <WorkspaceShell><section className="content-page"><div className="page-heading"><div><p className="eyebrow">Shared organisational view</p><h1>Company Lens</h1></div><Link className="secondary-button" href="/briefing">Switch to My Lens</Link></div><section className="company-summary"><div><small>Markets</small><strong>{state.data.profile?.operating_markets.join(", ") || "Context incomplete"}</strong></div><div><small>Strategic priorities</small><strong>{state.data.profile?.strategic_priorities.join(", ") || "Not configured"}</strong></div><div><small>Open material briefs</small><strong>{state.data.briefs.length}</strong></div></section><div className="card-list">{state.data.briefs.length ? state.data.briefs.map((brief) => <BriefCard brief={brief} key={brief.id} phase5Ui={false} />) : <section className="empty-brief"><h2>No company-level Decision Briefs are open.</h2><p>Stem will surface a brief when stored evidence and Company Context meet the materiality threshold.</p></section>}</div></section></WorkspaceShell>;
+  }
 
   return <WorkspaceShell><section className="content-page"><div className="page-heading"><div><p className="eyebrow">Shared organisational view</p><h1>Company Lens</h1></div><Link className="secondary-button" href="/briefing">Switch to My Lens</Link></div>
     {state.status === "loading" && <ModuleLoading />}{state.status === "error" && <ModuleFailure message={state.message} retry={() => void load()} />}

@@ -427,6 +427,8 @@ async def _persist_brief(
     assessment: Any,
     evidence_ids: tuple[UUID, ...],
 ) -> BriefWrite:
+    settings = get_settings()
+    lifecycle_enabled = settings.PHASE5_BRIEF_LIFECYCLE_ENABLED
     guidance = (
         generate_decision_paths(
             assessment.decision_type,
@@ -434,7 +436,7 @@ async def _persist_brief(
             evidence_ids,
             tuple(narrative.uncertainties),
         )
-        if get_settings().PHASE5_DECISION_PATHS_ENABLED
+        if settings.PHASE5_DECISION_PATHS_ENABLED
         else None
     )
     existing = (
@@ -458,7 +460,7 @@ async def _persist_brief(
             },
         )
     ).mappings().one_or_none()
-    material = existing is not None and any(
+    material = lifecycle_enabled and existing is not None and any(
         (
             existing["personal_priority_score"] != priority_score,
             existing["what_changed"] != narrative.what_changed,
@@ -493,7 +495,9 @@ async def _persist_brief(
                   :tenant_id, :user_id, :assessment_id, :signal_id, :lens_version,
                   :priority_score, :what_changed, :why, :exposure, :stakes,
                   :prompt, :owners, :uncertainties, :evidence_ids,
-                  'deterministic', 'decision-formatter-v1',NOW(),NOW(),
+                  'deterministic', 'decision-formatter-v1',
+                  CASE WHEN CAST(:lifecycle_enabled AS BOOLEAN) THEN NOW() ELSE NULL END,
+                  CASE WHEN CAST(:lifecycle_enabled AS BOOLEAN) THEN NOW() ELSE NULL END,
                   :gaps,CAST(:options AS JSONB),:validation,:guidance_status,
                   CASE WHEN :guidance_enabled THEN NOW() ELSE NULL END,:guidance_version
                 )
@@ -518,7 +522,11 @@ async def _persist_brief(
                   material_change_count = CASE WHEN :material
                     THEN decision.briefs.material_change_count + 1
                     ELSE decision.briefs.material_change_count END,
-                  updated_at = CASE WHEN :material THEN NOW() ELSE decision.briefs.updated_at END
+                  updated_at = CASE
+                    WHEN CAST(:lifecycle_enabled AS BOOLEAN) THEN
+                      CASE WHEN :material THEN NOW() ELSE decision.briefs.updated_at END
+                    ELSE NOW()
+                  END
                 RETURNING id
                 """
             ),
@@ -538,6 +546,7 @@ async def _persist_brief(
                 "uncertainties": list(narrative.uncertainties),
                 "evidence_ids": list(evidence_ids),
                 "material": material,
+                "lifecycle_enabled": lifecycle_enabled,
                 "gaps": guidance.gaps_summary if guidance else None,
                 "options": json.dumps(
                     [option.as_json() for option in guidance.response_options]
@@ -552,7 +561,7 @@ async def _persist_brief(
         )
     ).scalar_one()
     event_type = "BRIEF_CREATED" if existing is None else "BRIEF_UPDATED" if material else None
-    if event_type:
+    if event_type and lifecycle_enabled:
         await session.execute(
             text(
                 """
