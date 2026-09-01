@@ -101,6 +101,7 @@ async def test_system_admin_grant_is_scoped_audited_and_closes_database(monkeypa
 
     assert result == {"status": "granted", "tenant_name": "Stem Internal Operations"}
     assert any("SYSTEM_ADMIN_GRANTED" in statement for statement in connection.statements)
+    assert any("CAST(:previous_role AS TEXT)" in statement for statement in connection.statements)
     assert any("permission_role='SYSTEM_ADMIN'" in statement for statement in connection.statements)
     close.assert_awaited_once()
 
