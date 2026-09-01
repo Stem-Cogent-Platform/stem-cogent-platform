@@ -66,6 +66,7 @@ variables {
     database_credentials       = "arn:aws:secretsmanager:eu-west-1:123456789012:secret:sc/staging/rds/stemcogent/credentials-a"
     redis_auth_token           = "arn:aws:secretsmanager:eu-west-1:123456789012:secret:sc/staging/elasticache/redis/auth-token-a"
     jwt_signing_secret         = "arn:aws:secretsmanager:eu-west-1:123456789012:secret:sc/staging/auth/jwt-signing-secret-a"
+    system_admin_mfa_secret    = "arn:aws:secretsmanager:eu-west-1:123456789012:secret:sc/staging/auth/system-admin-mfa-secret-a"
     openai_api_key             = "arn:aws:secretsmanager:eu-west-1:123456789012:secret:sc/staging/llm/openai/api-key-a"
     groq_api_key               = "arn:aws:secretsmanager:eu-west-1:123456789012:secret:sc/staging/llm/groq/api-key-a"
     resend_api_key             = "arn:aws:secretsmanager:eu-west-1:123456789012:secret:sc/staging/email/resend/api-key-a"
@@ -183,6 +184,26 @@ run "maps_pipeline_permissions_to_real_transitions" {
       strcontains(aws_iam_role_policy.task["normalization-worker"].policy, "sc-entity-review-staging"),
     ])
     error_message = "Consolidated Phase 2 runtimes must be authorized for every queue transition performed by their code."
+  }
+}
+
+run "allows_only_the_api_to_read_the_system_admin_mfa_secret" {
+  command = plan
+
+  assert {
+    condition = strcontains(
+      aws_iam_role_policy.task["api-service"].policy,
+      "sc/staging/auth/system-admin-mfa-secret-a",
+    )
+    error_message = "The API task role must be able to read the configured system-admin MFA secret."
+  }
+
+  assert {
+    condition = alltrue([
+      for service, policy in aws_iam_role_policy.task :
+      service == "api-service" || !strcontains(policy.policy, "system-admin-mfa-secret")
+    ])
+    error_message = "The system-admin MFA secret must not be exposed to non-API task roles."
   }
 }
 
