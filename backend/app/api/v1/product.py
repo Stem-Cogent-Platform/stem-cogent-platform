@@ -284,7 +284,10 @@ async def record_decision_action(
                 tenant_id,brief_id,event_type,event_metadata
             ) VALUES (
                 :tenant_id,:brief_id,'STATUS_CHANGED',
-                jsonb_build_object('status',:status,'action_type',:action_type)
+                jsonb_build_object(
+                    'status',CAST(:status AS TEXT),
+                    'action_type',CAST(:action_type AS TEXT)
+                )
             )
             """
         ),

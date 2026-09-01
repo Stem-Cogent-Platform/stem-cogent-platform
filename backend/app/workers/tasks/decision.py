@@ -560,7 +560,9 @@ async def _persist_brief(
                     tenant_id,brief_id,event_type,event_metadata
                 ) VALUES (
                     :tenant_id,:brief_id,:event_type,
-                    jsonb_build_object('evidence_count',:evidence_count)
+                    jsonb_build_object(
+                        'evidence_count',CAST(:evidence_count AS INTEGER)
+                    )
                 )
                 """
             ),

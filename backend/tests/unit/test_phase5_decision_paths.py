@@ -1,8 +1,15 @@
+import inspect
 from uuid import uuid4
 
 import pytest
 
 from app.intelligence.decision_paths import generate_decision_paths
+from app.workers.tasks import decision
+
+
+def test_brief_event_audit_types_polymorphic_json_value() -> None:
+    source = inspect.getsource(decision._persist_brief)
+    assert "CAST(:evidence_count AS INTEGER)" in source
 
 
 @pytest.mark.parametrize(

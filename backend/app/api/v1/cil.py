@@ -108,7 +108,9 @@ async def query_cil(
                     tenant_id,user_id,event_name,object_type,object_id,metadata
                 ) VALUES (
                     :tenant_id,:user_id,'CIL_QUERY_SUBMITTED',:object_type,
-                    :object_id,jsonb_build_object('grounded',:grounded)
+                    :object_id,jsonb_build_object(
+                        'grounded',CAST(:grounded AS BOOLEAN)
+                    )
                 )
                 """
             ),

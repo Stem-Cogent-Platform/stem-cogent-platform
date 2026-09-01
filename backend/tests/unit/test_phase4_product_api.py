@@ -117,6 +117,8 @@ async def test_brief_listing_detail_and_action_paths() -> None:
     )
     assert action["id"] == str(action_id)
     assert "brief_status" in action_session.statements[1]
+    assert "CAST(:status AS TEXT)" in action_session.statements[2]
+    assert "CAST(:action_type AS TEXT)" in action_session.statements[2]
     assert action_session.commits == 1
 
     missing = context(Session(Result(row=None)))
