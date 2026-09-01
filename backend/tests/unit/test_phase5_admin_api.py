@@ -161,8 +161,10 @@ async def test_tenant_detail_lists_and_not_found_paths() -> None:
     listed = await admin.list_tenants(system_context(Session(Result(rows=[{"id": tenant_id}]))))
     assert listed == [{"id": str(tenant_id)}]
 
-    detail = await admin.get_tenant(tenant_id, system_context(Session(*detail_results(tenant_id))))
+    detail_session = Session(*detail_results(tenant_id))
+    detail = await admin.get_tenant(tenant_id, system_context(detail_session))
     assert all(detail["checklist"].values())
+    assert "resolution_status IN ('RESOLVED','NOT_APPLICABLE')" in detail_session.statements[0]
     with pytest.raises(HTTPException) as missing:
         await admin.get_tenant(tenant_id, system_context(Session(Result(row=None))))
     assert missing.value.status_code == 404
