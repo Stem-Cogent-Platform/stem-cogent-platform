@@ -1,8 +1,22 @@
+import inspect
 from uuid import uuid4
 
 import pytest
 
 from app.intelligence.decision_paths import generate_decision_paths
+from app.workers.tasks import decision
+
+
+def test_brief_event_audit_types_polymorphic_json_value() -> None:
+    source = inspect.getsource(decision._persist_brief)
+    assert "CAST(:evidence_count AS INTEGER)" in source
+
+
+def test_brief_lifecycle_worker_writes_are_feature_gated() -> None:
+    source = inspect.getsource(decision._persist_brief)
+    assert "settings.PHASE5_BRIEF_LIFECYCLE_ENABLED" in source
+    assert "if event_type and lifecycle_enabled" in source
+    assert "CAST(:lifecycle_enabled AS BOOLEAN)" in source
 
 
 @pytest.mark.parametrize(

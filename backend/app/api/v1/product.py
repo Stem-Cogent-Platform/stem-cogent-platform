@@ -89,6 +89,20 @@ class ProductEventInput(BaseModel):
         return value
 
 
+@router.get("/capabilities")
+async def product_capabilities(
+    context: RequestContext = Depends(get_request_context),
+) -> dict[str, bool]:
+    """Expose only safe rollout state needed by the authenticated product UI."""
+
+    del context
+    settings = get_settings()
+    return {
+        "phase5_brief_lifecycle_enabled": settings.PHASE5_BRIEF_LIFECYCLE_ENABLED,
+        "phase5_new_ui_enabled": settings.PHASE5_NEW_UI_ENABLED,
+    }
+
+
 @router.get("/briefs")
 async def list_briefs(
     status_filter: str | None = Query(default=None, alias="status", max_length=30),
@@ -238,9 +252,11 @@ async def get_brief(
             ),
         )
     await context.session.commit()
+    lifecycle_enabled = get_settings().PHASE5_BRIEF_LIFECYCLE_ENABLED
     return jsonable_encoder({**dict(row), "evidence": [dict(item) for item in evidence],
                              "actions": [dict(item) for item in actions],
-                             "timeline": [dict(item) for item in timeline]})
+                             "timeline": [dict(item) for item in timeline]
+                             if lifecycle_enabled else []})
 
 
 @router.post("/briefs/{brief_id}/actions", status_code=status.HTTP_201_CREATED)
@@ -271,26 +287,45 @@ async def record_decision_action(
     if row is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Decision Brief not found")
     next_status = "WATCHING" if body.action_type == "ACKNOWLEDGED" else body.action_type
-    await context.session.execute(
-        text("UPDATE decision.briefs SET brief_status=:status,updated_at=NOW(),"
-             "last_material_change_at=NOW(),material_change_count=material_change_count+1 "
-             "WHERE id=:brief_id AND tenant_id=:tenant_id"),
-        {"status": next_status, "brief_id": brief_id, "tenant_id": context.principal.tenant_id},
-    )
-    await context.session.execute(
-        text(
-            """
-            INSERT INTO decision.brief_events (
-                tenant_id,brief_id,event_type,event_metadata
-            ) VALUES (
-                :tenant_id,:brief_id,'STATUS_CHANGED',
-                jsonb_build_object('status',:status,'action_type',:action_type)
-            )
-            """
-        ),
-        {"tenant_id": context.principal.tenant_id, "brief_id": brief_id,
-         "status": next_status, "action_type": body.action_type},
-    )
+    lifecycle_enabled = get_settings().PHASE5_BRIEF_LIFECYCLE_ENABLED
+    update_parameters = {"status": next_status, "brief_id": brief_id,
+                         "tenant_id": context.principal.tenant_id}
+    if lifecycle_enabled:
+        await context.session.execute(
+            text(
+                "UPDATE decision.briefs SET brief_status=:status,updated_at=NOW(),"
+                "last_material_change_at=NOW(),"
+                "material_change_count=material_change_count+1 "
+                "WHERE id=:brief_id AND tenant_id=:tenant_id"
+            ),
+            update_parameters,
+        )
+    else:
+        await context.session.execute(
+            text(
+                "UPDATE decision.briefs SET brief_status=:status,updated_at=NOW() "
+                "WHERE id=:brief_id AND tenant_id=:tenant_id"
+            ),
+            update_parameters,
+        )
+    if lifecycle_enabled:
+        await context.session.execute(
+            text(
+                """
+                INSERT INTO decision.brief_events (
+                    tenant_id,brief_id,event_type,event_metadata
+                ) VALUES (
+                    :tenant_id,:brief_id,'STATUS_CHANGED',
+                    jsonb_build_object(
+                        'status',CAST(:status AS TEXT),
+                        'action_type',CAST(:action_type AS TEXT)
+                    )
+                )
+                """
+            ),
+            {"tenant_id": context.principal.tenant_id, "brief_id": brief_id,
+             "status": next_status, "action_type": body.action_type},
+        )
     await _audit(context, "DECISION_ACTION_RECORDED", "DECISION_BRIEF", brief_id,
                  {"action_type": body.action_type, "action_id": str(row["id"])})
     if body.action_type in {"ESCALATED", "ACTED_ON"}:
@@ -843,6 +878,16 @@ async def briefing_changes(
     since: datetime | None = Query(default=None),
     context: RequestContext = Depends(get_request_context),
 ) -> dict[str, Any]:
+    if not get_settings().PHASE5_BRIEF_LIFECYCLE_ENABLED:
+        return {
+            "new_briefs": 0,
+            "updated_briefs": 0,
+            "new_evidence_items": 0,
+            "new_relevant_monitoring": 0,
+            "critical_count": 0,
+            "since": since or datetime.now(UTC),
+            "enabled": False,
+        }
     if since is None:
         since = (
             await context.session.execute(
@@ -897,7 +942,7 @@ async def briefing_changes(
             ProductEventInput(event_name="BRIEFING_VIEWED", occurred_at=datetime.now(UTC)),
         )
         await context.session.commit()
-    return jsonable_encoder({**dict(values), "since": since})
+    return jsonable_encoder({**dict(values), "since": since, "enabled": True})
 
 
 @router.post("/events", status_code=status.HTTP_202_ACCEPTED)
