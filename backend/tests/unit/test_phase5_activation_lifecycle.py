@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from uuid import uuid4
@@ -7,6 +8,12 @@ from uuid import uuid4
 import pytest
 
 from app.workers.tasks import pilot_activation
+
+
+def test_activation_audit_types_polymorphic_json_value() -> None:
+    source = inspect.getsource(pilot_activation.run_activation)
+    assert "ACTIVATION_RUN_COMPLETED" in source
+    assert "CAST(:scanned AS INTEGER)" in source
 
 
 class Result:

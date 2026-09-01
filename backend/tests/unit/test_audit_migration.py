@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -94,3 +95,25 @@ def test_application_and_owner_paths_cannot_mutate_audit_rows() -> None:
     # Later hardening migrations may repeat the revocation defensively. Both the
     # partitioned parent and default partition must remain covered.
     assert sql.count("REVOKE UPDATE, DELETE, TRUNCATE ON audit.events") >= 2
+
+
+def test_every_application_audit_insert_supplies_required_timestamp() -> None:
+    insert_pattern = re.compile(
+        r"INSERT\s+INTO\s+audit\.events\s*\((?P<columns>[^)]*)\)",
+        re.IGNORECASE | re.DOTALL,
+    )
+    inserts: list[tuple[Path, str]] = []
+    for path in (BACKEND_ROOT / "app").rglob("*.py"):
+        source = path.read_text(encoding="utf-8")
+        inserts.extend(
+            (path, match.group("columns"))
+            for match in insert_pattern.finditer(source)
+        )
+
+    assert inserts, "No application audit inserts were discovered"
+    missing = [
+        str(path.relative_to(BACKEND_ROOT))
+        for path, columns in inserts
+        if "occurred_at" not in {column.strip().casefold() for column in columns.split(",")}
+    ]
+    assert not missing, f"audit.events inserts missing occurred_at: {missing}"
