@@ -1,5 +1,8 @@
+import inspect
+
 import pytest
 
+from app.api.v1 import auth_sessions
 from app.api.v1.admin import router as admin_router
 from app.authn.totp import verify_totp
 from app.ops import grant_system_admin
@@ -60,6 +63,13 @@ def test_internal_admin_api_uses_versioned_private_route() -> None:
     paths = {route.path for route in admin_router.routes}
     assert "/api/v1/internal/admin/tenants" in paths
     assert "/internal/admin/tenants" not in paths
+
+
+def test_system_admin_login_audit_records_required_timestamp() -> None:
+    source = inspect.getsource(auth_sessions.admin_mfa_login)
+    assert "SYSTEM_ADMIN_LOGIN" in source
+    assert "occurred_at" in source
+    assert "NOW()" in source
 
 
 @pytest.mark.asyncio

@@ -291,10 +291,11 @@ async def admin_mfa_login(
             text(
                 """
                 INSERT INTO audit.events (
-                    tenant_id,actor_user_id,event_type,entity_type,entity_id,event_data
+                    tenant_id,actor_user_id,event_type,entity_type,entity_id,event_data,
+                    occurred_at
                 ) VALUES (
                     :tenant_id,:user_id,'SYSTEM_ADMIN_LOGIN','USER',:user_id,
-                    jsonb_build_object('mfa',true)
+                    jsonb_build_object('mfa',true),NOW()
                 )
                 """
             ),

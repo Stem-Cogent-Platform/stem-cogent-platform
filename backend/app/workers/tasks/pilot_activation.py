@@ -165,7 +165,9 @@ async def run_activation(payload: dict[str, Any]) -> str:
                     tenant_id,event_type,entity_type,entity_id,event_data,occurred_at
                 ) VALUES (
                     :tenant_id,'ACTIVATION_RUN_COMPLETED','ACTIVATION_RUN',:run_id,
-                    jsonb_build_object('global_outputs_scanned',:scanned),NOW()
+                    jsonb_build_object(
+                        'global_outputs_scanned',CAST(:scanned AS INTEGER)
+                    ),NOW()
                 )
                 """
             ),
