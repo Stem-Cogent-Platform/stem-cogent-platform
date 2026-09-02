@@ -302,7 +302,17 @@ async def _tenant_detail(context: RequestContext, tenant_id: UUID) -> dict[str, 
             text(
                 """
                 SELECT tenant.id, tenant.name, tenant.slug, tenant.status, tenant.plan_tier,
-                       engagement.*, profile.business_categories, profile.operating_markets,
+                       engagement.id AS engagement_id,
+                       engagement.status AS pilot_status,
+                       engagement.started_at, engagement.ends_at,
+                       engagement.owner_user_id, engagement.cohort_code,
+                       engagement.conversion_outcome, engagement.conversion_note,
+                       engagement.created_at AS pilot_created_at,
+                       engagement.updated_at AS pilot_updated_at,
+                       engagement.company_website, engagement.pilot_owner,
+                       engagement.internal_notes, engagement.readiness_override_note,
+                       engagement.first_useful_brief_available_at,
+                       profile.business_categories, profile.operating_markets,
                        profile.strategic_priorities, profile.profile_completeness,
                        (SELECT COUNT(*) FROM context.company_objects object
                         WHERE object.tenant_id=tenant.id AND object.active) AS object_count,
@@ -347,7 +357,8 @@ async def _tenant_detail(context: RequestContext, tenant_id: UUID) -> dict[str, 
         "user_accepted": values.get("accepted_invites", 0) > 0,
         "decision_lens_complete": values.get("lens_count", 0) > 0,
         "focus_areas_complete": values.get("focus_count", 0) > 0,
-        "pilot_active": values.get("status") == "ACTIVE" and values.get("started_at") is not None,
+        "pilot_active": values.get("pilot_status") == "ACTIVE"
+        and values.get("started_at") is not None,
     }
     objects = (
         await context.session.execute(
