@@ -70,8 +70,10 @@ def system_context(session: Session, *, role: str = "SYSTEM_ADMIN", methods=("mf
 def detail_results(tenant_id, **overrides) -> list[Result]:
     row = {
         "id": tenant_id,
+        "engagement_id": uuid4(),
         "name": "Acme",
         "status": "ACTIVE",
+        "pilot_status": "ACTIVE",
         "started_at": datetime.now(UTC),
         "profile_completeness": 1,
         "operating_markets": ["Nigeria"],
@@ -176,12 +178,25 @@ async def test_create_and_patch_tenant_return_readiness_detail() -> None:
 @pytest.mark.asyncio
 async def test_tenant_detail_lists_and_not_found_paths() -> None:
     tenant_id = uuid4()
+    engagement_id = uuid4()
     listed = await admin.list_tenants(system_context(Session(Result(rows=[{"id": tenant_id}]))))
     assert listed == [{"id": str(tenant_id)}]
 
-    detail_session = Session(*detail_results(tenant_id))
+    detail_session = Session(
+        *detail_results(
+            tenant_id,
+            engagement_id=engagement_id,
+            status="TRIAL",
+            pilot_status="ACTIVE",
+        )
+    )
     detail = await admin.get_tenant(tenant_id, system_context(detail_session))
     assert all(detail["checklist"].values())
+    assert detail["tenant"]["id"] == str(tenant_id)
+    assert detail["tenant"]["engagement_id"] == str(engagement_id)
+    assert detail["tenant"]["status"] == "TRIAL"
+    assert detail["tenant"]["pilot_status"] == "ACTIVE"
+    assert "engagement.*" not in detail_session.statements[0]
     assert "resolution_status IN ('RESOLVED','NOT_APPLICABLE')" in detail_session.statements[0]
     with pytest.raises(HTTPException) as missing:
         await admin.get_tenant(tenant_id, system_context(Session(Result(row=None))))
