@@ -138,6 +138,24 @@ async def test_create_and_patch_tenant_return_readiness_detail() -> None:
     assert created["checklist"]["entities_resolved"] is True
     assert create_session.commits == 1
     assert sum("company_objects" in statement for statement in create_session.statements) >= 4
+    object_parameters = [
+        parameters
+        for statement, parameters in zip(
+            create_session.statements, create_session.parameters, strict=True
+        )
+        if "INSERT INTO context.company_objects" in statement
+    ]
+    assert [parameters["resolution_status"] for parameters in object_parameters] == [
+        "NOT_APPLICABLE",
+        "UNRESOLVED",
+        "UNRESOLVED",
+        "UNRESOLVED",
+    ]
+    assert all(
+        "CASE WHEN" not in statement
+        for statement in create_session.statements
+        if "INSERT INTO context.company_objects" in statement
+    )
 
     tenant_id = uuid4()
     patch_session = Session(Result(), Result(), Result(), *detail_results(tenant_id))

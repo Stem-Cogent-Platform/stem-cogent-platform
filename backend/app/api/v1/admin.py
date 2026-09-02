@@ -191,19 +191,27 @@ async def create_tenant(
         ("COMPETITOR", body.competitors),
     ):
         for value in values:
+            resolution_status = (
+                "UNRESOLVED"
+                if object_type in {"MARKET", "DEPENDENCY", "COMPETITOR"}
+                else "NOT_APPLICABLE"
+            )
             await context.session.execute(
                 text(
                     """
                     INSERT INTO context.company_objects (
                         tenant_id,object_type,name,resolution_status
                     ) VALUES (
-                        :tenant_id,:object_type,:name,
-                        CASE WHEN :object_type IN ('MARKET','DEPENDENCY','COMPETITOR')
-                             THEN 'UNRESOLVED' ELSE 'NOT_APPLICABLE' END
+                        :tenant_id,:object_type,:name,:resolution_status
                     )
                     """
                 ),
-                {"tenant_id": tenant_id, "object_type": object_type, "name": value},
+                {
+                    "tenant_id": tenant_id,
+                    "object_type": object_type,
+                    "name": value,
+                    "resolution_status": resolution_status,
+                },
             )
     await _audit(context, "TENANT_CREATED", tenant_id, "TENANT", tenant_id)
     await context.session.commit()
