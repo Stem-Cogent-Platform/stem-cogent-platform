@@ -39,10 +39,12 @@ class Session:
     def __init__(self, *results: Result) -> None:
         self.results = list(results)
         self.statements: list[str] = []
+        self.parameters: list[dict | None] = []
         self.commits = 0
 
     async def execute(self, statement, parameters=None) -> Result:
         self.statements.append(str(statement))
+        self.parameters.append(parameters)
         return self.results.pop(0)
 
     async def commit(self) -> None:
@@ -61,7 +63,9 @@ async def test_ready_user_starts_exact_21_day_trial(monkeypatch) -> None:
     tenant_id, user_id, engagement_id = uuid4(), uuid4(), uuid4()
     session = Session(
         Result(),
-        Result(row={"accepted": True, "lens": True, "focus": True, "first_value": True}),
+        Result(
+            row={"accepted": True, "lens": True, "focus": True, "first_value": True}
+        ),
         Result(scalar=engagement_id),
         Result(),
         Result(),
@@ -74,7 +78,31 @@ async def test_ready_user_starts_exact_21_day_trial(monkeypatch) -> None:
     await pilot_activation._maybe_start_trial(tenant_id, user_id)
 
     assert session.commits == 1
-    assert sum("pilot.checkpoints" in statement for statement in session.statements) == 3
+    assert (
+        sum("pilot.checkpoints" in statement for statement in session.statements) == 3
+    )
+    checkpoint_parameters = [
+        parameters
+        for statement, parameters in zip(
+            session.statements, session.parameters, strict=True
+        )
+        if "pilot.checkpoints" in statement
+    ]
+    assert [parameters["day_number"] for parameters in checkpoint_parameters] == [
+        7,
+        14,
+        21,
+    ]
+    assert [parameters["interval_days"] for parameters in checkpoint_parameters] == [
+        7,
+        14,
+        21,
+    ]
+    assert all(
+        ":day_number" in statement and ":interval_days" in statement
+        for statement in session.statements
+        if "pilot.checkpoints" in statement
+    )
     assert any("PILOT_ACTIVATED" in statement for statement in session.statements)
 
 
@@ -83,7 +111,9 @@ async def test_incomplete_or_started_pilot_is_not_restarted(monkeypatch) -> None
     tenant_id, user_id = uuid4(), uuid4()
     incomplete = Session(
         Result(),
-        Result(row={"accepted": True, "lens": False, "focus": True, "first_value": True}),
+        Result(
+            row={"accepted": True, "lens": False, "focus": True, "first_value": True}
+        ),
     )
     monkeypatch.setattr(pilot_activation, "get_session", session_source(incomplete))
     await pilot_activation._maybe_start_trial(tenant_id, user_id)
@@ -91,7 +121,9 @@ async def test_incomplete_or_started_pilot_is_not_restarted(monkeypatch) -> None
 
     started = Session(
         Result(),
-        Result(row={"accepted": True, "lens": True, "focus": True, "first_value": True}),
+        Result(
+            row={"accepted": True, "lens": True, "focus": True, "first_value": True}
+        ),
         Result(scalar=None),
     )
     monkeypatch.setattr(pilot_activation, "get_session", session_source(started))
@@ -100,7 +132,9 @@ async def test_incomplete_or_started_pilot_is_not_restarted(monkeypatch) -> None
 
 
 @pytest.mark.asyncio
-async def test_personalisation_rebuilds_each_output_then_checks_readiness(monkeypatch) -> None:
+async def test_personalisation_rebuilds_each_output_then_checks_readiness(
+    monkeypatch,
+) -> None:
     tenant_id, user_id = uuid4(), uuid4()
     outputs = [
         {"global_output_id": uuid4(), "signal_id": uuid4()},
@@ -128,7 +162,9 @@ async def test_personalisation_rebuilds_each_output_then_checks_readiness(monkey
 
 
 @pytest.mark.asyncio
-async def test_failure_and_completion_helpers_persist_bounded_events(monkeypatch) -> None:
+async def test_failure_and_completion_helpers_persist_bounded_events(
+    monkeypatch,
+) -> None:
     tenant_id, run_id = uuid4(), uuid4()
     session = Session(Result())
     await pilot_activation._finish_failed(session, run_id, tenant_id, "x" * 2000)
@@ -147,7 +183,9 @@ async def test_failure_and_completion_helpers_persist_bounded_events(monkeypatch
     monkeypatch.setattr(
         pilot_activation,
         "get_settings",
-        lambda: SimpleNamespace(SQS_PIPELINE_RECOMMENDED_URL="https://sqs.example/recommended"),
+        lambda: SimpleNamespace(
+            SQS_PIPELINE_RECOMMENDED_URL="https://sqs.example/recommended"
+        ),
     )
     await pilot_activation._publish_completed(
         run_id,
@@ -167,7 +205,9 @@ async def test_failure_and_completion_helpers_persist_bounded_events(monkeypatch
 
 
 def test_celery_entrypoints_delegate_and_acknowledge(monkeypatch) -> None:
-    monkeypatch.setattr(pilot_activation, "run_async_worker", lambda callback: "delegated")
+    monkeypatch.setattr(
+        pilot_activation, "run_async_worker", lambda callback: "delegated"
+    )
     assert pilot_activation.activate_pilot({}) == "delegated"
     assert pilot_activation.personalise_pilot_user({}) == "delegated"
     assert pilot_activation.activation_completed({}) == "ACKNOWLEDGED"
