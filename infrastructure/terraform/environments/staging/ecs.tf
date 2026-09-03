@@ -30,12 +30,12 @@ locals {
       SYNTHESIS_ENABLED                     = "true"
       CIL_ENABLED                           = "true"
       CLICKHOUSE_ENABLED                    = "false"
-      PHASE5_PILOT_INVITES_ENABLED          = "false"
-      PHASE5_FIRST_VALUE_ACTIVATION_ENABLED = "false"
-      PHASE5_BRIEF_LIFECYCLE_ENABLED        = "false"
-      PHASE5_DECISION_PATHS_ENABLED         = "false"
-      PHASE5_NEW_UI_ENABLED                 = "false"
-      PHASE5_PRODUCT_ANALYTICS_ENABLED      = "false"
+      PHASE5_PILOT_INVITES_ENABLED          = "true"
+      PHASE5_FIRST_VALUE_ACTIVATION_ENABLED = "true"
+      PHASE5_BRIEF_LIFECYCLE_ENABLED        = "true"
+      PHASE5_DECISION_PATHS_ENABLED         = "true"
+      PHASE5_NEW_UI_ENABLED                 = "true"
+      PHASE5_PRODUCT_ANALYTICS_ENABLED      = "true"
     },
     {
       for queue_name, queue_url in module.sqs.queue_urls :
