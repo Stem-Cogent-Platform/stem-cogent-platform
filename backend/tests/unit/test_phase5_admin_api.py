@@ -230,6 +230,14 @@ async def test_invitation_create_and_revoke_are_audited(monkeypatch) -> None:
     assert created["id"] == invitation_id
     assert created["invitation_url"].startswith("https://app.staging.stem-cogent.com/invite/accept?token=")
     assert session.commits == 1
+    invitation_parameters = next(
+        parameters
+        for statement, parameters in zip(
+            session.statements, session.parameters, strict=True
+        )
+        if "INSERT INTO auth.tenant_invitations" in statement
+    )
+    assert invitation_parameters["actor"] is None
 
     revoke_session = Session(Result(row={"tenant_id": tenant_id}), Result())
     assert await admin.revoke_invitation(invitation_id, system_context(revoke_session)) == {"status": "REVOKED"}

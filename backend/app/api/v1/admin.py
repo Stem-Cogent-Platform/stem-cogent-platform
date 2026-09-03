@@ -435,6 +435,11 @@ async def create_invitation(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Pilot tenant not found")
     raw_token = secrets.token_urlsafe(48)
     token_hash = hashlib.sha256(raw_token.encode()).hexdigest()
+    invited_by = (
+        context.principal.user_id
+        if context.principal.tenant_id == tenant_id
+        else None
+    )
     await context.session.execute(
         text(
             "UPDATE auth.tenant_invitations SET status='REVOKED' "
@@ -457,7 +462,7 @@ async def create_invitation(
                 "tenant_id": tenant_id,
                 "email": body.email,
                 "role": body.permission_role,
-                "actor": context.principal.user_id,
+                "actor": invited_by,
                 "token_hash": token_hash,
                 "expires_at": datetime.now(UTC) + timedelta(hours=body.expires_in_hours),
             },
