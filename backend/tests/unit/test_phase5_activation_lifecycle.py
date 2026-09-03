@@ -119,6 +119,11 @@ async def test_personalisation_rebuilds_each_output_then_checks_readiness(monkey
 
     assert result == "PERSONALISED:2"
     assert decide.await_count == 2
+    for call in decide.await_args_list:
+        payload = call.args[0]["payload"]
+        assert isinstance(payload["global_output_id"], str)
+        assert isinstance(payload["signal_id"], str)
+        assert payload["tenant_id"] == str(tenant_id)
     readiness.assert_awaited_once_with(tenant_id, user_id)
 
 

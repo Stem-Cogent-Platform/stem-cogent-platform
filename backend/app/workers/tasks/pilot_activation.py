@@ -16,6 +16,15 @@ from app.workers.runtime import run_async_worker
 from app.workers.tasks.decision import run_decision_briefs
 
 
+def _decision_payload(output: dict[str, Any], tenant_id: UUID) -> dict[str, str]:
+    """Normalize database-driver UUIDs before crossing the event boundary."""
+    return {
+        "global_output_id": str(output["global_output_id"]),
+        "signal_id": str(output["signal_id"]),
+        "tenant_id": str(tenant_id),
+    }
+
+
 async def run_activation(payload: dict[str, Any]) -> str:
     tenant_id = UUID(payload["tenant_id"])
     run_id = UUID(payload["activation_run_id"])
@@ -101,10 +110,7 @@ async def run_activation(payload: dict[str, Any]) -> str:
                     "origin_service": "pilot-activation-worker",
                     "origin_timestamp": datetime.now(UTC).isoformat(),
                     "routing_key": "pipeline.synthesized",
-                    "payload": {
-                        **output,
-                        "tenant_id": str(tenant_id),
-                    },
+                    "payload": _decision_payload(output, tenant_id),
                 }
             )
     except Exception as exc:
@@ -211,7 +217,7 @@ async def personalise_user(payload: dict[str, Any]) -> str:
                 "origin_service": "pilot-personalisation-worker",
                 "origin_timestamp": datetime.now(UTC).isoformat(),
                 "routing_key": "pipeline.synthesized",
-                "payload": {**output, "tenant_id": str(tenant_id)},
+                "payload": _decision_payload(output, tenant_id),
             }
         )
     await _maybe_start_trial(tenant_id, user_id)
