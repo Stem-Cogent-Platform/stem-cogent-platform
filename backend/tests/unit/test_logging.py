@@ -55,6 +55,31 @@ def test_structured_formatter_serializes_exceptions() -> None:
     assert "RuntimeError: expected test failure" in record["exception"]
 
 
+def test_structured_formatter_removes_query_strings_from_access_logs() -> None:
+    stream = io.StringIO()
+    handler = logging.StreamHandler(stream)
+    handler.setFormatter(StructuredFormatter())
+    logger = logging.getLogger("uvicorn.access")
+    logger.handlers = [handler]
+    logger.propagate = False
+    logger.setLevel(logging.INFO)
+
+    logger.info(
+        '%s - "%s %s HTTP/%s" %d',
+        "127.0.0.1:1234",
+        "GET",
+        "/api/v1/auth/invitations/validate?token=sensitive-value&next=/home",
+        "1.1",
+        400,
+    )
+
+    record = json.loads(stream.getvalue())
+    assert record["message"] == (
+        '127.0.0.1:1234 - "GET /api/v1/auth/invitations/validate HTTP/1.1" 400'
+    )
+    assert "sensitive-value" not in stream.getvalue()
+
+
 def test_request_middleware_propagates_correlation_headers() -> None:
     output = io.StringIO()
     root_handler = logging.getLogger().handlers[0]
