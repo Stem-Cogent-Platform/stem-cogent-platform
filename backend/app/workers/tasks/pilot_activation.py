@@ -57,12 +57,16 @@ async def run_activation(payload: dict[str, Any]) -> str:
             return f"UNCHANGED:{existing or 'MISSING'}"
         profile_version = (
             await session.execute(
-                text("SELECT version FROM context.company_profiles WHERE tenant_id=:tenant_id"),
+                text(
+                    "SELECT version FROM context.company_profiles WHERE tenant_id=:tenant_id"
+                ),
                 {"tenant_id": tenant_id},
             )
         ).scalar_one_or_none()
         if profile_version != context_version:
-            await _finish_failed(session, run_id, tenant_id, "Company Context version changed")
+            await _finish_failed(
+                session, run_id, tenant_id, "Company Context version changed"
+            )
             return "FAILED:CONTEXT_VERSION_CHANGED"
         context_count = (
             await session.execute(
@@ -74,7 +78,9 @@ async def run_activation(payload: dict[str, Any]) -> str:
             )
         ).scalar_one()
         if context_count == 0:
-            await _finish_failed(session, run_id, tenant_id, "Company Context is incomplete")
+            await _finish_failed(
+                session, run_id, tenant_id, "Company Context is incomplete"
+            )
             return "FAILED:CONTEXT_INCOMPLETE"
         outputs = [
             dict(row)
@@ -91,7 +97,9 @@ async def run_activation(payload: dict[str, Any]) -> str:
                     ),
                     {"lookback_days": lookback_days},
                 )
-            ).mappings().all()
+            )
+            .mappings()
+            .all()
         ]
         await session.commit()
         break
@@ -122,9 +130,10 @@ async def run_activation(payload: dict[str, Any]) -> str:
     async for session in get_session():
         await _tenant(session, tenant_id)
         counts = (
-            await session.execute(
-                text(
-                    """
+            (
+                await session.execute(
+                    text(
+                        """
                     SELECT
                       (SELECT COUNT(*) FROM decision.assessments
                        WHERE tenant_id=:tenant_id AND company_context_version=:version
@@ -139,10 +148,17 @@ async def run_activation(payload: dict[str, Any]) -> str:
                          AND company_context_version=:version
                          AND last_verified_at>=:started_at) monitoring
                     """
-                ),
-                {"tenant_id": tenant_id, "version": context_version, "started_at": started_at},
+                    ),
+                    {
+                        "tenant_id": tenant_id,
+                        "version": context_version,
+                        "started_at": started_at,
+                    },
+                )
             )
-        ).mappings().one()
+            .mappings()
+            .one()
+        )
         final_status = "COMPLETED"
         await session.execute(
             text(
@@ -205,13 +221,20 @@ async def personalise_user(payload: dict[str, Any]) -> str:
                     ),
                     {"tenant_id": tenant_id},
                 )
-            ).mappings().all()
+            )
+            .mappings()
+            .all()
         ]
         break
     for output in outputs:
         await run_decision_briefs(
             {
-                "event_id": str(uuid5(NAMESPACE_URL, f"PERSONALISE:{user_id}:{output['global_output_id']}")),
+                "event_id": str(
+                    uuid5(
+                        NAMESPACE_URL,
+                        f"PERSONALISE:{user_id}:{output['global_output_id']}",
+                    )
+                ),
                 "event_type": "INTELLIGENCE_SYNTHESIZED",
                 "event_version": "2.0",
                 "origin_service": "pilot-personalisation-worker",
@@ -228,9 +251,10 @@ async def _maybe_start_trial(tenant_id: UUID, user_id: UUID) -> None:
     async for session in get_session():
         await _tenant(session, tenant_id)
         ready = (
-            await session.execute(
-                text(
-                    """
+            (
+                await session.execute(
+                    text(
+                        """
                     SELECT
                       EXISTS(SELECT 1 FROM auth.tenant_invitations
                              WHERE tenant_id=:tenant_id AND status='ACCEPTED') accepted,
@@ -246,10 +270,13 @@ async def _maybe_start_trial(tenant_id: UUID, user_id: UUID) -> None:
                                  WHERE tenant_id=:tenant_id
                                    AND readiness_override_note IS NOT NULL)) first_value
                     """
-                ),
-                {"tenant_id": tenant_id, "user_id": user_id},
+                    ),
+                    {"tenant_id": tenant_id, "user_id": user_id},
+                )
             )
-        ).mappings().one()
+            .mappings()
+            .one()
+        )
         if not all(ready.values()):
             return
         engagement_id = (
@@ -283,11 +310,19 @@ async def _maybe_start_trial(tenant_id: UUID, user_id: UUID) -> None:
                 text(
                     """
                     INSERT INTO pilot.checkpoints (tenant_id,engagement_id,day_number,due_at)
-                    VALUES (:tenant_id,:engagement_id,:day,NOW()+make_interval(days=>:day))
+                    VALUES (
+                        :tenant_id,:engagement_id,:day_number,
+                        NOW()+make_interval(days=>:interval_days)
+                    )
                     ON CONFLICT (engagement_id,day_number) DO NOTHING
                     """
                 ),
-                {"tenant_id": tenant_id, "engagement_id": engagement_id, "day": day},
+                {
+                    "tenant_id": tenant_id,
+                    "engagement_id": engagement_id,
+                    "day_number": day,
+                    "interval_days": day,
+                },
             )
         await session.execute(
             text(
@@ -298,7 +333,11 @@ async def _maybe_start_trial(tenant_id: UUID, user_id: UUID) -> None:
                           :engagement_id,'{}'::JSONB,NOW())
                 """
             ),
-            {"tenant_id": tenant_id, "user_id": user_id, "engagement_id": engagement_id},
+            {
+                "tenant_id": tenant_id,
+                "user_id": user_id,
+                "engagement_id": engagement_id,
+            },
         )
         await session.commit()
         return
@@ -311,7 +350,9 @@ async def _tenant(session: Any, tenant_id: UUID) -> None:
     )
 
 
-async def _finish_failed(session: Any, run_id: UUID, tenant_id: UUID, summary: str) -> None:
+async def _finish_failed(
+    session: Any, run_id: UUID, tenant_id: UUID, summary: str
+) -> None:
     await session.execute(
         text(
             "UPDATE context.activation_runs SET status='FAILED',completed_at=NOW(),"
