@@ -511,6 +511,11 @@ async def start_activation(
     ).scalar_one_or_none()
     if profile is None:
         raise HTTPException(status.HTTP_409_CONFLICT, "Company Context is incomplete")
+    initiated_by = (
+        context.principal.user_id
+        if context.principal.tenant_id == tenant_id
+        else None
+    )
     run_id = (
         await context.session.execute(
             text(
@@ -522,7 +527,7 @@ async def start_activation(
             ),
             {
                 "tenant_id": tenant_id,
-                "actor": context.principal.user_id,
+                "actor": initiated_by,
                 "lookback": body.lookback_days,
                 "version": profile,
             },

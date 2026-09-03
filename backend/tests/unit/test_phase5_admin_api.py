@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 from fastapi import HTTPException
@@ -56,10 +56,16 @@ class Session:
         self.commits += 1
 
 
-def system_context(session: Session, *, role: str = "SYSTEM_ADMIN", methods=("mfa",)) -> RequestContext:
+def system_context(
+    session: Session,
+    *,
+    role: str = "SYSTEM_ADMIN",
+    methods=("mfa",),
+    tenant_id: UUID | None = None,
+) -> RequestContext:
     principal = Principal(
         user_id=uuid4(),
-        tenant_id=uuid4(),
+        tenant_id=tenant_id or uuid4(),
         permission_role=role,
         permissions=frozenset({"SYSTEM_ADMIN"}),
         authentication_methods=frozenset(methods),
@@ -247,13 +253,23 @@ async def test_activation_dispatch_and_status_views(monkeypatch) -> None:
     )
     monkeypatch.setattr(admin.celery_app, "send_task", lambda *args, **kwargs: sent.update(args=args, kwargs=kwargs))
     session = Session(Result(scalar=3), Result(scalar=run_id), Result())
+    operator_tenant_id = uuid4()
+    assert operator_tenant_id != tenant_id
     queued = await admin.start_activation(
         tenant_id,
         admin.ActivationCreateInput(lookback_days=45),
-        system_context(session),
+        system_context(session, tenant_id=operator_tenant_id),
     )
     assert queued == {"id": run_id, "status": "QUEUED"}
     assert sent["kwargs"]["queue"] == "activation-queue"
+    activation_parameters = next(
+        parameters
+        for statement, parameters in zip(
+            session.statements, session.parameters, strict=True
+        )
+        if "INSERT INTO context.activation_runs" in statement
+    )
+    assert activation_parameters["actor"] is None
 
     rows = [{"id": run_id, "status": "COMPLETED"}]
     assert (await admin.tenant_activation(tenant_id, system_context(Session(Result(rows=rows)))))[0]["id"] == str(run_id)
