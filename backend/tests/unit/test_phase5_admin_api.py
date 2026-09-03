@@ -279,6 +279,60 @@ async def test_activation_dispatch_and_status_views(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
+async def test_activation_dispatch_failure_is_persisted_safely(monkeypatch) -> None:
+    tenant_id = uuid4()
+    run_id = uuid4()
+    monkeypatch.setattr(
+        admin,
+        "get_settings",
+        lambda: SimpleNamespace(
+            PHASE5_FIRST_VALUE_ACTIVATION_ENABLED=True,
+            SQS_PIPELINE_SYNTHESIZED_URL="https://sqs.example/activation-queue",
+        ),
+    )
+
+    def fail_dispatch(*args, **kwargs) -> None:
+        raise RuntimeError("provider detail that must not reach the response")
+
+    monkeypatch.setattr(admin.celery_app, "send_task", fail_dispatch)
+    session = Session(
+        Result(scalar=3),
+        Result(scalar=run_id),
+        Result(),
+        Result(),
+        Result(),
+    )
+
+    with pytest.raises(HTTPException) as unavailable:
+        await admin.start_activation(
+            tenant_id,
+            admin.ActivationCreateInput(lookback_days=45),
+            system_context(session),
+        )
+
+    assert unavailable.value.status_code == 503
+    assert unavailable.value.detail == "Activation worker unavailable"
+    assert "provider detail" not in unavailable.value.detail
+    assert session.commits == 2
+    failed_index = next(
+        index
+        for index, statement in enumerate(session.statements)
+        if "SET status='FAILED'" in statement
+    )
+    assert session.parameters[failed_index] == {
+        "failure_code": "ACTIVATION_DISPATCH_FAILED",
+        "run_id": run_id,
+        "tenant_id": tenant_id,
+    }
+    audit_index = next(
+        index
+        for index, parameters in enumerate(session.parameters)
+        if parameters and parameters.get("event_type") == "ACTIVATION_RUN_DISPATCH_FAILED"
+    )
+    assert "provider detail" not in str(session.parameters[audit_index])
+
+
+@pytest.mark.asyncio
 async def test_entity_review_pipeline_and_metrics_paths() -> None:
     tenant_id = uuid4()
     object_id = uuid4()

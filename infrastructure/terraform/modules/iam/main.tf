@@ -77,6 +77,7 @@ locals {
       consume = []
       publish = [
         "ingestion-priority",
+        "pipeline-synthesized",
         "feedback-events",
       ]
     }

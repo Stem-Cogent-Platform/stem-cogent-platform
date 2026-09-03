@@ -501,8 +501,12 @@ async def start_activation(
     body: ActivationCreateInput,
     context: RequestContext = Depends(get_system_admin_context),
 ) -> dict[str, Any]:
-    if not get_settings().PHASE5_FIRST_VALUE_ACTIVATION_ENABLED:
+    settings = get_settings()
+    if not settings.PHASE5_FIRST_VALUE_ACTIVATION_ENABLED:
         raise HTTPException(status.HTTP_409_CONFLICT, "First Value Activation is disabled")
+    queue_url = settings.SQS_PIPELINE_SYNTHESIZED_URL
+    if not queue_url:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "Activation worker unavailable")
     profile = (
         await context.session.execute(
             text("SELECT version FROM context.company_profiles WHERE tenant_id=:tenant_id"),
@@ -535,23 +539,48 @@ async def start_activation(
     ).scalar_one()
     await _audit(context, "ACTIVATION_RUN_STARTED", tenant_id, "ACTIVATION_RUN", run_id)
     await context.session.commit()
-    queue_url = get_settings().SQS_PIPELINE_SYNTHESIZED_URL
-    if not queue_url:
-        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "Activation worker unavailable")
     queue_name = queue_url.rstrip("/").rsplit("/", 1)[-1]
-    celery_app.send_task(
-        "app.workers.tasks.pilot_activation.activate_pilot",
-        args=[
+    try:
+        celery_app.send_task(
+            "app.workers.tasks.pilot_activation.activate_pilot",
+            args=[
+                {
+                    "tenant_id": str(tenant_id),
+                    "company_context_version": profile,
+                    "lookback_days": body.lookback_days,
+                    "activation_run_id": str(run_id),
+                }
+            ],
+            queue=queue_name,
+            task_id=str(run_id),
+        )
+    except Exception as exc:
+        failure_code = "ACTIVATION_DISPATCH_FAILED"
+        await context.session.execute(
+            text(
+                "UPDATE context.activation_runs SET status='FAILED',completed_at=NOW(),"
+                "error_summary=:failure_code WHERE id=:run_id AND tenant_id=:tenant_id "
+                "AND status='QUEUED'"
+            ),
             {
-                "tenant_id": str(tenant_id),
-                "company_context_version": profile,
-                "lookback_days": body.lookback_days,
-                "activation_run_id": str(run_id),
-            }
-        ],
-        queue=queue_name,
-        task_id=str(run_id),
-    )
+                "failure_code": failure_code,
+                "run_id": run_id,
+                "tenant_id": tenant_id,
+            },
+        )
+        await _audit(
+            context,
+            "ACTIVATION_RUN_DISPATCH_FAILED",
+            tenant_id,
+            "ACTIVATION_RUN",
+            run_id,
+            {"failure_code": failure_code},
+        )
+        await context.session.commit()
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "Activation worker unavailable",
+        ) from exc
     return {"id": run_id, "status": "QUEUED"}
 
 
