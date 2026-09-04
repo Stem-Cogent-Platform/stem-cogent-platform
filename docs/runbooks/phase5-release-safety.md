@@ -31,14 +31,14 @@ the address.
 
 ## Feature flags
 
-The six `PHASE5_*_ENABLED` settings default to `false` in application code and
-both deployment environments. Enable a capability in staging only after its
-focused tests and migration rehearsal pass. Production remains off until the
-matching staging acceptance record exists.
+The six `PHASE5_*_ENABLED` settings default to `false` in application code.
+They are enabled and persisted in staging after focused verification. They
+remain `false` in production until the matching staging acceptance record is
+complete.
 
 ## Database backup and rollback
 
-Before applying revisions `0023` through `0025`:
+Before applying revisions `0023` through `0027`:
 
 1. Create a manual RDS snapshot in the target environment and wait for
    `available`.
@@ -76,7 +76,7 @@ zero to one and must reach a completed `1/1` rollout before activation begins.
 1. Apply infrastructure and populate the system-admin MFA secret.
 2. Confirm every ECS service is stable, including production clustering `1/1`.
 3. Deploy to staging with all six Phase 5 flags off.
-4. Apply migrations `0023`, `0024`, and `0025` in staging.
+4. Apply migrations `0023` through `0027` in staging.
 5. Promote the nominated account with the explicit grant operation.
 6. Enable and verify the staging flags in dependency order: invites, first
    value activation, lifecycle, Decision Paths, new UI, then analytics.

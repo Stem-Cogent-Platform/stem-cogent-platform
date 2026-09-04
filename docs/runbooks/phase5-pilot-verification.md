@@ -59,7 +59,7 @@ A tenant `ADMIN` role cannot open it.
    `Stem Cogent <environment>` to prevent staging/production confusion.
 6. Deploy the application with all `PHASE5_*_ENABLED=false`.
 7. Run the normal one-shot Alembic task and confirm the database head is
-   exactly `0025`.
+   exactly `0027`.
 8. Execute `backend/app/ops/grant_system_admin.py` inside the private migration
    task environment with all three explicit safeguards:
 
@@ -187,7 +187,7 @@ functional environment pass.
 
 Production may be called functional only when all of these are true:
 
-- database head is `0025` and all six flags have passed progressive enablement;
+- database head is `0027` and all six flags have passed progressive enablement;
 - API/frontend are `2/2`, clustering is at least `1/1`, the scheduler is `1/1`,
   and every other configured worker matches its Terraform desired count;
 - fresh real signals produce embeddings, clusters, cited Global Outputs,
