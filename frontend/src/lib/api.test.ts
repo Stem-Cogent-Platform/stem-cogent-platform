@@ -25,6 +25,19 @@ afterEach(() => {
 });
 
 describe("apiRequest", () => {
+  async function establishSession() {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response(
+          JSON.stringify({ access_token: "session-token", expires_in: 900, user: {} }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        )
+      )
+    );
+    await login({ email: "pilot@example.com", password: "correct-password" });
+  }
+
   it("sends authenticated JSON requests with caller headers", async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(new Response(JSON.stringify({ access_token: "session-token", expires_in: 900, user: {} }), { status: 200, headers: { "Content-Type": "application/json" } }))
@@ -63,6 +76,7 @@ describe("apiRequest", () => {
     [{ detail: { message: "Plan is inactive", code: "BILLING_INACTIVE" } }, "Plan is inactive", "BILLING_INACTIVE"],
     [{}, "We could not complete that request. Please try again.", undefined]
   ])("normalises API errors without leaking response data", async (payload, message, code) => {
+    await establishSession();
     vi.stubGlobal(
       "fetch",
       vi.fn(async () =>
@@ -84,6 +98,7 @@ describe("apiRequest", () => {
   });
 
   it("rejects frontend HTML returned in place of API JSON", async () => {
+    await establishSession();
     vi.stubGlobal(
       "fetch",
       vi.fn(async () => new Response("<html>frontend fallback</html>", {
@@ -99,6 +114,7 @@ describe("apiRequest", () => {
   });
 
   it("turns browser transport failures into an actionable API error", async () => {
+    await establishSession();
     vi.stubGlobal("fetch", vi.fn(async () => { throw new TypeError("Failed to fetch"); }));
 
     await expect(apiRequest("/api/v1/briefs")).rejects.toMatchObject({
@@ -215,12 +231,6 @@ describe("apiRequest", () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(
-        new Response(JSON.stringify({ detail: "Bearer token required" }), {
-          status: 401,
-          headers: { "Content-Type": "application/json" }
-        })
-      )
-      .mockResolvedValueOnce(
         new Response(
           JSON.stringify({
             access_token: "restored-token",
@@ -242,11 +252,41 @@ describe("apiRequest", () => {
       saved: true
     });
     expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
-      "/api/v1/context/company",
       "/api/v1/auth/refresh",
       "/api/v1/context/company"
     ]);
     expect(accessToken()).toBe("restored-token");
+  });
+
+  it("shares one session refresh across concurrent protected requests", async () => {
+    clearSession();
+    let releaseRefresh: (() => void) | undefined;
+    const refreshReady = new Promise<void>((resolve) => { releaseRefresh = resolve; });
+    const fetchMock = vi.fn(async (url: string | URL | Request) => {
+      if (url === "/api/v1/auth/refresh") {
+        await refreshReady;
+        return new Response(
+          JSON.stringify({ access_token: "restored-token", expires_in: 900, user: {} }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
+      }
+      return new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" }
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const first = apiRequest<{ ok: boolean }>("/api/v1/briefs");
+    const second = apiRequest<{ ok: boolean }>("/api/v1/alerts");
+    releaseRefresh?.();
+
+    await expect(Promise.all([first, second])).resolves.toEqual([{ ok: true }, { ok: true }]);
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+      "/api/v1/auth/refresh",
+      "/api/v1/briefs",
+      "/api/v1/alerts"
+    ]);
   });
 
   it("restores an SSO session from the API host when the same-origin cookie is absent", async () => {
