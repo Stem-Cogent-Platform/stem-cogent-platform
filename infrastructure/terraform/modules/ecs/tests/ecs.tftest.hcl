@@ -76,6 +76,32 @@ variables {
   }
 }
 
+run "preserves_staging_replay_pause" {
+  command = plan
+  variables {
+    phase_two_worker_desired_counts = {
+      scheduler      = 1, collector = 1, validation = 1, normalization = 1,
+      classification = 1, enrichment = 1, clustering = 0, synthesis = 1
+    }
+  }
+  assert {
+    condition     = aws_ecs_service.phase_two_worker["clustering"].desired_count == 0
+    error_message = "Staging replay must remain paused until explicitly restored."
+  }
+}
+
+run "rejects_production_worker_pause" {
+  command = plan
+  variables {
+    environment = "prod"
+    phase_two_worker_desired_counts = {
+      scheduler      = 1, collector = 1, validation = 1, normalization = 1,
+      classification = 1, enrichment = 1, clustering = 0, synthesis = 1
+    }
+  }
+  expect_failures = [var.phase_two_worker_desired_counts]
+}
+
 run "creates_observable_fargate_cluster" {
   command = plan
 
