@@ -21,6 +21,12 @@ async def _no_sleep(_: float) -> None:
     return None
 
 
+def test_cil_schema_requires_every_field_for_openai_strict_output() -> None:
+    schema = answering.GroundedAnswer.model_json_schema()
+    assert set(schema["required"]) == set(schema["properties"])
+    assert schema["additionalProperties"] is False
+
+
 def _openai_payload(value: dict[str, object]) -> dict[str, object]:
     import json
 

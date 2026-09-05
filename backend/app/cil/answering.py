@@ -22,7 +22,7 @@ class GroundedAnswer(BaseModel):
     model_config = ConfigDict(extra="forbid")
     answer_text: str = Field(min_length=1, max_length=3000)
     cited_signal_ids: list[UUID] = Field(min_length=1, max_length=20)
-    follow_up_suggestions: list[str] = Field(default_factory=list, max_length=4)
+    follow_up_suggestions: list[str] = Field(max_length=4)
 
 
 @dataclass(frozen=True, slots=True)
