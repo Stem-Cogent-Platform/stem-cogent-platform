@@ -82,6 +82,9 @@ def detail_results(tenant_id, **overrides) -> list[Result]:
         "pilot_status": "ACTIVE",
         "started_at": datetime.now(UTC),
         "profile_completeness": 1,
+        "business_categories": ["Payments"],
+        "strategic_priorities": ["Reliability"],
+        "company_context_version": 3,
         "operating_markets": ["Nigeria"],
         "object_count": 2,
         "resolved_count": 2,
@@ -93,7 +96,19 @@ def detail_results(tenant_id, **overrides) -> list[Result]:
         "focus_count": 1,
         **overrides,
     }
-    return [Result(row=row), *(Result(rows=[]) for _ in range(5))]
+    return [Result(row=row), Result(rows=[product()]), *(Result(rows=[]) for _ in range(4))]
+
+
+def product():
+    return {"object_type": "PRODUCT", "name": "Payments", "active": True}
+
+
+def activation_context():
+    return [
+        Result(row={"version": 3, "business_categories": ["Payments"],
+                    "operating_markets": ["Nigeria"], "strategic_priorities": ["Reliability"]}),
+        Result(rows=[product()]),
+    ]
 
 
 @pytest.mark.asyncio
@@ -116,6 +131,7 @@ def test_admin_payloads_normalise_and_validate_operator_input() -> None:
         business_categories=[" Fintech ", "Fintech"],
         markets=[" Nigeria  ", "Nigeria"],
         products=[" Payments "],
+        strategic_priorities=["Reliability"],
         pilot_owner="Stem Operator",
     )
     assert body.business_categories == ["Fintech"]
@@ -134,6 +150,7 @@ async def test_create_and_patch_tenant_return_readiness_detail() -> None:
         business_categories=["Fintech"],
         markets=["Nigeria"],
         products=["Payments"],
+        strategic_priorities=["Reliability"],
         dependencies=["NIBSS"],
         competitors=["Peer Bank"],
         pilot_owner="Stem Operator",
@@ -260,7 +277,7 @@ async def test_activation_dispatch_and_status_views(monkeypatch) -> None:
         ),
     )
     monkeypatch.setattr(admin.celery_app, "send_task", lambda *args, **kwargs: sent.update(args=args, kwargs=kwargs))
-    session = Session(Result(scalar=3), Result(scalar=run_id), Result())
+    session = Session(*activation_context(), Result(scalar=run_id), Result())
     operator_tenant_id = uuid4()
     assert operator_tenant_id != tenant_id
     queued = await admin.start_activation(
@@ -304,7 +321,7 @@ async def test_activation_dispatch_failure_is_persisted_safely(monkeypatch) -> N
 
     monkeypatch.setattr(admin.celery_app, "send_task", fail_dispatch)
     session = Session(
-        Result(scalar=3),
+        *activation_context(),
         Result(scalar=run_id),
         Result(),
         Result(),

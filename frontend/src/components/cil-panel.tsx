@@ -7,14 +7,14 @@ import { apiRequest } from "@/lib/api";
 type Citation = { source_signal_id: string; source_name: string; source_url?: string };
 type Response = { answer_text: string; citations: Citation[]; confidence_indicator: string; follow_up_suggestions: string[] };
 
-export function CILPanel({ anchorId, anchorType = "DECISION_BRIEF" }: { anchorId: string; anchorType?: "DECISION_BRIEF" | "SIGNAL" | "ENTITY" | "COMPANY_LENS" }) {
+export function CILPanel({ anchorId, anchorType = "DECISION_BRIEF", hasRelationships = false }: { anchorId: string; anchorType?: "DECISION_BRIEF" | "SIGNAL" | "ENTITY" | "COMPANY_LENS"; hasRelationships?: boolean }) {
   const [result, setResult] = useState<Response | null>(null);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
   const [query, setQuery] = useState("");
   const [mobileOpen, setMobileOpen] = useState(false);
   const suggested = anchorType === "ENTITY"
-    ? ["What changed recently?", "Which relationships matter most?"]
+    ? ["What changed recently?", ...(hasRelationships ? ["Which relationships matter most?"] : [])]
     : ["What evidence supports this?", "What decision is required?", "What remains uncertain?"];
 
   async function submit(event: FormEvent<HTMLFormElement>) {

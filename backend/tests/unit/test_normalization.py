@@ -5,7 +5,7 @@ from uuid import UUID
 import pytest
 
 from app.intelligence.entities import EntityRecord, resolve_entities
-from app.intelligence.normalization import normalize_payload
+from app.intelligence.normalization import canonicalize_source_url, normalize_payload
 
 
 FIXTURES = Path(__file__).parents[1] / "fixtures" / "ingestion"
@@ -116,3 +116,9 @@ def test_normalization_rejects_empty_or_unknown_payloads() -> None:
         normalize_payload("API", b"", "https://example.com")
     with pytest.raises(ValueError, match="Unsupported normalization"):
         normalize_payload("EMAIL", b"body", "https://example.com")
+
+
+def test_source_url_identity_removes_tracking_and_normalizes_origin() -> None:
+    assert canonicalize_source_url(
+        "HTTPS://TechCabal.com/2026/Paystack/?utm_source=newsletter&ref=home#comments"
+    ) == "https://techcabal.com/2026/Paystack"

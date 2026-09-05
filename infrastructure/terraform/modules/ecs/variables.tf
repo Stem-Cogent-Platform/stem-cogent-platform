@@ -248,9 +248,9 @@ variable "phase_two_worker_desired_counts" {
       var.phase_two_worker_desired_counts["scheduler"] == 1 &&
       alltrue([
         for count in values(var.phase_two_worker_desired_counts) :
-        count >= 1 && floor(count) == count
+        count >= (var.environment == "staging" ? 0 : 1) && floor(count) == count
       ])
     )
-    error_message = "Worker desired counts require exactly one scheduler and at least one integer task for every Phase 2 and Phase 3 worker."
+    error_message = "Worker desired counts require exactly one scheduler and integer task counts; only staging permits other workers to be paused at zero."
   }
 }

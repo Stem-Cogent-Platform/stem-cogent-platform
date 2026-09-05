@@ -12,7 +12,20 @@ import { Brief, LoadState } from "@/lib/types";
 
 const WS_URL = process.env.NEXT_PUBLIC_WS_URL ?? "ws://localhost:8000";
 
-type MonitoringItem = { id: string; headline: string; relevance_reasons?: string[]; primary_domain?: string; detected_at: string };
+type MonitoringItem = {
+  id: string;
+  display_title: string;
+  what_changed: string;
+  primary_domain?: string;
+  event_type?: string;
+  primary_entity?: string;
+  matched_company_objects: string[];
+  published_at?: string;
+  detected_at: string;
+  evidence_available: boolean;
+  source_url?: string;
+  source_name: string;
+};
 type BriefingData = {
   briefs: Brief[];
   monitoring: MonitoringItem[];
@@ -91,10 +104,7 @@ export default function BriefingPage() {
   const data = state.status === "ready" ? state.data : null;
 
   if (data && !data.phase5UiEnabled) {
-    return <WorkspaceShell><section className="briefing-heading"><div><p className="eyebrow">My Decision Briefing</p><h1>Developments requiring attention</h1></div><span className="connection-status"><i /> {connection}</span></section>
-      {newCount > 0 && <button className="new-brief-banner" onClick={() => void load()} type="button">{newCount} new brief{newCount === 1 ? " is" : "s are"} ready</button>}
-      <section className="briefing-grid"><div className="brief-column"><div className="section-heading"><h2>Decision briefs</h2><span>{data.briefs.length} evidence-backed</span></div>{data.briefs.map((brief) => <BriefCard brief={brief} key={brief.id} phase5Ui={false} />)}{!data.briefs.length && <article className="empty-brief"><h3>No developments currently meet your Decision Brief threshold.</h3><p>Wider Intelligence remains available while Stem continues monitoring your Focus Areas.</p><Link className="secondary-button" href="/intelligence">Review Wider Intelligence</Link></article>}</div><aside className="focus-panel"><p className="eyebrow">Watching</p><h2>Your Focus Areas</h2><p>Your configured Focus Areas influence ranking while factual evidence remains shared and unchanged.</p><Link className="text-link" href="/watchlist">Review focus and watchlist</Link></aside></section>
-    </WorkspaceShell>;
+    return <WorkspaceShell><section className="content-page"><section className="briefing-heading"><div><p className="eyebrow">My Decision Briefing</p><h1>Developments requiring attention</h1></div><span className="connection-status"><i /> {connection}</span></section>{newCount > 0 && <button className="new-brief-banner" onClick={() => void load()} type="button">{newCount} new brief{newCount === 1 ? " is" : "s are"} ready</button>}<section className="briefing-grid"><div className="brief-column"><div className="section-heading"><h2>Decision briefs</h2><span>{data.briefs.length} evidence-backed</span></div>{data.briefs.map((brief) => <BriefCard brief={brief} key={brief.id} phase5Ui={false} />)}{!data.briefs.length && <article className="empty-brief"><h3>No developments currently meet your Decision Brief threshold.</h3><p>Wider Intelligence remains available while Stem continues monitoring your Focus Areas.</p><Link className="secondary-button" href="/intelligence">Review Wider Intelligence</Link></article>}</div><aside className="focus-panel"><p className="eyebrow">Watching</p><h2>Your Focus Areas</h2><p>Your configured Focus Areas influence ranking while factual evidence remains shared and unchanged.</p><Link className="text-link" href="/watchlist">Review focus and watchlist</Link></aside></section></section></WorkspaceShell>;
   }
 
   return <WorkspaceShell>
@@ -104,7 +114,7 @@ export default function BriefingPage() {
     {state.status === "error" && <section className="content-page"><ModuleFailure message={state.message} retry={() => void load()} /></section>}
     {data && <section className="briefing-v2"><div className="briefing-main">
       <section aria-labelledby="attention-title"><div className="section-heading"><div><p className="eyebrow">Requires your attention</p><h2 id="attention-title">Material decisions</h2></div><span>{data.briefs.length} open</span></div><div className="card-list">{data.briefs.map((brief) => <BriefCard brief={brief} key={brief.id} />)}</div>{!data.briefs.length && <article className="empty-brief"><h3>{stateMessages.briefingEmpty.title}</h3><p>{stateMessages.briefingEmpty.body}</p><Link className="secondary-button" href="/intelligence">Explore Wider Intelligence</Link></article>}</section>
-      <section aria-labelledby="monitoring-title" className="monitoring-section"><div className="section-heading"><div><p className="eyebrow">Relevant monitoring</p><h2 id="monitoring-title">Below the decision threshold</h2></div><Link href="/intelligence">Wider Intelligence -&gt;</Link></div><div className="monitoring-list">{data.monitoring.map((item) => <article key={item.id}><div><span>{item.primary_domain?.replaceAll("_", " ") ?? "Market development"}</span><h3>{item.headline}</h3><p>Monitoring{item.relevance_reasons?.length ? ` / ${item.relevance_reasons.slice(0, 2).join(" / ")}` : " / Relevant to your context"}</p></div><time dateTime={item.detected_at}>{relativeTime(item.detected_at)}</time></article>)}</div>{!data.monitoring.length && <p className="quiet-state">No additional developments are being monitored for your current lens.</p>}</section>
+      <section aria-labelledby="monitoring-title" className="monitoring-section"><div className="section-heading"><div><p className="eyebrow">Relevant monitoring</p><h2 id="monitoring-title">Below the decision threshold</h2></div><Link href="/intelligence">Wider Intelligence -&gt;</Link></div><div className="monitoring-list">{data.monitoring.map((item) => <article key={item.id}><div><span>{item.primary_domain?.replaceAll("_", " ") ?? "Market development"}{item.event_type ? ` · ${item.event_type.replaceAll("_", " ")}` : ""}{item.primary_entity ? ` · ${item.primary_entity}` : ""}</span><h3>{item.display_title}</h3><p>{item.matched_company_objects.length ? `Relevant to ${item.matched_company_objects.slice(0, 2).join(" and ")}` : item.what_changed}</p><small>{item.evidence_available ? `${item.source_name} · Evidence available` : "Evidence is still being verified"}</small></div><time dateTime={item.published_at ?? item.detected_at}>{relativeTime(item.published_at ?? item.detected_at)}</time>{item.evidence_available && item.source_url && <a href={item.source_url} rel="noreferrer" target="_blank">Open evidence</a>}</article>)}</div>{!data.monitoring.length && <p className="quiet-state">No additional developments are being monitored for your current lens.</p>}</section>
     </div><aside className="briefing-rail"><section className="since-visit"><p className="eyebrow">Since your last visit</p><strong>{data.changes.new_briefs} new development{data.changes.new_briefs === 1 ? "" : "s"}</strong><span>{data.changes.updated_briefs} brief updated / {data.changes.new_evidence_items} new evidence item{data.changes.new_evidence_items === 1 ? "" : "s"}</span>{data.changes.new_relevant_monitoring > 0 && <small>{data.changes.new_relevant_monitoring} monitoring update{data.changes.new_relevant_monitoring === 1 ? "" : "s"}</small>}</section><section className="focus-panel"><p className="eyebrow">Your lens</p><h2>Focus Area activity</h2><p>Your Company Context and personal Focus Areas shape ranking without changing the underlying evidence.</p><Link className="text-link" href="/watchlist">Review Focus Areas</Link></section></aside></section>}
   </WorkspaceShell>;
 }

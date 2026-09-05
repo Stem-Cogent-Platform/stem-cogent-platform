@@ -20,11 +20,14 @@ const roles = [
 const domains = ["REGULATORY_POLICY", "INFRASTRUCTURE_RELIABILITY", "COMPETITIVE_PRODUCT", "MARKET_EXPANSION", "FINANCIAL_ECONOMIC", "FRAUD_RISK_TRUST", "CUSTOMER_MARKET"];
 const domainLabels: Record<string, string> = { REGULATORY_POLICY: "Regulatory policy", INFRASTRUCTURE_RELIABILITY: "Infrastructure reliability", COMPETITIVE_PRODUCT: "Competitive product", MARKET_EXPANSION: "Market expansion", FINANCIAL_ECONOMIC: "Financial & economic", FRAUD_RISK_TRUST: "Security, fraud & trust", CUSTOMER_MARKET: "Customer & market" };
 const marketLabels: Record<string, string> = { NG: "Nigeria", GH: "Ghana", KE: "Kenya", ZA: "South Africa", GB: "United Kingdom", OTHER: "Other" };
-const deliveries = [
+const alertThresholds = [
   ["CRITICAL_ONLY", "Critical only", "Only developments that require immediate review"],
-  ["IMPORTANT_AND_CRITICAL", "Important + Critical", "Recommended for active decision owners"],
-  ["DAILY_BRIEFING", "Daily Briefing", "One structured briefing each workday"],
-  ["WEEKLY_BRIEFING", "Weekly Briefing", "A consolidated weekly decision view"]
+  ["IMPORTANT_AND_CRITICAL", "Important + Critical", "Recommended for active decision owners"]
+] as const;
+const digestCadences = [
+  ["NONE", "Off", "Do not send a scheduled digest"],
+  ["DAILY", "Daily", "One structured briefing each workday"],
+  ["WEEKLY", "Weekly", "A consolidated weekly decision view"]
 ] as const;
 
 function list(value: string) {
@@ -41,7 +44,8 @@ export function OnboardingWizard() {
     categories: [] as string[], markets: ["NG"] as string[], segments: [] as string[],
     products: "", dependencies: "", competitors: "", regulatory: "", priorities: "",
     role: "CEO", responsibilities: "", domains: [] as string[], focus: "",
-    delivery: "IMPORTANT_AND_CRITICAL"
+    alertThreshold: "IMPORTANT_AND_CRITICAL",
+    digestCadence: "WEEKLY"
   });
   const progress = useMemo(() => ((step + 1) / steps.length) * 100, [step]);
 
@@ -90,9 +94,13 @@ export function OnboardingWizard() {
         role_code: state.role,
         responsibility_tags: list(state.responsibilities),
         priority_domains: state.domains.slice(0, 5),
-        delivery_preference: state.delivery
+        delivery_preference: state.alertThreshold
       }) });
       await Promise.all(list(state.focus).map((label) => apiRequest("/api/v1/me/focus-areas", { method: "POST", body: JSON.stringify({ focus_type: "TOPIC", label, query_text: label, weight: 1 }) })));
+      await apiRequest("/api/v1/me/onboarding/complete", { method: "POST", body: JSON.stringify({
+        alert_threshold: state.alertThreshold,
+        digest_cadence: state.digestCadence
+      }) });
       router.replace("/briefing");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Your setup could not be saved. Please try again.");
@@ -111,7 +119,7 @@ export function OnboardingWizard() {
         <p className="eyebrow">Workspace setup</p>
         <h1>Make every brief relevant from day one.</h1>
         <p>About five minutes. You can update every choice later in Settings.</p>
-        <ol>{steps.map((label, index) => <li className={index === step ? "current" : index < step ? "complete" : ""} key={label}><span>{index < step ? "✓" : index + 1}</span><strong>{label}</strong></li>)}</ol>
+        <ol>{steps.map((label, index) => <li className={index === step ? "current" : index < step ? "visited" : ""} key={label}><span>{index + 1}</span><strong>{label}</strong></li>)}</ol>
       </aside>
       <section className="wizard-stage">
         <div className="wizard-progress"><i style={{ width: `${progress}%` }} /></div>
@@ -122,7 +130,7 @@ export function OnboardingWizard() {
         {step === 2 && <div className="wizard-panel"><p className="eyebrow">Your Role</p><h2>Which decisions are you responsible for?</h2><div className="role-card-grid">{roles.map(([value,label,description]) => <button className={state.role === value ? "selected" : ""} onClick={() => setState({ ...state, role: value })} type="button" key={value}><strong>{label}</strong><span>{description}</span></button>)}</div></div>}
         {step === 3 && <div className="wizard-panel"><p className="eyebrow">Decision Lens</p><h2>What do you want Stem Cogent to prioritise for you?</h2><p>Select up to five domains, then add responsibility detail.</p><ChoiceGroup label="Priority decision domains" labels={domainLabels} options={domains} values={state.domains} onToggle={(value) => state.domains.includes(value) || state.domains.length < 5 ? toggle("domains", value) : undefined} /><div className="wizard-fields single"><label><span>Your responsibilities</span><input value={state.responsibilities} onChange={(event) => setState({ ...state, responsibilities: event.target.value })} /></label></div></div>}
         {step === 4 && <div className="wizard-panel"><p className="eyebrow">Focus Areas</p><h2>What should we watch especially closely right now?</h2><p>Add competitors, regulators, infrastructure providers, markets, product categories, or active initiatives.</p><div className="wizard-fields single"><label><span>Focus areas</span><input value={state.focus} onChange={(event) => setState({ ...state, focus: event.target.value })} /></label></div><div className="focus-examples"><span>Examples</span>{["CBN circulars", "NIBSS reliability", "Merchant margin", "Cross-border payments"].map((item) => <button onClick={() => setState({ ...state, focus: state.focus ? `${state.focus}, ${item}` : item })} type="button" key={item}>+ {item}</button>)}</div></div>}
-        {step === 5 && <div className="wizard-panel"><p className="eyebrow">Delivery</p><h2>How should important developments reach you?</h2><div className="delivery-list">{deliveries.map(([value,label,description]) => <button className={state.delivery === value ? "selected" : ""} onClick={() => setState({ ...state, delivery: value })} type="button" key={value}><i /> <span><strong>{label}</strong><small>{description}</small></span></button>)}</div>{message && <p className="form-message" role="alert">{message}</p>}</div>}
+        {step === 5 && <div className="wizard-panel"><p className="eyebrow">Delivery</p><h2>How should important developments reach you?</h2><h3>Alert threshold</h3><p>Choose which developments should interrupt you.</p><div className="delivery-list">{alertThresholds.map(([value,label,description]) => <button className={state.alertThreshold === value ? "selected" : ""} onClick={() => setState({ ...state, alertThreshold: value })} type="button" key={value}><i /> <span><strong>{label}</strong><small>{description}</small></span></button>)}</div><h3>Digest cadence</h3><p>Choose how often Stem should collect updates into a briefing.</p><div className="delivery-list">{digestCadences.map(([value,label,description]) => <button className={state.digestCadence === value ? "selected" : ""} onClick={() => setState({ ...state, digestCadence: value })} type="button" key={value}><i /> <span><strong>{label}</strong><small>{description}</small></span></button>)}</div>{message && <p className="form-message" role="alert">{message}</p>}</div>}
 
         <footer><button className="secondary-button" disabled={step === 0 || saving} onClick={() => setStep((value) => value - 1)} type="button">Back</button>{step < steps.length - 1 ? <button className="primary-button" disabled={(step === 0 && (!state.categories.length || !state.markets.length)) || (step === 3 && !state.domains.length)} onClick={() => setStep((value) => value + 1)} type="button">Continue</button> : <button className="primary-button" disabled={saving} type="submit">{saving ? "Creating your briefing…" : "Open my briefing"}</button>}</footer>
       </section>

@@ -11,7 +11,7 @@ from email.utils import parsedate_to_datetime
 from html.parser import HTMLParser
 from pathlib import PurePosixPath
 from typing import Any
-from urllib.parse import urljoin
+from urllib.parse import parse_qsl, urlencode, urljoin, urlsplit, urlunsplit
 
 from defusedxml import ElementTree  # type: ignore[import-untyped]
 from docx import Document
@@ -19,6 +19,43 @@ from pypdf import PdfReader
 
 
 _API_RECORD_LIMIT = 500
+_TRACKING_QUERY_PARAMETERS = frozenset(
+    {
+        "fbclid",
+        "gclid",
+        "mc_cid",
+        "mc_eid",
+        "ref",
+        "utm_campaign",
+        "utm_content",
+        "utm_medium",
+        "utm_source",
+        "utm_term",
+    }
+)
+
+
+def canonicalize_source_url(value: str) -> str:
+    """Normalize an evidence URL without discarding content-selecting parameters."""
+
+    parsed = urlsplit(value.strip())
+    scheme = parsed.scheme.casefold()
+    hostname = (parsed.hostname or "").casefold()
+    port = parsed.port
+    default_port = (scheme == "http" and port == 80) or (scheme == "https" and port == 443)
+    netloc = hostname if port is None or default_port else f"{hostname}:{port}"
+    query = urlencode(
+        sorted(
+            (key, item)
+            for key, item in parse_qsl(parsed.query, keep_blank_values=True)
+            if key.casefold() not in _TRACKING_QUERY_PARAMETERS
+        ),
+        doseq=True,
+    )
+    path = parsed.path or "/"
+    if path != "/":
+        path = path.rstrip("/")
+    return urlunsplit((scheme, netloc, path, query, ""))
 
 
 @dataclass(frozen=True)

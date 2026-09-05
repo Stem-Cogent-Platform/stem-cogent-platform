@@ -35,15 +35,28 @@ async def run_embedding(event: dict[str, Any]) -> str:
             signal["entity_labels"],
             settings.EMBEDDING_MAX_INPUT_CHARACTERS,
         )
-        client = _embedding_client()
-        try:
-            vector = (await client.embed((embedding_input,)))[0]
-        finally:
-            await client.aclose()
+        input_hash = "sha256:" + hashlib.sha256(embedding_input.encode()).hexdigest()
         await session.execute(
-            text("SELECT pg_advisory_xact_lock(hashtextextended(CAST(:id AS TEXT), 0))"),
-            {"id": str(signal_id)},
+            text("SELECT pg_advisory_xact_lock(hashtextextended(:identity,0))"),
+            {
+                "identity": ":".join(
+                    (
+                        str(tenant_id or "GLOBAL"),
+                        settings.EMBEDDING_PROVIDER,
+                        settings.EMBEDDING_MODEL,
+                        settings.EMBEDDING_INPUT_VERSION,
+                        input_hash,
+                    )
+                )
+            },
         )
+        vector = await _cached_embedding(session, tenant_id, input_hash)
+        if vector is None:
+            client = _embedding_client()
+            try:
+                vector = (await client.embed((embedding_input,)))[0]
+            finally:
+                await client.aclose()
         await _persist_embedding(
             session,
             signal_id,
@@ -102,6 +115,40 @@ def _embedding_client() -> OpenAIEmbeddingClient:
     )
 
 
+async def _cached_embedding(
+    session: AsyncSession,
+    tenant_id: UUID | None,
+    input_hash: str,
+) -> tuple[float, ...] | None:
+    settings = get_settings()
+    value = (
+        await session.execute(
+            text(
+                """
+                SELECT embedding::TEXT
+                FROM intelligence.signal_embeddings
+                WHERE tenant_id IS NOT DISTINCT FROM :tenant_id
+                  AND input_hash=:input_hash
+                  AND embedding_provider=:provider
+                  AND embedding_model=:model
+                  AND embedding_input_version=:input_version
+                ORDER BY embedded_at DESC LIMIT 1
+                """
+            ),
+            {
+                "tenant_id": tenant_id,
+                "input_hash": input_hash,
+                "provider": settings.EMBEDDING_PROVIDER,
+                "model": settings.EMBEDDING_MODEL,
+                "input_version": settings.EMBEDDING_INPUT_VERSION,
+            },
+        )
+    ).scalar_one_or_none()
+    if value is None:
+        return None
+    return tuple(float(item) for item in str(value).strip("[]").split(","))
+
+
 async def _load_scored_signal(
     session: AsyncSession,
     signal_id: UUID,
@@ -151,10 +198,11 @@ async def _persist_embedding(
             """
             INSERT INTO intelligence.signal_embeddings (
               signal_id, tenant_id, embedding, embedding_provider,
-              embedding_model, embedding_dimension, input_hash, embedded_at
+              embedding_model, embedding_dimension, input_hash,
+              embedding_input_version, embedded_at
             ) VALUES (
               :signal_id, :tenant_id, CAST(:embedding AS vector), :provider,
-              :model, :dimension, :input_hash, NOW()
+              :model, :dimension, :input_hash, :input_version, NOW()
             )
             ON CONFLICT (signal_id) DO UPDATE
             SET tenant_id = EXCLUDED.tenant_id,
@@ -163,10 +211,13 @@ async def _persist_embedding(
                 embedding_model = EXCLUDED.embedding_model,
                 embedding_dimension = EXCLUDED.embedding_dimension,
                 input_hash = EXCLUDED.input_hash,
+                embedding_input_version = EXCLUDED.embedding_input_version,
                 embedded_at = EXCLUDED.embedded_at
             WHERE intelligence.signal_embeddings.input_hash <> EXCLUDED.input_hash
                OR intelligence.signal_embeddings.embedding_provider <> EXCLUDED.embedding_provider
                OR intelligence.signal_embeddings.embedding_model <> EXCLUDED.embedding_model
+               OR intelligence.signal_embeddings.embedding_input_version <>
+                  EXCLUDED.embedding_input_version
             """
         ),
         {
@@ -177,6 +228,7 @@ async def _persist_embedding(
             "model": settings.EMBEDDING_MODEL,
             "dimension": settings.EMBEDDING_DIMENSION,
             "input_hash": input_hash,
+            "input_version": settings.EMBEDDING_INPUT_VERSION,
         },
     )
 

@@ -5,7 +5,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from app.intelligence.synthesis.client import OpenAIResponsesClient
+from app.intelligence.synthesis.client import StructuredGenerationClient
 from app.intelligence.synthesis.context import GlobalContextPackage
 
 
@@ -13,7 +13,12 @@ GLOBAL_INTELLIGENCE_SYSTEM_PROMPT = (
     "You are a structured intelligence formatting service. Use only the provided "
     "evidence/context. Do not introduce facts, predictions, business exposure, or "
     "tenant-specific claims that are not present. Every factual claim must map to a "
-    "supplied source signal."
+    "supplied source signal. If there are N key_developments, there are exactly N + 3 "
+    "claims: summary is claim 0; key_developments are claims 1 through N in list "
+    "order; global_implication is claim N + 1; confidence_note is claim N + 2. The "
+    "citations array must contain a citation for every claim_index from 0 through N + 2, "
+    "including repeated citations when one source supports several claims. Copy each "
+    "source_signal_id and source_name exactly from the supplied evidence."
 )
 
 _MONEY = re.compile(r"(?i)(?:[$€£₦]|\b(?:NGN|USD|EUR|GBP)\b)\s*[\d,]+(?:\.\d+)?")
@@ -46,7 +51,7 @@ class SynthesisValidationError(RuntimeError):
 
 
 class SynthesisService:
-    def __init__(self, client: OpenAIResponsesClient) -> None:
+    def __init__(self, client: StructuredGenerationClient) -> None:
         self._client = client
 
     async def synthesize(self, context: GlobalContextPackage) -> tuple[GlobalSynthesis, bool]:

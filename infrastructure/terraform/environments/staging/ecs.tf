@@ -71,8 +71,9 @@ module "ecs" {
     normalization  = 1
     classification = 1
     enrichment     = 1
-    clustering     = 1
-    synthesis      = 1
+    # Keep historical replay paused until bounded funded acceptance succeeds.
+    clustering = 0
+    synthesis  = 1
   }
   phase_one_log_group_names = {
     api            = module.observability.log_group_names["api"]

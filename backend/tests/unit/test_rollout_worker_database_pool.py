@@ -131,3 +131,48 @@ def test_rollout_registers_and_updates_changed_service(monkeypatch: Any) -> None
     assert result["applied"] is True
     assert result["services"][0]["new_task_definition"] == "arn:task/worker:2"
     assert _Session.ecs.updated[0]["taskDefinition"] == "arn:task/worker:2"
+
+
+def test_task_registration_reports_unchanged_values_without_tags() -> None:
+    response = {
+        "taskDefinition": {
+            "family": "worker",
+            "containerDefinitions": [
+                {
+                    "name": "worker",
+                    "environment": [
+                        {"name": "DATABASE_POOL_SIZE", "value": "1"},
+                        {"name": "DATABASE_MAX_OVERFLOW", "value": "0"},
+                    ],
+                }
+            ],
+        }
+    }
+
+    registration, changed = _task_registration(response, "1", "0")
+
+    assert changed == []
+    assert "tags" not in registration
+
+
+def test_main_reports_dry_run(monkeypatch: Any, capsys: Any) -> None:
+    monkeypatch.setattr(
+        pool,
+        "rollout",
+        lambda args: {"applied": args.apply, "services": []},
+    )
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "rollout_worker_database_pool",
+            "--profile",
+            "production",
+            "--cluster",
+            "sc-cluster-prod",
+            "--environment",
+            "prod",
+        ],
+    )
+
+    assert pool.main() == 0
+    assert '"applied": false' in capsys.readouterr().out

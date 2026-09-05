@@ -89,3 +89,25 @@ def test_run_executes_private_audit_task_and_reads_marker(monkeypatch: Any) -> N
     result = audit._run("staging", "staging", "eu-west-1", 30)
 
     assert result == {"database": {"signals": 1}, "responses": {}}
+
+
+def test_main_prints_the_sanitized_audit(monkeypatch: Any, capsys: Any) -> None:
+    monkeypatch.setattr(
+        audit,
+        "_run",
+        lambda *args: {"database": {"signals": 2}, "responses": {}},
+    )
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "audit_phase4_live_api",
+            "--profile",
+            "staging",
+            "--environment",
+            "staging",
+        ],
+    )
+
+    audit.main()
+
+    assert '"signals": 2' in capsys.readouterr().out

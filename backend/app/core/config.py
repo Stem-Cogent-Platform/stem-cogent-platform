@@ -62,6 +62,7 @@ class Settings(BaseSettings):
 
     EMBEDDING_PROVIDER: str = "openai"
     EMBEDDING_MODEL: str = "text-embedding-3-small"
+    EMBEDDING_INPUT_VERSION: str = "v1"
     EMBEDDING_DIMENSION: int = 1536
     EMBEDDING_MAX_INPUT_CHARACTERS: int = 12_000
     EMBEDDING_TIMEOUT_SECONDS: float = 30.0
@@ -72,7 +73,12 @@ class Settings(BaseSettings):
     SEMANTIC_SEARCH_LIMIT: int = 10
 
     LLM_PRIMARY_PROVIDER: str = "openai"
-    LLM_PRIMARY_MODEL: str = "gpt-5-mini"
+    # Pin a model that the deployed OpenAI project can use with strict
+    # structured outputs. gpt-5-mini is listed but rejects this project's
+    # requests until the OpenAI organization is verified.
+    LLM_PRIMARY_MODEL: str = "gpt-4.1-mini-2025-04-14"
+    LLM_FALLBACK_PROVIDER: str = "groq"
+    LLM_FALLBACK_MODEL: str = "openai/gpt-oss-120b"
     LLM_TIMEOUT_SECONDS: float = 45.0
     LLM_MAX_RETRIES: int = 4
     GLOBAL_SYNTHESIS_PROMPT_VERSION: str = "2026.08-v2"
@@ -95,6 +101,7 @@ class Settings(BaseSettings):
 
     SYNTHESIS_ENABLED: bool = True
     CIL_ENABLED: bool = True
+    CIL_RATE_LIMIT_PER_MINUTE: int = 10
     CLICKHOUSE_ENABLED: bool = True
 
     # Phase 5 capabilities are deliberately fail-closed. Deployment
