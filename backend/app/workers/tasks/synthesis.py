@@ -10,9 +10,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.core.database import get_session
-from app.core.secrets import get_scalar_secret
 from app.intelligence.synthesis import EvidenceItem, GlobalContextPackage, SynthesisService
-from app.intelligence.synthesis.client import OpenAIResponsesClient
+from app.intelligence.synthesis.client import StructuredGenerationClient
+from app.intelligence.synthesis.router import build_generation_client
 from app.workers.celery_app import celery_app
 from app.workers.events import CeleryEventPublisher
 from app.workers.runtime import run_async_worker
@@ -25,29 +25,76 @@ async def run_synthesis(event: dict[str, Any]) -> str:
         UUID(value) for value in event["payload"].get("historical_signal_ids", [])[:3]
     )
     async for session in get_session():
+        # Acquire the lock in a separate statement: a SELECT that waits for a
+        # lock retains its earlier snapshot and can miss the winner's commit.
+        await session.execute(
+            text("SELECT pg_advisory_xact_lock(hashtextextended(:identity,0))"),
+            {"identity": f"{signal_id}:{get_settings().GLOBAL_SYNTHESIS_PROMPT_VERSION}"},
+        )
+        duplicate = (
+            await session.execute(
+                text(
+                    """
+                    SELECT canonical_signal_id FROM pipeline.signals
+                    WHERE id=:signal_id
+                      AND tenant_id IS NOT DISTINCT FROM :tenant_id
+                      AND dedup_status IN ('EXACT_DUPLICATE','SEMANTIC_DUPLICATE')
+                      AND canonical_signal_id IS NOT NULL
+                      AND canonical_signal_id <> id
+                    LIMIT 1
+                    """
+                ),
+                {"signal_id": signal_id, "tenant_id": tenant_id},
+            )
+        ).scalar_one_or_none()
+        if duplicate is not None:
+            return "DUPLICATE_SKIPPED"
+        existing = (
+            await session.execute(
+                text(
+                    """
+                    SELECT output.id, output.llm_synthesis_failed
+                    FROM intelligence.global_outputs AS output
+                    WHERE output.signal_id=:signal_id
+                      AND output.synthesis_status='COMPLETED'
+                      AND output.synthesis_prompt_version=:prompt_version
+                    LIMIT 1
+                    """
+                ),
+                {
+                    "signal_id": signal_id,
+                    "prompt_version": get_settings().GLOBAL_SYNTHESIS_PROMPT_VERSION,
+                },
+            )
+        ).mappings().one_or_none()
+        if existing is not None:
+            await _publish_synthesized(
+                event, signal_id, existing["id"], existing["llm_synthesis_failed"]
+            )
+            return "ALREADY_SYNTHESIZED"
         context = await _assemble_context(session, signal_id, tenant_id, historical_ids)
         client = _synthesis_client()
         try:
             output, failed = await SynthesisService(client).synthesize(context)
         finally:
             await client.aclose()
-        output_id = await _persist_output(session, signal_id, tenant_id, output, context, failed)
+        provider = "deterministic" if failed else getattr(
+            client, "last_provider", get_settings().LLM_PRIMARY_PROVIDER
+        )
+        model = "grounded-fallback-v1" if failed else getattr(
+            client, "last_model", client.model
+        )
+        output_id = await _persist_output(
+            session, signal_id, tenant_id, output, context, failed, provider, model
+        )
         await session.commit()
         await _publish_synthesized(event, signal_id, output_id, failed)
         return "FALLBACK" if failed else "SYNTHESIZED"
     raise RuntimeError("Database session was not available")
 
 
-def _synthesis_client() -> OpenAIResponsesClient:
-    settings = get_settings()
-    if settings.LLM_PRIMARY_PROVIDER != "openai" or not settings.OPENAI_API_KEY_ARN:
-        raise RuntimeError("Configured OpenAI synthesis provider is missing its secret ARN")
-    return OpenAIResponsesClient(
-        api_key=get_scalar_secret(settings.OPENAI_API_KEY_ARN),
-        model=settings.LLM_PRIMARY_MODEL,
-        timeout_seconds=settings.LLM_TIMEOUT_SECONDS,
-        max_retries=settings.LLM_MAX_RETRIES,
-    )
+def _synthesis_client() -> StructuredGenerationClient:
+    return build_generation_client()
 
 
 async def _assemble_context(
@@ -155,6 +202,8 @@ async def _persist_output(
     output: Any,
     context: GlobalContextPackage,
     failed: bool,
+    provider: str,
+    model: str,
 ) -> UUID:
     settings = get_settings()
     citations = [
@@ -208,8 +257,8 @@ async def _persist_output(
                 "global_implication": output.global_implication,
                 "confidence_note": output.confidence_note,
                 "citations": json.dumps(citations),
-                "provider": settings.LLM_PRIMARY_PROVIDER,
-                "model": settings.LLM_PRIMARY_MODEL,
+                "provider": provider,
+                "model": model,
                 "prompt_version": settings.GLOBAL_SYNTHESIS_PROMPT_VERSION,
                 "failed": failed,
                 "historical_signal_ids": list(context.historical_signal_ids),

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 from datetime import UTC, datetime
 from typing import Any
 from uuid import NAMESPACE_URL, UUID, uuid5
@@ -12,7 +13,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import get_settings
 from app.core.database import get_session
 from app.intelligence.entities import EntityRecord, ResolutionResult, resolve_entities
-from app.intelligence.normalization import NormalizedDocument, normalize_payload
+from app.intelligence.normalization import (
+    NormalizedDocument,
+    canonicalize_source_url,
+    normalize_payload,
+)
 from app.workers.celery_app import celery_app
 from app.workers.events import CeleryEventPublisher
 from app.workers.runtime import run_async_worker
@@ -113,29 +118,65 @@ async def _persist_document(
     document: NormalizedDocument,
     resolution: ResolutionResult,
 ) -> UUID:
+    canonical_url = canonicalize_source_url(document.source_url)
+    tenant_raw = event["payload"].get("tenant_id")
+    tenant_id = UUID(tenant_raw) if tenant_raw else None
+    tenant_scope = str(tenant_id or "GLOBAL")
+    fingerprint_value = ":".join(
+        (str(raw["source_id"]), tenant_scope, canonical_url, document.body_text_hash)
+    )
+    content_fingerprint = (
+        "sha256:" + hashlib.sha256(fingerprint_value.encode("utf-8")).hexdigest()
+    )
+    await session.execute(
+        text("SELECT pg_advisory_xact_lock(hashtextextended(:fingerprint,0))"),
+        {"fingerprint": content_fingerprint},
+    )
     existing = (
         await session.execute(
             text(
                 """
                 SELECT id
                 FROM pipeline.signals
-                WHERE raw_signal_id = :raw_signal_id
-                  AND body_text_hash = :body_text_hash
-                  AND source_url IS NOT DISTINCT FROM :source_url
+                WHERE tenant_id IS NOT DISTINCT FROM :tenant_id
+                  AND (
+                    content_fingerprint=:content_fingerprint
+                    OR (
+                      content_fingerprint IS NULL
+                      AND source_id=:source_id
+                      AND body_text_hash=:body_text_hash
+                      AND source_url IN (:source_url,:canonical_url)
+                    )
+                  )
                 ORDER BY created_at DESC
                 LIMIT 1
                 """
             ),
             {
-                "raw_signal_id": raw["id"],
+                "tenant_id": tenant_id,
+                "source_id": raw["source_id"],
                 "body_text_hash": document.body_text_hash,
                 "source_url": document.source_url,
+                "canonical_url": canonical_url,
+                "content_fingerprint": content_fingerprint,
             },
         )
     ).scalar_one_or_none()
     if existing:
+        await session.execute(
+            text(
+                "UPDATE pipeline.signals SET canonical_url=COALESCE(canonical_url,:canonical_url),"
+                "content_fingerprint=COALESCE(content_fingerprint,:content_fingerprint) "
+                "WHERE id=:signal_id AND tenant_id IS NOT DISTINCT FROM :tenant_id"
+            ),
+            {
+                "canonical_url": canonical_url,
+                "content_fingerprint": content_fingerprint,
+                "signal_id": existing,
+                "tenant_id": tenant_id,
+            },
+        )
         return existing
-    tenant_id = event["payload"].get("tenant_id")
     flags = list(document.processing_flags)
     if resolution.unknown_mentions:
         flags.append("ENTITY_REVIEW_REQUIRED")
@@ -149,14 +190,14 @@ async def _persist_document(
                     original_language, source_url, published_at, detected_at,
                     normalized_region_tags, body_text_hash, processing_flags,
                     pipeline_stage, review_flag, tenant_id, is_proprietary,
-                    normalized_at
+                    normalized_at, canonical_url, content_fingerprint
                 ) VALUES (
                     :collection_job_id, :source_id, :raw_signal_id, :raw_storage_path,
                     :signal_type, :title, :body_text, :original_body_text,
                     :original_language, :source_url, :published_at, :detected_at,
                     :region_tags, :body_text_hash, :processing_flags,
                     'NORMALIZED', :review_flag, :tenant_id, :is_proprietary,
-                    NOW()
+                    NOW(), :canonical_url, :content_fingerprint
                 )
                 RETURNING id
                 """
@@ -178,8 +219,10 @@ async def _persist_document(
                 "body_text_hash": document.body_text_hash,
                 "processing_flags": flags,
                 "review_flag": bool(resolution.unknown_mentions),
-                "tenant_id": UUID(tenant_id) if tenant_id else None,
+                "tenant_id": tenant_id,
                 "is_proprietary": bool(tenant_id),
+                "canonical_url": canonical_url,
+                "content_fingerprint": content_fingerprint,
             },
         )
     ).scalar_one()

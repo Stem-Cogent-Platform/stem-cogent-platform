@@ -163,6 +163,8 @@ locals {
       "redis_auth_token",
       "jwt_signing_secret",
       "system_admin_mfa_secret",
+      "openai_api_key",
+      "groq_api_key",
       "paystack_secret_key",
       "paystack_public_key",
       "paystack_webhook_secret",

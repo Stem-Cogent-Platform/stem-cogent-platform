@@ -175,7 +175,7 @@ async def test_brief_lifecycle_flag_is_an_effective_rollback_gate(monkeypatch) -
 
 @pytest.mark.asyncio
 async def test_company_intelligence_entity_and_alert_paths() -> None:
-    company = context(Session(Result(row={"name": "Stem"}), Result(rows=[{"id": uuid4(), "evidence_signal_ids": [uuid4()]}])))
+    company = context(Session(Result(row={"name": "Stem"}), Result(rows=[]), Result(rows=[{"id": uuid4(), "evidence_signal_ids": [uuid4()]}])))
     assert (await product.company_lens(company))["profile"]["name"] == "Stem"
 
     intelligence_session = Session(Result(rows=[{"id": uuid4(), "summary": "Change", "citations": [{"source_signal_id": str(uuid4())}]}]))

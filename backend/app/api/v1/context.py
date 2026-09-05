@@ -17,6 +17,7 @@ from app.context.cache import (
     invalidate_company,
     invalidate_user,
 )
+from app.context.completeness import company_context_status
 from app.compliance import require_current_legal_acceptance
 from app.core.config import get_settings
 from app.workers.celery_app import celery_app
@@ -68,6 +69,12 @@ class DecisionLensInput(BaseModel):
     responsibility_tags: list[str] = Field(default_factory=list, max_length=50)
     priority_domains: list[str] = Field(default_factory=list, max_length=20)
     delivery_preference: str = Field(default="IMPORTANT_AND_CRITICAL", min_length=1, max_length=30)
+
+
+class OnboardingCompleteInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    alert_threshold: Literal["CRITICAL_ONLY", "IMPORTANT_AND_CRITICAL"]
+    digest_cadence: Literal["NONE", "DAILY", "WEEKLY"]
 
 
 class FocusAreaInput(BaseModel):
@@ -131,8 +138,14 @@ async def get_company_context(
             {"tenant_id": context.principal.tenant_id},
         )
     ).mappings().all()
+    profile_value = dict(profile) if profile else None
+    object_values = [dict(row) for row in objects]
     payload = jsonable_encoder(
-        {"profile": dict(profile) if profile else None, "objects": [dict(row) for row in objects]}
+        {
+            "profile": profile_value,
+            "objects": object_values,
+            "context_status": company_context_status(profile_value, object_values),
+        }
     )
     await cache_set(key, payload)
     return payload
@@ -146,7 +159,8 @@ async def put_company_context(
     require_permission(context, "CONFIGURE_COMPANY_CONTEXT")
     require_current_legal_acceptance(context)
     values = body.model_dump()
-    completeness = sum(bool(values[key]) for key in values) / len(values)
+    required = ("business_categories", "operating_markets", "strategic_priorities")
+    completeness = sum(bool(values[key]) for key in required) / len(required)
     row = (
         await context.session.execute(
             text(
@@ -198,12 +212,38 @@ async def create_company_object(
         await context.session.execute(
             text(
                 """
-                INSERT INTO context.company_objects (
-                  tenant_id, object_type, name, entity_id, metadata, importance
-                ) VALUES (
-                  :tenant_id, :object_type, :name, :entity_id,
-                  CAST(:metadata AS JSONB), :importance
-                ) RETURNING *
+                WITH lock AS MATERIALIZED (
+                  SELECT pg_advisory_xact_lock(hashtextextended(
+                    CAST(:tenant_id AS TEXT)||':'||:object_type||':'||LOWER(:name),0
+                  ))
+                ), inserted AS (
+                  INSERT INTO context.company_objects (
+                    tenant_id, object_type, name, entity_id, metadata, importance
+                  )
+                  SELECT :tenant_id, :object_type, :name, :entity_id,
+                         CAST(:metadata AS JSONB), :importance
+                  FROM lock
+                  WHERE NOT EXISTS (
+                    SELECT 1 FROM context.company_objects
+                    WHERE tenant_id=:tenant_id AND object_type=:object_type
+                      AND LOWER(name)=LOWER(:name) AND active
+                  )
+                  RETURNING *, TRUE AS created
+                ), profile_updated AS (
+                  UPDATE context.company_profiles
+                  SET version=version+1, updated_at=NOW()
+                  WHERE tenant_id=:tenant_id AND EXISTS (SELECT 1 FROM inserted)
+                  RETURNING tenant_id
+                )
+                SELECT * FROM inserted
+                UNION ALL
+                SELECT existing.*, FALSE AS created
+                FROM context.company_objects existing
+                WHERE existing.tenant_id=:tenant_id
+                  AND existing.object_type=:object_type
+                  AND LOWER(existing.name)=LOWER(:name) AND existing.active
+                  AND NOT EXISTS (SELECT 1 FROM inserted)
+                LIMIT 1
                 """
             ),
             {
@@ -213,7 +253,8 @@ async def create_company_object(
             },
         )
     ).mappings().one()
-    await _audit(context, "COMPANY_OBJECT_CREATED", "COMPANY_OBJECT", row["id"])
+    if row.get("created", True):
+        await _audit(context, "COMPANY_OBJECT_CREATED", "COMPANY_OBJECT", row["id"])
     await context.session.commit()
     await invalidate_company(context.principal.tenant_id)
     return jsonable_encoder(dict(row))
@@ -254,7 +295,13 @@ async def patch_company_object(
     ).mappings().one_or_none()
     if row is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Company object not found")
-    await _audit(context, "COMPANY_OBJECT_UPDATED", "COMPANY_OBJECT", object_id)
+    await _audit(
+        context,
+        "COMPANY_OBJECT_UPDATED",
+        "COMPANY_OBJECT",
+        object_id,
+        increment_context_version=True,
+    )
     await context.session.commit()
     await invalidate_company(context.principal.tenant_id)
     return jsonable_encoder(dict(row))
@@ -452,26 +499,164 @@ async def delete_focus_area(
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
-def _queue_personalisation(context: RequestContext) -> None:
+@router.post("/me/onboarding/complete")
+async def complete_onboarding(
+    body: OnboardingCompleteInput,
+    context: RequestContext = Depends(get_request_context),
+) -> dict[str, Any]:
+    """Mark onboarding complete only after every durable prerequisite exists."""
+
+    require_permission(context, "CONFIGURE_DECISION_LENS")
+    require_permission(context, "CONFIGURE_FOCUS_AREAS")
+    require_permission(context, "CONFIGURE_ALERTS")
+    require_current_legal_acceptance(context)
+    profile = (
+        await context.session.execute(
+            text("SELECT * FROM context.company_profiles WHERE tenant_id=:tenant_id"),
+            {"tenant_id": context.principal.tenant_id},
+        )
+    ).mappings().one_or_none()
+    objects = (
+        await context.session.execute(
+            text(
+                "SELECT * FROM context.company_objects "
+                "WHERE tenant_id=:tenant_id AND active"
+            ),
+            {"tenant_id": context.principal.tenant_id},
+        )
+    ).mappings().all()
+    context_state = company_context_status(
+        dict(profile) if profile else None,
+        [dict(item) for item in objects],
+    )
+    if not context_state["complete"]:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail={
+                "code": "COMPANY_CONTEXT_INCOMPLETE",
+                "message": "Complete the required Company Context fields before continuing.",
+                "missing_fields": context_state["missing_fields"],
+            },
+        )
+    prerequisites = (
+        await context.session.execute(
+            text(
+                """
+                SELECT
+                  EXISTS(SELECT 1 FROM context.user_decision_lenses
+                    WHERE tenant_id=:tenant_id AND user_id=:user_id AND active) AS lens,
+                  EXISTS(SELECT 1 FROM context.focus_areas
+                    WHERE tenant_id=:tenant_id AND user_id=:user_id AND active) AS focus
+                """
+            ),
+            {
+                "tenant_id": context.principal.tenant_id,
+                "user_id": context.principal.user_id,
+            },
+        )
+    ).mappings().one()
+    if not prerequisites["lens"] or not prerequisites["focus"]:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail={
+                "code": "PERSONALISATION_INCOMPLETE",
+                "message": "Complete your Decision Lens and at least one Focus Area before continuing.",
+            },
+        )
+    urgency_bands = (
+        ["CRITICAL"]
+        if body.alert_threshold == "CRITICAL_ONLY"
+        else ["HIGH", "CRITICAL"]
+    )
+    minimum_band = "CRITICAL" if body.alert_threshold == "CRITICAL_ONLY" else "HIGH"
+    await context.session.execute(
+        text(
+            """
+            UPDATE context.user_decision_lenses
+            SET delivery_preference=:threshold,updated_at=NOW()
+            WHERE tenant_id=:tenant_id AND user_id=:user_id AND active
+            """
+        ),
+        {
+            "threshold": body.alert_threshold,
+            "tenant_id": context.principal.tenant_id,
+            "user_id": context.principal.user_id,
+        },
+    )
+    await context.session.execute(
+        text(
+            """
+            INSERT INTO delivery.user_alert_preferences (
+              tenant_id,user_id,domain_codes,urgency_bands,delivery_channels,
+              minimum_relevance_band,digest_frequency,enabled
+            ) VALUES (
+              :tenant_id,:user_id,ARRAY[]::TEXT[],:urgency_bands,
+              ARRAY['IN_APP']::TEXT[],:minimum_band,:digest_cadence,TRUE
+            ) ON CONFLICT (user_id) DO UPDATE SET
+              urgency_bands=EXCLUDED.urgency_bands,
+              minimum_relevance_band=EXCLUDED.minimum_relevance_band,
+              digest_frequency=EXCLUDED.digest_frequency,
+              enabled=TRUE,updated_at=NOW()
+            WHERE delivery.user_alert_preferences.tenant_id=EXCLUDED.tenant_id
+            """
+        ),
+        {
+            "tenant_id": context.principal.tenant_id,
+            "user_id": context.principal.user_id,
+            "urgency_bands": urgency_bands,
+            "minimum_band": minimum_band,
+            "digest_cadence": body.digest_cadence,
+        },
+    )
+    completed_at = (
+        await context.session.execute(
+            text(
+                """
+                UPDATE auth.users SET onboarding_completed_at=COALESCE(
+                  onboarding_completed_at,NOW()
+                ),updated_at=NOW()
+                WHERE tenant_id=:tenant_id AND id=:user_id
+                RETURNING onboarding_completed_at
+                """
+            ),
+            {
+                "tenant_id": context.principal.tenant_id,
+                "user_id": context.principal.user_id,
+            },
+        )
+    ).scalar_one()
+    await _audit(context, "ONBOARDING_COMPLETED", "USER", context.principal.user_id)
+    await context.session.commit()
+    await invalidate_user(context.principal.tenant_id, context.principal.user_id)
+    queued = _queue_personalisation(context)
+    return {
+        "status": "COMPLETE",
+        "completed_at": completed_at,
+        "personalisation_queued": queued,
+    }
+
+
+def _queue_personalisation(context: RequestContext) -> bool:
     settings = get_settings()
     if not settings.PHASE5_FIRST_VALUE_ACTIVATION_ENABLED:
-        return
+        return False
     queue_url = settings.SQS_PIPELINE_SYNTHESIZED_URL
     if not queue_url:
-        raise HTTPException(
-            status.HTTP_503_SERVICE_UNAVAILABLE,
-            "Personal briefing preparation is temporarily unavailable",
+        return False
+    try:
+        celery_app.send_task(
+            "app.workers.tasks.pilot_activation.personalise_user",
+            args=[
+                {
+                    "tenant_id": str(context.principal.tenant_id),
+                    "user_id": str(context.principal.user_id),
+                }
+            ],
+            queue=queue_url.rstrip("/").rsplit("/", 1)[-1],
         )
-    celery_app.send_task(
-        "app.workers.tasks.pilot_activation.personalise_user",
-        args=[
-            {
-                "tenant_id": str(context.principal.tenant_id),
-                "user_id": str(context.principal.user_id),
-            }
-        ],
-        queue=queue_url.rstrip("/").rsplit("/", 1)[-1],
-    )
+    except Exception:
+        return False
+    return True
 
 
 async def _audit(
@@ -479,10 +664,18 @@ async def _audit(
     event_type: str,
     entity_type: str,
     entity_id: UUID,
+    *,
+    increment_context_version: bool = False,
 ) -> None:
     await context.session.execute(
         text(
             """
+            WITH profile_updated AS (
+              UPDATE context.company_profiles
+              SET version=version+1, updated_at=NOW()
+              WHERE tenant_id=:tenant_id AND :increment_context_version
+              RETURNING tenant_id
+            )
             INSERT INTO audit.events (
               tenant_id, actor_user_id, event_type, entity_type,
               entity_id, event_data, occurred_at
@@ -498,5 +691,6 @@ async def _audit(
             "event_type": event_type,
             "entity_type": entity_type,
             "entity_id": entity_id,
+            "increment_context_version": increment_context_version,
         },
     )

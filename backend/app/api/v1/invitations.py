@@ -115,7 +115,8 @@ async def accept_invitation(
                 text(
                     """
                     SELECT users.id, users.tenant_id, users.email, users.display_name,
-                           users.permission_role, tenants.name AS tenant_name
+                           users.permission_role, users.onboarding_completed_at,
+                           tenants.name AS tenant_name
                     FROM auth.users users
                     JOIN auth.tenants tenants ON tenants.id = users.tenant_id
                     WHERE users.id = :user_id AND users.tenant_id = :tenant_id
