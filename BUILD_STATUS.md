@@ -236,9 +236,18 @@ passed 358 unit tests (75.12% coverage), the PostgreSQL/Redis dependency test,
 migration upgrade/downgrade/re-upgrade, type checks and security scans. Frontend
 CI passed. The full Terraform plan now reports no changes after codifying the
 clustering pause; six ECS tests include staging pause and production rejection.
-Additional admin provisioning form repair and its browser test are being verified.
+Additional admin provisioning form repair and its browser test passed locally;
+subsequent backend, frontend and Terraform CI runs also passed.
 
 Synthesis now reads its completion cache after a separate lock statement and
 skips stored duplicates before paid generation. No bulk queue/DLQ replay or
 historical deletion occurred. See `docs/qa/phase5-funded-recovery-2026-09-05.md`.
 Live application rollout and the fresh-tenant production gate are still pending.
+
+Latest continuation: CIL strict-schema correction committed locally (`5a5311b`,
+integration `3584512`), with 12 targeted tests and Ruff passing. Pushes failed
+because local network/DNS access to GitHub and AWS became unavailable. The
+bounded provider-contract task `8f2fa50617634aed9a1a8496e08f9246` was launched,
+but its result/stopped state could not be retrieved after DNS failure. Resume
+by inspecting that existing task, not by creating another paid request. PR #89
+remains unmerged; no application rollout or production change is claimed.
