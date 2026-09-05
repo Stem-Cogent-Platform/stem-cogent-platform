@@ -17,6 +17,13 @@ env:
   TF_INPUT: 'false'
   AWS_REGION: eu-west-1
 
+# Share Application CD's environment lock: Terraform must not restore workers
+# while a migration has deliberately paused them. Preserve pending releases.
+concurrency:
+  group: application-deploy-${{ github.ref_name }}
+  cancel-in-progress: false
+  queue: max
+
 jobs:
   pull-request-plan:
     name: Plan (${{ github.base_ref == 'main' && 'production' || 'staging' }})
