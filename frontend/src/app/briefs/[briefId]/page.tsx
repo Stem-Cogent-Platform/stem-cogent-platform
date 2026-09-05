@@ -24,14 +24,19 @@ export default function BriefDetailPage() {
   const [pendingAction, setPendingAction] = useState<string | null>(null);
   const [showCil, setShowCil] = useState(false);
   const [showEvidence, setShowEvidence] = useState(false);
+  const [phase5Ui, setPhase5Ui] = useState(false);
 
   const load = useCallback(async () => {
     if (!UUID.test(id)) return;
     try {
       setState({ status: "loading" });
-      const data = await apiRequest<Brief>(`/api/v1/briefs/${id}`);
+      const [data, capabilities] = await Promise.all([
+        apiRequest<Brief>(`/api/v1/briefs/${id}`),
+        apiRequest<{ phase5_new_ui_enabled: boolean }>("/api/v1/capabilities"),
+      ]);
+      setPhase5Ui(capabilities.phase5_new_ui_enabled);
       setState({ status: "ready", data });
-      if (data.response_options?.length) void recordProductEvent("DECISION_PATHS_VIEWED", { object_type: "DECISION_BRIEF", object_id: id });
+      if (capabilities.phase5_new_ui_enabled && data.response_options?.length) void recordProductEvent("DECISION_PATHS_VIEWED", { object_type: "DECISION_BRIEF", object_id: id });
     } catch (error) {
       setState({ status: "error", message: friendlyError(error, "We couldn't load this Decision Brief. Try again.") });
     }
@@ -54,6 +59,10 @@ export default function BriefDetailPage() {
   function openEvidence() {
     setShowEvidence((value) => !value);
     if (!showEvidence) void recordProductEvent("EVIDENCE_PANEL_OPENED", { object_type: "DECISION_BRIEF", object_id: id });
+  }
+
+  if (state.status === "ready" && !phase5Ui) {
+    return <WorkspaceShell><section className="detail-page"><Link className="text-link" href="/briefing">Back to briefing</Link><div className="detail-grid brief-detail-layout"><article className="brief-detail"><div className="brief-meta"><span className={`priority-chip priority-${state.data.relevance_band.toLowerCase()}`}>{state.data.relevance_band}</span><span>{state.data.confidence_band} confidence</span><span>{state.data.quantification_status.replaceAll("_", " ")}</span></div><h1>{state.data.what_changed}</h1><section><h2>Why it matters to you</h2><p>{state.data.why_it_matters || "No company-specific assertion is available beyond the verified evidence."}</p></section><section><h2>Exposure and stakes</h2><p>{state.data.exposure_summary || "Exposure is still being assessed."}</p><p>{state.data.stakes_summary || "No quantified stake has been verified."}</p></section><section><h2>Decision required</h2><p>{state.data.decision_prompt || "Continue monitoring this development."}</p><p><strong>Owner:</strong> {state.data.owner_roles.join(", ") || "Unassigned"}</p></section><section><h2>Uncertainty</h2>{state.data.uncertainties.length ? <ul>{state.data.uncertainties.map((item) => <li key={item}>{item.replaceAll("_", " ")}</li>)}</ul> : <p>No additional uncertainty was recorded.</p>}</section><section><h2>Evidence</h2><ul className="evidence-list">{state.data.evidence?.map((item) => <li key={item.id}><div><strong>{item.title || item.source_name}</strong><small>{item.source_name} · {item.confidence_band || "Reviewed"}</small></div>{item.source_url && <a href={item.source_url} rel="noreferrer" target="_blank">Open source</a>}</li>)}</ul></section><section className="decision-actions"><h2>Record decision action</h2><div>{actions.map(([value, label]) => <button disabled={pendingAction !== null} key={value} onClick={() => void act(value)} type="button">{pendingAction === value ? "Recording..." : label}</button>)}</div>{actionMessage && <p aria-live="polite" className="form-message">{actionMessage}</p>}</section></article><CILPanel anchorId={id} /></div></section></WorkspaceShell>;
   }
 
   return <WorkspaceShell><section className="detail-page">

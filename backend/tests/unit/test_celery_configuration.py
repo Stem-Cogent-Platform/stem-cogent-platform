@@ -35,6 +35,16 @@ def test_all_canonical_launch_queues_use_predefined_sqs_urls() -> None:
     assert app.conf.broker_url == "sqs://"
 
 
+def test_each_queue_keeps_its_own_exchange_and_routing_key_after_finalize() -> None:
+    app = create_celery_app(_settings_with_queues())
+
+    app.finalize()
+
+    for queue_name, queue in app.amqp.queues.items():
+        assert queue.exchange.name == queue_name
+        assert queue.routing_key == queue_name
+
+
 def test_worker_transport_is_json_only_and_failure_safe() -> None:
     app = create_celery_app(_settings_with_queues())
 

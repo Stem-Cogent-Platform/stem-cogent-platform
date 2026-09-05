@@ -175,15 +175,48 @@ run "maps_pipeline_permissions_to_real_transitions" {
   }
 
   assert {
-    condition = alltrue([
+    condition = alltrue(concat([
+      for statement in jsondecode(aws_iam_role_policy.task["api-service"].policy).Statement :
+      toset(statement.Resource) == toset([
+        "arn:aws:sqs:eu-west-1:123456789012:sc-ingestion-priority-staging",
+        "arn:aws:sqs:eu-west-1:123456789012:sc-pipeline-synthesized-staging",
+        "arn:aws:sqs:eu-west-1:123456789012:sc-feedback-events-staging",
+        ]) && toset(statement.Action) == toset([
+        "sqs:GetQueueAttributes",
+        "sqs:GetQueueUrl",
+        "sqs:SendMessage",
+        "sqs:SendMessageBatch",
+      ]) if statement.Sid == "PublishAssignedQueues"
+      ], [
+      !strcontains(aws_iam_role_policy.task["api-service"].policy, "sqs:ReceiveMessage"),
       strcontains(aws_iam_role_policy.task["scheduler-worker"].policy, "sc-ingestion-priority-staging"),
       strcontains(aws_iam_role_policy.task["scheduler-worker"].policy, "sc-ingestion-standard-staging"),
       strcontains(aws_iam_role_policy.task["scheduler-worker"].policy, "sqs:GetQueueAttributes"),
       strcontains(aws_iam_role_policy.task["scheduler-worker"].policy, "sqs:GetQueueUrl"),
       strcontains(aws_iam_role_policy.task["collector-worker"].policy, "sc-pipeline-raw-signals-staging"),
       strcontains(aws_iam_role_policy.task["normalization-worker"].policy, "sc-entity-review-staging"),
+    ]))
+    error_message = "API and consolidated Phase 2 runtimes must be authorized for every queue transition performed by their code without unnecessary consumption access."
+  }
+}
+
+run "allows_only_the_api_to_read_the_system_admin_mfa_secret" {
+  command = plan
+
+  assert {
+    condition = strcontains(
+      aws_iam_role_policy.task["api-service"].policy,
+      "sc/staging/auth/system-admin-mfa-secret-a",
+    )
+    error_message = "The API task role must be able to read the configured system-admin MFA secret."
+  }
+
+  assert {
+    condition = alltrue([
+      for service, policy in aws_iam_role_policy.task :
+      service == "api-service" || !strcontains(policy.policy, "system-admin-mfa-secret")
     ])
-    error_message = "Consolidated Phase 2 runtimes must be authorized for every queue transition performed by their code."
+    error_message = "The system-admin MFA secret must not be exposed to non-API task roles."
   }
 }
 

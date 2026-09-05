@@ -85,13 +85,17 @@ def test_live_acceptance_migration_is_staging_forward_compatible() -> None:
     assert "embedding_input_version" in source
 
 
-def test_invitation_repair_preserves_canonical_citext_function_contract() -> None:
+def test_invitation_repair_preserves_deployed_function_contract() -> None:
     source = (
         ROOT
         / "backend/alembic/versions/0026_2026_09_03_fix_invitation_acceptance.py"
     ).read_text()
 
-    assert "email CITEXT" in source
+    original = (
+        ROOT / "backend/alembic/versions/0023_2026_08_31_phase5_pilot_invites_and_activation.py"
+    ).read_text()
+    assert "email VARCHAR" in source
+    assert "email VARCHAR" in original
     assert "ON CONFLICT ON CONSTRAINT users_tenant_email_key" in source
 
 
@@ -135,6 +139,15 @@ def test_monitoring_contract_requires_identity_evidence_and_relevance() -> None:
         assert required in product
     assert "jsonb_array_length(output.citations)>0" in activation
     assert "matched_object_ids" in activation
+
+
+def test_entity_identity_does_not_split_backfilled_and_legacy_fingerprints() -> None:
+    from app.ops.audit_phase5_queries import select_sql
+
+    query = select_sql(ROOT / "backend/app/api/v1/product.py", ") activity")
+    assert "signal.content_fingerprint" not in query
+    assert query.count("COALESCE(signal.canonical_url,signal.source_url,'')") == 2
+    assert "signal.body_text_hash" in query
 
 
 def test_live_staging_runtime_repairs_are_present_in_canonical_source() -> None:

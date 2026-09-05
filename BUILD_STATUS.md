@@ -223,3 +223,22 @@ local. The latest evidence is in `docs/qa/phase5-live-followup-2026-09-05.md`.
 | AWS reported cost | Staging: $122.59 September through September 4, $224.92 last 7 days, $834.95 last 30 days. September figures remain estimated by AWS. |
 | Existing payer controls | $100 monthly budget with actual 85/100% and forecast 100% alerts; service anomaly monitor and daily subscription exist outside current IaC. Requested full threshold matrix remains open. |
 | Production gate | NOT READY — BLOCKERS REMAIN: provider funding, deployment, historical cleanup, current-context activation, fresh-tenant journey, continuous flow and full isolation proof. |
+
+### 2026-09-05 — Funded recovery and staging release integration
+
+The funding blocker is cleared: one bounded live embedding request returned 200.
+The staging API's two provider-secret permissions were applied through a saved,
+reviewed Terraform plan (one in-place policy update; no additions or destroys).
+The dedicated pre-0028 RDS snapshot is available. Production remains untouched.
+
+PR #89 reconciles canonical repairs with deployed staging fixes. Its backend CI
+passed 358 unit tests (75.12% coverage), the PostgreSQL/Redis dependency test,
+migration upgrade/downgrade/re-upgrade, type checks and security scans. Frontend
+CI passed. The full Terraform plan now reports no changes after codifying the
+clustering pause; six ECS tests include staging pause and production rejection.
+Additional admin provisioning form repair and its browser test are being verified.
+
+Synthesis now reads its completion cache after a separate lock statement and
+skips stored duplicates before paid generation. No bulk queue/DLQ replay or
+historical deletion occurred. See `docs/qa/phase5-funded-recovery-2026-09-05.md`.
+Live application rollout and the fresh-tenant production gate are still pending.

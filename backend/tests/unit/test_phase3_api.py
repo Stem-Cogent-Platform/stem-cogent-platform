@@ -323,11 +323,18 @@ async def test_cil_query_creates_and_reuses_grounded_sessions(monkeypatch) -> No
         confidence_indicator="HIGH",
     )
     monkeypatch.setattr(cil, "retrieve_context", AsyncMock(return_value=result))
+    monkeypatch.setattr(
+        cil,
+        "get_settings",
+        lambda: SimpleNamespace(PHASE5_PRODUCT_ANALYTICS_ENABLED=True),
+    )
     session = FakeSession(
         FakeResult(scalar_one=session_id),
         FakeResult(),
         FakeResult(),
+        FakeResult(),
         FakeResult(scalar_one_or_none=session_id),
+        FakeResult(),
         FakeResult(),
         FakeResult(),
     )
@@ -349,6 +356,12 @@ async def test_cil_query_creates_and_reuses_grounded_sessions(monkeypatch) -> No
     )
     assert second.session_id == session_id
     assert session.commits == 2
+    audit_statements = [
+        statement for statement in session.statements
+        if "CIL_QUERY_SUBMITTED" in statement
+    ]
+    assert audit_statements
+    assert all("CAST(:grounded AS BOOLEAN)" in statement for statement in audit_statements)
 
 
 @pytest.mark.asyncio

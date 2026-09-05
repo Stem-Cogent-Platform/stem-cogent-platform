@@ -18,6 +18,9 @@ _READINESS_TABLES = ("user_decision_lenses", "focus_areas")
 
 
 def upgrade() -> None:
+    # Internal readiness only counts these records. Restrict the additional
+    # cross-tenant capability to SELECT; tenant users retain their existing
+    # per-tenant ALL policies.
     for table in _READINESS_TABLES:
         op.execute(
             f"CREATE POLICY system_admin_read_{table} ON context.{table} "

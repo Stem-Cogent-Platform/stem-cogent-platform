@@ -29,7 +29,7 @@ def _accept_function(*, qualified_conflicts: bool) -> str:
     statement = """
         CREATE OR REPLACE FUNCTION auth.accept_tenant_invitation(
             p_token_hash TEXT, p_password_hash TEXT, p_display_name TEXT
-        ) RETURNS TABLE (user_id UUID, tenant_id UUID, email CITEXT)
+        ) RETURNS TABLE (user_id UUID, tenant_id UUID, email VARCHAR)
         LANGUAGE plpgsql SECURITY DEFINER
         SET search_path = pg_catalog, auth, audit
         AS $$
@@ -75,6 +75,9 @@ def _accept_function(*, qualified_conflicts: bool) -> str:
 
 
 def upgrade() -> None:
+    # OUT parameters are PL/pgSQL variables. Named conflict columns such as
+    # ``tenant_id`` and ``email`` are therefore ambiguous inside the function.
+    # Constraint names select the same keys without colliding with OUT params.
     op.execute(_accept_function(qualified_conflicts=True))
 
 

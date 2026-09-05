@@ -2,6 +2,8 @@ FROM node:20-alpine AS dependencies
 
 WORKDIR /app
 
+RUN npm install --global npm@11.6.2
+
 COPY package.json package-lock.json ./
 RUN npm ci --no-audit --no-fund --fetch-retries=5 --fetch-retry-mintimeout=20000 --fetch-retry-maxtimeout=120000
 

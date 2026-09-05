@@ -10,16 +10,21 @@ import { stateMessages } from "@/lib/product-copy/stateMessages";
 import { LoadState } from "@/lib/types";
 
 type WatchItem = { id: string; name: string; object_type: string; importance: string; entity_id?: string; recent_activity_count: number | null; open_brief_count: number };
-type FocusItem = { id: string; label: string; focus_type: string; entity_id?: string; recent_activity_count: number | null; open_brief_count: number | null };
+type FocusItem = { id: string; label: string; focus_type: string; weight?: number; entity_id?: string; recent_activity_count: number | null; open_brief_count: number | null };
 type Watchlist = { company: WatchItem[]; focus: FocusItem[] };
 const tabs = ["COMPETITOR", "PRODUCT", "DEPENDENCY", "MARKET", "REGULATOR", "FOCUS"] as const;
 
 export default function WatchlistPage() {
   const [state, setState] = useState<LoadState<Watchlist>>({ status: "loading" });
+  const [phase5Ui, setPhase5Ui] = useState(false);
   const [tab, setTab] = useState<(typeof tabs)[number]>("COMPETITOR");
-  const load = useCallback(async () => { try { setState({ status: "loading" }); setState({ status: "ready", data: await apiRequest<Watchlist>("/api/v1/watchlist") }); } catch (error) { setState({ status: "error", message: error instanceof Error ? error.message : "Your watchlist could not be loaded." }); } }, []);
+  const load = useCallback(async () => { try { setState({ status: "loading" }); const [data, capabilities] = await Promise.all([apiRequest<Watchlist>("/api/v1/watchlist"), apiRequest<{ phase5_new_ui_enabled: boolean }>("/api/v1/capabilities")]); setPhase5Ui(capabilities.phase5_new_ui_enabled); setState({ status: "ready", data }); } catch (error) { setState({ status: "error", message: error instanceof Error ? error.message : "Your watchlist could not be loaded." }); } }, []);
   useEffect(() => { const timer = window.setTimeout(() => void load(), 0); return () => window.clearTimeout(timer); }, [load]);
   const items = useMemo(() => state.status !== "ready" ? [] : tab === "FOCUS" ? state.data.focus : state.data.company.filter((item) => item.object_type === tab), [state, tab]);
+
+  if (state.status === "ready" && !phase5Ui) {
+    return <WorkspaceShell><section className="content-page"><div className="page-heading"><div><p className="eyebrow">Monitoring scope</p><h1>Watchlist & Focus Areas</h1></div><Link className="secondary-button" href="/onboarding/lens">Add a Focus Area</Link></div><div className="two-column"><section className="panel"><h2>Company watchlist</h2>{state.data.company.map((item) => <article className="watch-item" key={item.id}><div><small>{item.object_type.replaceAll("_", " ")}</small><strong>{item.name}</strong><span>{item.recent_activity_count == null ? "Monitoring setup in progress" : `${item.recent_activity_count} signal${item.recent_activity_count === 1 ? "" : "s"} · 30 days`}</span></div><span>{item.open_brief_count} open brief{item.open_brief_count === 1 ? "" : "s"}</span>{item.entity_id && <Link href={`/entities/${item.entity_id}`}>View entity</Link>}</article>)}</section><section className="panel"><h2>My Focus Areas</h2>{state.data.focus.map((item) => <article className="watch-item" key={item.id}><div><small>{item.focus_type.replaceAll("_", " ")}</small><strong>{item.label}</strong><span>{item.recent_activity_count == null ? "Monitoring setup in progress" : `${item.recent_activity_count} signal${item.recent_activity_count === 1 ? "" : "s"} · 30 days`}</span></div>{item.entity_id && <Link href={`/entities/${item.entity_id}`}>View entity</Link>}</article>)}</section></div></section></WorkspaceShell>;
+  }
 
   return <WorkspaceShell><section className="content-page"><div className="page-heading"><div><p className="eyebrow">Monitoring scope</p><h1>Watchlist & Focus Areas</h1></div><Link className="secondary-button" href="/onboarding/lens">Add a Focus Area</Link></div>
     {state.status === "loading" && <ModuleLoading label="Loading watchlist and Focus Areas" />}{state.status === "error" && <ModuleFailure message={state.message} retry={() => void load()} />}

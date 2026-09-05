@@ -667,22 +667,15 @@ async def _audit(
     *,
     increment_context_version: bool = False,
 ) -> None:
-    version_update = (
-        """
-        WITH profile_updated AS (
-          UPDATE context.company_profiles
-          SET version=version+1, updated_at=NOW()
-          WHERE tenant_id=:tenant_id
-          RETURNING tenant_id
-        )
-        """
-        if increment_context_version
-        else ""
-    )
     await context.session.execute(
         text(
-            version_update
-            + """
+            """
+            WITH profile_updated AS (
+              UPDATE context.company_profiles
+              SET version=version+1, updated_at=NOW()
+              WHERE tenant_id=:tenant_id AND :increment_context_version
+              RETURNING tenant_id
+            )
             INSERT INTO audit.events (
               tenant_id, actor_user_id, event_type, entity_type,
               entity_id, event_data, occurred_at
@@ -698,5 +691,6 @@ async def _audit(
             "event_type": event_type,
             "entity_type": entity_type,
             "entity_id": entity_id,
+            "increment_context_version": increment_context_version,
         },
     )

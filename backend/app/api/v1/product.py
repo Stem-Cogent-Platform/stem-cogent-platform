@@ -337,7 +337,7 @@ async def record_decision_action(
         await _audit(context, f"BRIEF_{body.action_type}", "DECISION_BRIEF", brief_id,
                      {"action_id": str(row["id"])})
     if get_settings().PHASE5_PRODUCT_ANALYTICS_ENABLED:
-        event_names = {
+        event_names: dict[str, _PRODUCT_EVENTS] = {
             "ACKNOWLEDGED": "BRIEF_ACKNOWLEDGED",
             "WATCHING": "BRIEF_WATCHED",
             "ESCALATED": "BRIEF_ESCALATED",
@@ -479,10 +479,9 @@ async def entity_profile(
                        activity.source_url,activity.source_name
                 FROM (
                 SELECT DISTINCT ON (
-                         COALESCE(signal.content_fingerprint,
-                                  signal.source_id::TEXT||':'||
-                                  COALESCE(signal.source_url,'')||':'||
-                                  COALESCE(signal.body_text_hash,''))
+                         signal.source_id,
+                         COALESCE(signal.canonical_url,signal.source_url,''),
+                         signal.body_text_hash
                        ) signal.id,signal.title,signal.primary_domain,
                          signal.subcategory_tags[1] AS event_type,
                          signal.urgency_band,signal.confidence_band,
@@ -493,10 +492,9 @@ async def entity_profile(
                 WHERE link.entity_id = :entity_id
                   AND (signal.tenant_id IS NULL OR signal.tenant_id = :tenant_id)
                   AND signal.dedup_status NOT IN ('EXACT_DUPLICATE','SEMANTIC_DUPLICATE')
-                ORDER BY COALESCE(signal.content_fingerprint,
-                                  signal.source_id::TEXT||':'||
-                                  COALESCE(signal.source_url,'')||':'||
-                                  COALESCE(signal.body_text_hash,'')),
+                ORDER BY signal.source_id,
+                         COALESCE(signal.canonical_url,signal.source_url,''),
+                         signal.body_text_hash,
                          signal.published_at DESC NULLS LAST,signal.created_at DESC
                 ) activity
                 ORDER BY activity.published_at DESC NULLS LAST,activity.id

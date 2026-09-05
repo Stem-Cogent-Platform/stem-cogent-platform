@@ -327,15 +327,18 @@ async def _tenant_detail(context: RequestContext, tenant_id: UUID) -> dict[str, 
                 SELECT tenant.id, tenant.name, tenant.slug, tenant.status, tenant.plan_tier,
                        engagement.id AS engagement_id,
                        engagement.status AS pilot_status,
-                       engagement.started_at,engagement.ends_at,
-                       engagement.owner_user_id,engagement.cohort_code,
-                       engagement.company_website,engagement.pilot_owner,
-                       engagement.internal_notes,engagement.readiness_override_note,
+                       engagement.started_at, engagement.ends_at,
+                       engagement.owner_user_id, engagement.cohort_code,
+                       engagement.conversion_outcome, engagement.conversion_note,
+                       engagement.created_at AS pilot_created_at,
+                       engagement.updated_at AS pilot_updated_at,
+                       engagement.company_website, engagement.pilot_owner,
+                       engagement.internal_notes, engagement.readiness_override_note,
                        engagement.first_useful_brief_available_at,
-                       profile.business_categories,profile.operating_markets,
-                       profile.customer_segments,profile.regulatory_categories,
-                       profile.strategic_priorities,profile.profile_completeness,
+                       profile.customer_segments, profile.regulatory_categories,
                        profile.version AS company_context_version,
+                       profile.business_categories, profile.operating_markets,
+                       profile.strategic_priorities, profile.profile_completeness,
                        (SELECT COUNT(*) FROM context.company_objects object
                         WHERE object.tenant_id=tenant.id AND object.active) AS object_count,
                        (SELECT COUNT(*) FROM context.company_objects object
@@ -578,7 +581,7 @@ async def start_activation(
             {"tenant_id": tenant_id},
         )
     ).mappings().all()
-    if not company_context_status(
+    if profile is None or not company_context_status(
         dict(profile) if profile else None, [dict(item) for item in objects]
     )["complete"]:
         raise HTTPException(status.HTTP_409_CONFLICT, "Company Context is incomplete")
@@ -622,13 +625,26 @@ async def start_activation(
             task_id=str(run_id),
         )
     except Exception as exc:
+        failure_code = "ACTIVATION_DISPATCH_FAILED"
         await context.session.execute(
             text(
                 "UPDATE context.activation_runs SET status='FAILED',completed_at=NOW(),"
-                "error_summary='ACTIVATION_DISPATCH_FAILED' "
-                "WHERE id=:run_id AND tenant_id=:tenant_id AND status='QUEUED'"
+                "error_summary=:failure_code WHERE id=:run_id AND tenant_id=:tenant_id "
+                "AND status='QUEUED'"
             ),
-            {"run_id": run_id, "tenant_id": tenant_id},
+            {
+                "failure_code": failure_code,
+                "run_id": run_id,
+                "tenant_id": tenant_id,
+            },
+        )
+        await _audit(
+            context,
+            "ACTIVATION_RUN_DISPATCH_FAILED",
+            tenant_id,
+            "ACTIVATION_RUN",
+            run_id,
+            {"failure_code": failure_code},
         )
         await context.session.commit()
         raise HTTPException(

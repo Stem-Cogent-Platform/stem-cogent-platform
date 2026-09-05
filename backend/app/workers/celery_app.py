@@ -91,6 +91,10 @@ def create_celery_app(settings: Settings | None = None) -> Celery:
         task_create_missing_queues=False,
         task_default_queue=default_queue,
         task_ignore_result=True,
+        # Celery otherwise finalizes every bare Queue with the default queue's
+        # exchange and routing key. For SQS that silently sends explicitly
+        # routed tasks to the default physical queue instead of their assigned
+        # predefined queue.
         task_queues=tuple(
             Queue(name, Exchange(name, type="direct"), routing_key=name)
             for name in queues
