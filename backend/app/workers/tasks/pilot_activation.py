@@ -10,10 +10,20 @@ from sqlalchemy import text
 
 from app.core.config import get_settings
 from app.core.database import get_session
+from app.context.completeness import company_context_status
 from app.workers.celery_app import celery_app
 from app.workers.events import CeleryEventPublisher
 from app.workers.runtime import run_async_worker
 from app.workers.tasks.decision import run_decision_briefs
+
+
+def _decision_payload(output: dict[str, Any], tenant_id: UUID) -> dict[str, str]:
+    """Normalize database-driver UUIDs before crossing the event boundary."""
+    return {
+        "global_output_id": str(output["global_output_id"]),
+        "signal_id": str(output["signal_id"]),
+        "tenant_id": str(tenant_id),
+    }
 
 
 async def run_activation(payload: dict[str, Any]) -> str:
@@ -46,25 +56,27 @@ async def run_activation(payload: dict[str, Any]) -> str:
                 )
             ).scalar_one_or_none()
             return f"UNCHANGED:{existing or 'MISSING'}"
-        profile_version = (
+        profile = (
             await session.execute(
-                text("SELECT version FROM context.company_profiles WHERE tenant_id=:tenant_id"),
+                text("SELECT * FROM context.company_profiles WHERE tenant_id=:tenant_id"),
                 {"tenant_id": tenant_id},
             )
-        ).scalar_one_or_none()
-        if profile_version != context_version:
+        ).mappings().one_or_none()
+        if profile is None or profile["version"] != context_version:
             await _finish_failed(session, run_id, tenant_id, "Company Context version changed")
             return "FAILED:CONTEXT_VERSION_CHANGED"
-        context_count = (
+        context_objects = (
             await session.execute(
                 text(
-                    "SELECT COUNT(*) FROM context.company_objects "
+                    "SELECT * FROM context.company_objects "
                     "WHERE tenant_id=:tenant_id AND active"
                 ),
                 {"tenant_id": tenant_id},
             )
-        ).scalar_one()
-        if context_count == 0:
+        ).mappings().all()
+        if not company_context_status(
+            dict(profile), [dict(item) for item in context_objects]
+        )["complete"]:
             await _finish_failed(session, run_id, tenant_id, "Company Context is incomplete")
             return "FAILED:CONTEXT_INCOMPLETE"
         outputs = [
@@ -73,11 +85,19 @@ async def run_activation(payload: dict[str, Any]) -> str:
                 await session.execute(
                     text(
                         """
-                        SELECT id AS global_output_id,signal_id
-                        FROM intelligence.global_outputs
-                        WHERE tenant_id IS NULL AND synthesis_status='COMPLETED'
-                          AND created_at >= NOW() - make_interval(days => :lookback_days)
-                        ORDER BY created_at,id
+                        SELECT DISTINCT ON (
+                            signal.source_id,signal.source_url,signal.body_text_hash
+                        ) output.id AS global_output_id,output.signal_id
+                        FROM intelligence.global_outputs output
+                        JOIN pipeline.signals signal ON signal.id=output.signal_id
+                        WHERE output.tenant_id IS NULL AND output.synthesis_status='COMPLETED'
+                          AND signal.tenant_id IS NULL
+                          AND signal.dedup_status NOT IN ('EXACT_DUPLICATE','SEMANTIC_DUPLICATE')
+                          AND COALESCE(signal.published_at,signal.detected_at)
+                              >= NOW() - make_interval(days => :lookback_days)
+                          AND COALESCE(signal.published_at,signal.detected_at) <= NOW()
+                        ORDER BY signal.source_id,signal.source_url,signal.body_text_hash,
+                                 output.created_at,output.id
                         """
                     ),
                     {"lookback_days": lookback_days},
@@ -101,10 +121,7 @@ async def run_activation(payload: dict[str, Any]) -> str:
                     "origin_service": "pilot-activation-worker",
                     "origin_timestamp": datetime.now(UTC).isoformat(),
                     "routing_key": "pipeline.synthesized",
-                    "payload": {
-                        **output,
-                        "tenant_id": str(tenant_id),
-                    },
+                    "payload": _decision_payload(output, tenant_id),
                 }
             )
     except Exception as exc:
@@ -165,7 +182,9 @@ async def run_activation(payload: dict[str, Any]) -> str:
                     tenant_id,event_type,entity_type,entity_id,event_data,occurred_at
                 ) VALUES (
                     :tenant_id,'ACTIVATION_RUN_COMPLETED','ACTIVATION_RUN',:run_id,
-                    jsonb_build_object('global_outputs_scanned',:scanned),NOW()
+                    jsonb_build_object(
+                        'global_outputs_scanned',CAST(:scanned AS INTEGER)
+                    ),NOW()
                 )
                 """
             ),
@@ -191,6 +210,9 @@ async def personalise_user(payload: dict[str, Any]) -> str:
                         """
                         SELECT DISTINCT assessment.global_output_id,assessment.signal_id
                         FROM decision.assessments assessment
+                        JOIN context.company_profiles profile
+                          ON profile.tenant_id=assessment.tenant_id
+                         AND profile.version=assessment.company_context_version
                         WHERE assessment.tenant_id=:tenant_id
                         ORDER BY assessment.global_output_id
                         """
@@ -209,7 +231,7 @@ async def personalise_user(payload: dict[str, Any]) -> str:
                 "origin_service": "pilot-personalisation-worker",
                 "origin_timestamp": datetime.now(UTC).isoformat(),
                 "routing_key": "pipeline.synthesized",
-                "payload": {**output, "tenant_id": str(tenant_id)},
+                "payload": _decision_payload(output, tenant_id),
             }
         )
     await _maybe_start_trial(tenant_id, user_id)
@@ -230,10 +252,38 @@ async def _maybe_start_trial(tenant_id: UUID, user_id: UUID) -> None:
                              WHERE tenant_id=:tenant_id AND user_id=:user_id AND active) lens,
                       EXISTS(SELECT 1 FROM context.focus_areas
                              WHERE tenant_id=:tenant_id AND user_id=:user_id AND active) focus,
-                      ((SELECT COUNT(*) FROM decision.briefs
-                        WHERE tenant_id=:tenant_id AND user_id IS NULL) > 0
-                       OR (SELECT COUNT(*) FROM context.relevant_monitoring
-                           WHERE tenant_id=:tenant_id AND user_id IS NULL) >= 3
+                      ((SELECT COUNT(*) FROM decision.briefs brief
+                        JOIN decision.assessments a ON a.id=brief.assessment_id
+                        JOIN context.company_profiles profile ON profile.tenant_id=brief.tenant_id
+                         AND profile.version=a.company_context_version
+                        WHERE brief.tenant_id=:tenant_id AND brief.user_id IS NULL) > 0
+                       OR (SELECT COUNT(DISTINCT (signal.source_id,signal.source_url,signal.body_text_hash))
+                           FROM context.relevant_monitoring monitoring
+                           JOIN context.company_profiles profile
+                             ON profile.tenant_id=monitoring.tenant_id
+                            AND profile.version=monitoring.company_context_version
+                           JOIN pipeline.signals signal ON signal.id=monitoring.signal_id
+                           JOIN intelligence.global_outputs output
+                             ON output.id=monitoring.global_output_id
+                           JOIN decision.assessments assessment
+                             ON assessment.tenant_id=monitoring.tenant_id
+                            AND assessment.global_output_id=monitoring.global_output_id
+                            AND assessment.company_context_version=
+                                monitoring.company_context_version
+                           WHERE monitoring.tenant_id=:tenant_id
+                             AND monitoring.user_id IS NULL
+                             AND signal.dedup_status NOT IN ('EXACT_DUPLICATE','SEMANTIC_DUPLICATE')
+                             AND COALESCE(NULLIF(BTRIM(signal.title),''),
+                                          NULLIF(BTRIM(output.summary),'')) IS NOT NULL
+                             AND signal.primary_domain IS NOT NULL
+                             AND NULLIF(signal.subcategory_tags[1],'') IS NOT NULL
+                             AND jsonb_array_length(output.citations)>0
+                             AND (
+                               cardinality(monitoring.matched_object_ids)>0
+                               OR jsonb_array_length(COALESCE(
+                                    assessment.rationale->'matched_rule_codes','[]'::JSONB
+                                  ))>0
+                             )) >= 3
                        OR EXISTS(SELECT 1 FROM pilot.engagements
                                  WHERE tenant_id=:tenant_id
                                    AND readiness_override_note IS NOT NULL)) first_value

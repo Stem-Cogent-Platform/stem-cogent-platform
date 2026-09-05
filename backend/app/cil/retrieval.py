@@ -157,23 +157,54 @@ async def _retrieve_entity(
     ).mappings().one_or_none()
     if entity is None:
         return _insufficient()
-    signal_ids = tuple((await session.execute(
+    signal_rows = (await session.execute(
         text(
             """
-            SELECT link.signal_id
+            SELECT DISTINCT ON (link.signal_id) link.signal_id, signal.title,
+                   left(signal.body_text, 1200) AS summary,
+                   signal.primary_domain, signal.subcategory_tags[1] AS event_type,
+                   signal.published_at, signal.source_url,
+                   source.source_name
             FROM intelligence.signal_entities AS link
             JOIN pipeline.signals AS signal ON signal.id = link.signal_id
+            JOIN config.sources AS source ON source.id = signal.source_id
             WHERE link.entity_id = :entity_id
               AND (link.tenant_id IS NULL OR link.tenant_id = :tenant_id)
               AND (signal.tenant_id IS NULL OR signal.tenant_id = :tenant_id)
-            ORDER BY signal.created_at DESC LIMIT 10
+            ORDER BY link.signal_id, signal.created_at DESC
+            LIMIT 10
             """
         ), {"entity_id": entity_id, "tenant_id": tenant_id}
-    )).scalars().all())
+    )).mappings().all()
+    relationships = (await session.execute(
+        text(
+            """
+            SELECT relationship_type, source_entity_id, target_entity_id,
+                   confidence_score, evidence_signal_ids
+            FROM intelligence.entity_relationships
+            WHERE (tenant_id IS NULL OR tenant_id = :tenant_id)
+              AND (source_entity_id = :entity_id OR target_entity_id = :entity_id)
+            ORDER BY confidence_score DESC NULLS LAST, id
+            LIMIT 20
+            """
+        ), {"entity_id": entity_id, "tenant_id": tenant_id}
+    )).mappings().all()
+    signal_ids = tuple(dict.fromkeys(
+        [row["signal_id"] for row in signal_rows]
+        + [
+            evidence_id
+            for relationship in relationships
+            for evidence_id in relationship["evidence_signal_ids"]
+        ]
+    ))[:20]
     citations = await _load_citations(session, tenant_id, signal_ids)
     return CILRetrievalResult(
-        {"entity": dict(entity), "related_signal_ids": signal_ids}, citations,
-        signal_ids, (), (), "MODERATE" if signal_ids else "LOW",
+        {
+            "entity": dict(entity),
+            "recent_evidence": [dict(row) for row in signal_rows],
+            "relationships": [dict(row) for row in relationships],
+        }, citations,
+        signal_ids, (), (), "MODERATE" if citations else "INSUFFICIENT_DATA",
     )
 
 
@@ -199,7 +230,7 @@ async def _retrieve_company_lens(
     )).mappings().all()
     return CILRetrievalResult(
         {"company_profile": dict(profile), "company_objects": [dict(row) for row in objects]},
-        (), (), (), (), "MODERATE",
+        (), (), (), (), "INSUFFICIENT_DATA",
     )
 
 

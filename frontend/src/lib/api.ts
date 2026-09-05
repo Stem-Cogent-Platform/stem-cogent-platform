@@ -133,6 +133,14 @@ export async function logout() {
 }
 
 export async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
+  if (!activeAccessToken) {
+    refreshInFlight ??= refreshSession().finally(() => {
+      refreshInFlight = null;
+    });
+    if (!(await refreshInFlight)) {
+      throw new ApiError("Your session has expired. Sign in again.", 401, "SESSION_REQUIRED");
+    }
+  }
   try {
     return await rawRequest<T>(path, init);
   } catch (error) {

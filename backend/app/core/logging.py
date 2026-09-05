@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import sys
 from contextvars import ContextVar, Token
 from datetime import UTC, datetime
@@ -41,6 +42,14 @@ _OPTIONAL_RECORD_FIELDS = (
     "http_path",
 )
 
+_URL_QUERY_PATTERN = re.compile(r'(?P<path>/[^\s?\"]*)\?[^\s\"]+')
+
+
+def _safe_log_message(record: logging.LogRecord) -> str:
+    """Remove query strings, which can contain invitation or OAuth secrets."""
+
+    return _URL_QUERY_PATTERN.sub(r"\g<path>", record.getMessage())
+
 
 class StructuredFormatter(logging.Formatter):
     """Render one stable JSON object per log record."""
@@ -55,7 +64,7 @@ class StructuredFormatter(logging.Formatter):
             "level": record.levelname,
             "service": getattr(record, "service", settings.SERVICE_NAME),
             "environment": settings.ENVIRONMENT,
-            "message": record.getMessage(),
+            "message": _safe_log_message(record),
             "logger": record.name,
             "request_id": request_id_var.get(),
             "correlation_id": correlation_id_var.get(),

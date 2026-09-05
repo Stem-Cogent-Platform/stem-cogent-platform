@@ -66,6 +66,7 @@ variables {
     database_credentials       = "arn:aws:secretsmanager:eu-west-1:123456789012:secret:sc/staging/rds/stemcogent/credentials-a"
     redis_auth_token           = "arn:aws:secretsmanager:eu-west-1:123456789012:secret:sc/staging/elasticache/redis/auth-token-a"
     jwt_signing_secret         = "arn:aws:secretsmanager:eu-west-1:123456789012:secret:sc/staging/auth/jwt-signing-secret-a"
+    system_admin_mfa_secret    = "arn:aws:secretsmanager:eu-west-1:123456789012:secret:sc/staging/auth/system-admin-mfa-secret-a"
     openai_api_key             = "arn:aws:secretsmanager:eu-west-1:123456789012:secret:sc/staging/llm/openai/api-key-a"
     groq_api_key               = "arn:aws:secretsmanager:eu-west-1:123456789012:secret:sc/staging/llm/groq/api-key-a"
     resend_api_key             = "arn:aws:secretsmanager:eu-west-1:123456789012:secret:sc/staging/email/resend/api-key-a"

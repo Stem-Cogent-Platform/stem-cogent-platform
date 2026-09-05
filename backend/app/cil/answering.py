@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any
 from uuid import UUID
 
@@ -7,8 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from app.cil.retrieval import CILRetrievalResult
 from app.core.config import get_settings
-from app.core.secrets import get_scalar_secret
-from app.intelligence.synthesis.client import OpenAIResponsesClient
+from app.intelligence.synthesis.router import build_generation_client
 
 _INSTRUCTIONS = (
     "Answer the user's question using only the supplied authorised structured context. "
@@ -25,16 +25,21 @@ class GroundedAnswer(BaseModel):
     follow_up_suggestions: list[str] = Field(default_factory=list, max_length=4)
 
 
-async def answer_query(query: str, result: CILRetrievalResult) -> GroundedAnswer:
+@dataclass(frozen=True, slots=True)
+class AnswerGeneration:
+    answer: GroundedAnswer
+    provider: str
+    model: str
+    fallback_used: bool = False
+
+
+async def answer_query(query: str, result: CILRetrievalResult) -> AnswerGeneration:
     settings = get_settings()
-    if settings.CIL_ENABLED and settings.OPENAI_API_KEY_ARN and result.citations:
-        client = OpenAIResponsesClient(
-            api_key=get_scalar_secret(settings.OPENAI_API_KEY_ARN),
-            model=settings.LLM_PRIMARY_MODEL,
-            timeout_seconds=settings.LLM_TIMEOUT_SECONDS,
-            max_retries=min(settings.LLM_MAX_RETRIES, 2),
-        )
+    provider_configured = settings.OPENAI_API_KEY_ARN or settings.GROQ_API_KEY_ARN
+    if settings.CIL_ENABLED and provider_configured and result.citations:
+        client = None
         try:
+            client = build_generation_client(max_retries=min(settings.LLM_MAX_RETRIES, 2))
             raw = await client.generate(
                 instructions=_INSTRUCTIONS,
                 context={"question": query, "authorised_context": result.structured_context,
@@ -45,12 +50,22 @@ async def answer_query(query: str, result: CILRetrievalResult) -> GroundedAnswer
             allowed = set(result.retrieved_signal_ids)
             if not set(answer.cited_signal_ids).issubset(allowed):
                 raise ValueError("CIL answer cited evidence outside the authorised retrieval set")
-            return answer
+            return AnswerGeneration(
+                answer=answer,
+                provider=getattr(client, "last_provider", settings.LLM_PRIMARY_PROVIDER),
+                model=getattr(client, "last_model", client.model),
+                fallback_used=getattr(client, "fallback_used", False),
+            )
         except Exception:
             pass
         finally:
-            await client.aclose()
-    return deterministic_answer(result)
+            if client is not None:
+                await client.aclose()
+    return AnswerGeneration(
+        answer=deterministic_answer(result),
+        provider="deterministic",
+        model="structured-retrieval-v1",
+    )
 
 
 def deterministic_answer(result: CILRetrievalResult) -> GroundedAnswer:

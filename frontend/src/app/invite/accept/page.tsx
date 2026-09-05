@@ -55,7 +55,7 @@ function InvitationForm() {
         {status === "loading" && <div aria-busy="true" className="invite-loading"><span /><span /><span /></div>}
         {status === "error" && <><p className="eyebrow">Pilot invitation</p><h1>Invitation unavailable</h1><p>{message}</p><Link className="secondary-button" href="/login">Back to sign in</Link></>}
         {status === "ready" && invitation && <>
-          <p className="eyebrow">Private pilot invitation</p>
+          <p className="eyebrow">You&apos;ve been invited to Stem Cogent</p>
           <h1>Join {invitation.workspace_name}</h1>
           <p>Your invitation is for <strong>{invitation.email}</strong>. Create your secure account to begin the guided setup.</p>
           <form className="invite-form" onSubmit={submit}>

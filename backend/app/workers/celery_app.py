@@ -1,7 +1,7 @@
 from urllib.parse import urlparse
 
 from celery import Celery
-from kombu import Queue
+from kombu import Exchange, Queue
 
 from app.core.config import Settings, get_settings
 
@@ -91,7 +91,10 @@ def create_celery_app(settings: Settings | None = None) -> Celery:
         task_create_missing_queues=False,
         task_default_queue=default_queue,
         task_ignore_result=True,
-        task_queues=tuple(Queue(name) for name in queues),
+        task_queues=tuple(
+            Queue(name, Exchange(name, type="direct"), routing_key=name)
+            for name in queues
+        ),
         task_reject_on_worker_lost=True,
         task_serializer="json",
         timezone="UTC",

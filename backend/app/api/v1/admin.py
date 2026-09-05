@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import re
 import secrets
 from datetime import UTC, date, datetime, timedelta
 from typing import Any, Literal
@@ -15,10 +16,22 @@ from sqlalchemy import text
 
 from app.api.auth import RequestContext, get_request_context, require_permission
 from app.context.entity_resolution import RegistryEntity, resolve_context_value
+from app.context.completeness import company_context_status
 from app.core.config import get_settings
 from app.workers.celery_app import celery_app
 
 router = APIRouter(prefix="/api/v1/internal/admin", tags=["internal-admin"])
+
+_INTERNAL_TENANT_TERMS = re.compile(
+    r"(?i)\b(?:phase\s*\d+|canonical|staging|test|fixture|seed|qa)\b"
+)
+
+
+def _customer_tenant_name(value: str) -> str:
+    name = " ".join(value.strip().split())
+    if _INTERNAL_TENANT_TERMS.search(name):
+        raise ValueError("Use the customer's real company display name")
+    return name
 
 
 class TenantProvisionInput(BaseModel):
@@ -27,14 +40,19 @@ class TenantProvisionInput(BaseModel):
     company_website: HttpUrl
     business_categories: list[str] = Field(min_length=1, max_length=20)
     markets: list[str] = Field(min_length=1, max_length=20)
-    products: list[str] = Field(default_factory=list, max_length=50)
+    products: list[str] = Field(min_length=1, max_length=50)
     dependencies: list[str] = Field(default_factory=list, max_length=50)
     competitors: list[str] = Field(default_factory=list, max_length=50)
-    strategic_priorities: list[str] = Field(default_factory=list, max_length=20)
+    strategic_priorities: list[str] = Field(min_length=1, max_length=20)
     pilot_start_date: date | None = None
     pilot_status: Literal["READY", "PAUSED"] = "READY"
     pilot_owner: str = Field(min_length=2, max_length=255)
     internal_notes: str | None = Field(default=None, max_length=10_000)
+
+    @field_validator("canonical_company_name")
+    @classmethod
+    def customer_company_name(cls, value: str) -> str:
+        return _customer_tenant_name(value)
 
     @field_validator(
         "business_categories",
@@ -58,6 +76,11 @@ class TenantPatchInput(BaseModel):
     pilot_owner: str | None = Field(default=None, min_length=2, max_length=255)
     internal_notes: str | None = Field(default=None, max_length=10_000)
     readiness_override_note: str | None = Field(default=None, max_length=4_000)
+
+    @field_validator("canonical_company_name")
+    @classmethod
+    def customer_company_name(cls, value: str | None) -> str | None:
+        return _customer_tenant_name(value) if value is not None else None
 
 
 class InvitationCreateInput(BaseModel):
@@ -191,19 +214,27 @@ async def create_tenant(
         ("COMPETITOR", body.competitors),
     ):
         for value in values:
+            resolution_status = (
+                "UNRESOLVED"
+                if object_type in {"MARKET", "DEPENDENCY", "COMPETITOR"}
+                else "NOT_APPLICABLE"
+            )
             await context.session.execute(
                 text(
                     """
                     INSERT INTO context.company_objects (
                         tenant_id,object_type,name,resolution_status
                     ) VALUES (
-                        :tenant_id,:object_type,:name,
-                        CASE WHEN :object_type IN ('MARKET','DEPENDENCY','COMPETITOR')
-                             THEN 'UNRESOLVED' ELSE 'NOT_APPLICABLE' END
+                        :tenant_id,:object_type,:name,:resolution_status
                     )
                     """
                 ),
-                {"tenant_id": tenant_id, "object_type": object_type, "name": value},
+                {
+                    "tenant_id": tenant_id,
+                    "object_type": object_type,
+                    "name": value,
+                    "resolution_status": resolution_status,
+                },
             )
     await _audit(context, "TENANT_CREATED", tenant_id, "TENANT", tenant_id)
     await context.session.commit()
@@ -294,17 +325,52 @@ async def _tenant_detail(context: RequestContext, tenant_id: UUID) -> dict[str, 
             text(
                 """
                 SELECT tenant.id, tenant.name, tenant.slug, tenant.status, tenant.plan_tier,
-                       engagement.*, profile.business_categories, profile.operating_markets,
-                       profile.strategic_priorities, profile.profile_completeness,
+                       engagement.id AS engagement_id,
+                       engagement.status AS pilot_status,
+                       engagement.started_at,engagement.ends_at,
+                       engagement.owner_user_id,engagement.cohort_code,
+                       engagement.company_website,engagement.pilot_owner,
+                       engagement.internal_notes,engagement.readiness_override_note,
+                       engagement.first_useful_brief_available_at,
+                       profile.business_categories,profile.operating_markets,
+                       profile.customer_segments,profile.regulatory_categories,
+                       profile.strategic_priorities,profile.profile_completeness,
+                       profile.version AS company_context_version,
                        (SELECT COUNT(*) FROM context.company_objects object
                         WHERE object.tenant_id=tenant.id AND object.active) AS object_count,
                        (SELECT COUNT(*) FROM context.company_objects object
                         WHERE object.tenant_id=tenant.id AND object.active
-                          AND object.resolution_status='RESOLVED') AS resolved_count,
+                          AND object.resolution_status IN ('RESOLVED','NOT_APPLICABLE'))
+                        AS resolved_count,
                        (SELECT COUNT(*) FROM decision.briefs brief
-                        WHERE brief.tenant_id=tenant.id AND brief.user_id IS NULL) AS company_briefs,
-                       (SELECT COUNT(*) FROM context.relevant_monitoring monitoring
-                        WHERE monitoring.tenant_id=tenant.id AND monitoring.user_id IS NULL) AS monitoring_count,
+                        JOIN decision.assessments a ON a.id=brief.assessment_id
+                        WHERE brief.tenant_id=tenant.id AND brief.user_id IS NULL
+                          AND a.company_context_version=profile.version) AS company_briefs,
+                       (SELECT COUNT(DISTINCT (signal.source_id,signal.source_url,signal.body_text_hash))
+                        FROM context.relevant_monitoring monitoring
+                        JOIN pipeline.signals signal ON signal.id=monitoring.signal_id
+                        JOIN intelligence.global_outputs output
+                          ON output.id=monitoring.global_output_id
+                        JOIN decision.assessments assessment
+                          ON assessment.tenant_id=monitoring.tenant_id
+                         AND assessment.global_output_id=monitoring.global_output_id
+                         AND assessment.company_context_version=
+                             monitoring.company_context_version
+                        WHERE monitoring.tenant_id=tenant.id
+                          AND monitoring.company_context_version=profile.version
+                          AND monitoring.user_id IS NULL
+                          AND signal.dedup_status NOT IN ('EXACT_DUPLICATE','SEMANTIC_DUPLICATE')
+                          AND COALESCE(NULLIF(BTRIM(signal.title),''),
+                                       NULLIF(BTRIM(output.summary),'')) IS NOT NULL
+                          AND signal.primary_domain IS NOT NULL
+                          AND NULLIF(signal.subcategory_tags[1],'') IS NOT NULL
+                          AND jsonb_array_length(output.citations)>0
+                          AND (
+                            cardinality(monitoring.matched_object_ids)>0
+                            OR jsonb_array_length(COALESCE(
+                                 assessment.rationale->'matched_rule_codes','[]'::JSONB
+                               ))>0
+                          )) AS meaningful_monitoring_count,
                        (SELECT COUNT(*) FROM auth.tenant_invitations invitation
                         WHERE invitation.tenant_id=tenant.id AND invitation.status='PENDING') AS pending_invites,
                        (SELECT COUNT(*) FROM auth.tenant_invitations invitation
@@ -325,21 +391,6 @@ async def _tenant_detail(context: RequestContext, tenant_id: UUID) -> dict[str, 
     if row is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Pilot tenant not found")
     values = dict(row)
-    object_count = int(values.get("object_count") or 0)
-    resolved = int(values.get("resolved_count") or 0)
-    checklist = {
-        "tenant_created": True,
-        "company_profile_complete": values.get("profile_completeness") == 1,
-        "products_configured": object_count > 0,
-        "markets_configured": bool(values.get("operating_markets")),
-        "entities_resolved": object_count > 0 and resolved == object_count,
-        "historical_activation_complete": values.get("company_briefs", 0) > 0 or values.get("monitoring_count", 0) >= 3,
-        "invitation_issued": values.get("pending_invites", 0) > 0 or values.get("accepted_invites", 0) > 0,
-        "user_accepted": values.get("accepted_invites", 0) > 0,
-        "decision_lens_complete": values.get("lens_count", 0) > 0,
-        "focus_areas_complete": values.get("focus_count", 0) > 0,
-        "pilot_active": values.get("status") == "ACTIVE" and values.get("started_at") is not None,
-    }
     objects = (
         await context.session.execute(
             text(
@@ -350,6 +401,28 @@ async def _tenant_detail(context: RequestContext, tenant_id: UUID) -> dict[str, 
             {"tenant_id": tenant_id},
         )
     ).mappings().all()
+    object_values = [dict(item) for item in objects]
+    context_state = company_context_status(values, object_values)
+    object_count = int(values.get("object_count") or 0)
+    resolved = int(values.get("resolved_count") or 0)
+    checklist = {
+        "tenant_created": True,
+        "company_profile_complete": context_state["complete"],
+        "products_configured": any(
+            item["object_type"] == "PRODUCT" for item in object_values
+        ),
+        "markets_configured": bool(values.get("operating_markets")),
+        "entities_resolved": object_count > 0 and resolved == object_count,
+        "historical_activation_complete": values.get("company_briefs", 0) > 0
+        or values.get("meaningful_monitoring_count", 0) >= 3,
+        "invitation_issued": values.get("pending_invites", 0) > 0
+        or values.get("accepted_invites", 0) > 0,
+        "user_accepted": values.get("accepted_invites", 0) > 0,
+        "decision_lens_complete": values.get("lens_count", 0) > 0,
+        "focus_areas_complete": values.get("focus_count", 0) > 0,
+        "pilot_active": values.get("pilot_status") == "ACTIVE"
+        and values.get("started_at") is not None,
+    }
     users = (
         await context.session.execute(
             text(
@@ -392,7 +465,8 @@ async def _tenant_detail(context: RequestContext, tenant_id: UUID) -> dict[str, 
         {
             "tenant": values,
             "checklist": checklist,
-            "company_objects": [dict(item) for item in objects],
+            "company_context_status": context_state,
+            "company_objects": object_values,
             "users": [dict(item) for item in users],
             "invitations": [dict(item) for item in invitations],
             "activations": [dict(item) for item in activations],
@@ -415,6 +489,11 @@ async def create_invitation(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Pilot tenant not found")
     raw_token = secrets.token_urlsafe(48)
     token_hash = hashlib.sha256(raw_token.encode()).hexdigest()
+    invited_by = (
+        context.principal.user_id
+        if context.principal.tenant_id == tenant_id
+        else None
+    )
     await context.session.execute(
         text(
             "UPDATE auth.tenant_invitations SET status='REVOKED' "
@@ -437,7 +516,7 @@ async def create_invitation(
                 "tenant_id": tenant_id,
                 "email": body.email,
                 "role": body.permission_role,
-                "actor": context.principal.user_id,
+                "actor": invited_by,
                 "token_hash": token_hash,
                 "expires_at": datetime.now(UTC) + timedelta(hours=body.expires_in_hours),
             },
@@ -481,16 +560,33 @@ async def start_activation(
     body: ActivationCreateInput,
     context: RequestContext = Depends(get_system_admin_context),
 ) -> dict[str, Any]:
-    if not get_settings().PHASE5_FIRST_VALUE_ACTIVATION_ENABLED:
+    settings = get_settings()
+    if not settings.PHASE5_FIRST_VALUE_ACTIVATION_ENABLED:
         raise HTTPException(status.HTTP_409_CONFLICT, "First Value Activation is disabled")
+    queue_url = settings.SQS_PIPELINE_SYNTHESIZED_URL
+    if not queue_url:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "Activation worker unavailable")
     profile = (
         await context.session.execute(
-            text("SELECT version FROM context.company_profiles WHERE tenant_id=:tenant_id"),
+            text("SELECT * FROM context.company_profiles WHERE tenant_id=:tenant_id"),
             {"tenant_id": tenant_id},
         )
-    ).scalar_one_or_none()
-    if profile is None:
+    ).mappings().one_or_none()
+    objects = (
+        await context.session.execute(
+            text("SELECT * FROM context.company_objects WHERE tenant_id=:tenant_id AND active"),
+            {"tenant_id": tenant_id},
+        )
+    ).mappings().all()
+    if not company_context_status(
+        dict(profile) if profile else None, [dict(item) for item in objects]
+    )["complete"]:
         raise HTTPException(status.HTTP_409_CONFLICT, "Company Context is incomplete")
+    initiated_by = (
+        context.principal.user_id
+        if context.principal.tenant_id == tenant_id
+        else None
+    )
     run_id = (
         await context.session.execute(
             text(
@@ -502,31 +598,43 @@ async def start_activation(
             ),
             {
                 "tenant_id": tenant_id,
-                "actor": context.principal.user_id,
+                "actor": initiated_by,
                 "lookback": body.lookback_days,
-                "version": profile,
+                "version": profile["version"],
             },
         )
     ).scalar_one()
     await _audit(context, "ACTIVATION_RUN_STARTED", tenant_id, "ACTIVATION_RUN", run_id)
     await context.session.commit()
-    queue_url = get_settings().SQS_PIPELINE_SYNTHESIZED_URL
-    if not queue_url:
-        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "Activation worker unavailable")
     queue_name = queue_url.rstrip("/").rsplit("/", 1)[-1]
-    celery_app.send_task(
-        "app.workers.tasks.pilot_activation.activate_pilot",
-        args=[
-            {
-                "tenant_id": str(tenant_id),
-                "company_context_version": profile,
-                "lookback_days": body.lookback_days,
-                "activation_run_id": str(run_id),
-            }
-        ],
-        queue=queue_name,
-        task_id=str(run_id),
-    )
+    try:
+        celery_app.send_task(
+            "app.workers.tasks.pilot_activation.activate_pilot",
+            args=[
+                {
+                    "tenant_id": str(tenant_id),
+                    "company_context_version": profile["version"],
+                    "lookback_days": body.lookback_days,
+                    "activation_run_id": str(run_id),
+                }
+            ],
+            queue=queue_name,
+            task_id=str(run_id),
+        )
+    except Exception as exc:
+        await context.session.execute(
+            text(
+                "UPDATE context.activation_runs SET status='FAILED',completed_at=NOW(),"
+                "error_summary='ACTIVATION_DISPATCH_FAILED' "
+                "WHERE id=:run_id AND tenant_id=:tenant_id AND status='QUEUED'"
+            ),
+            {"run_id": run_id, "tenant_id": tenant_id},
+        )
+        await context.session.commit()
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "Activation worker unavailable",
+        ) from exc
     return {"id": run_id, "status": "QUEUED"}
 
 
