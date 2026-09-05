@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from datetime import UTC, datetime
+from decimal import Decimal
 from types import SimpleNamespace
 from uuid import uuid4
 
@@ -196,6 +198,71 @@ async def test_primary_recovery_resumes_without_calling_fallback_again() -> None
     assert fallback_calls == 1
     assert client.last_provider == "openai"
     assert client.fallback_used is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("primary_fails", [False, True])
+async def test_cil_encodes_database_values_before_provider_generation(
+    monkeypatch, primary_fails: bool,
+) -> None:
+    import json
+
+    signal_id = uuid4()
+    published_at = datetime(2026, 9, 5, 12, 30, tzinfo=UTC)
+    result = CILRetrievalResult(
+        structured_context={
+            "id": signal_id,
+            "published_at": published_at,
+            "confidence_score": Decimal("0.85"),
+            "title": "A verified payment development",
+        },
+        citations=(CILCitation(signal_id, "Source", "https://example.com/evidence"),),
+        retrieved_signal_ids=(signal_id,),
+        retrieved_global_output_ids=(),
+        retrieved_brief_ids=(),
+        confidence_indicator="HIGH",
+    )
+    answer = {
+        "answer_text": "A verified payment development",
+        "cited_signal_ids": [str(signal_id)],
+        "follow_up_suggestions": [],
+    }
+    calls: list[str] = []
+
+    def check_context(encoded: str) -> None:
+        context = json.loads(encoded)
+        assert context["authorised_context"]["id"] == str(signal_id)
+        assert context["authorised_context"]["published_at"] == published_at.isoformat()
+        assert context["authorised_context"]["confidence_score"] == 0.85
+        assert context["allowed_signal_ids"] == [str(signal_id)]
+
+    def primary_handler(request: httpx.Request) -> httpx.Response:
+        calls.append("openai")
+        check_context(json.loads(request.content)["input"])
+        if primary_fails:
+            return httpx.Response(503, request=request, json={"error": "injected"})
+        return httpx.Response(200, request=request, json=_openai_payload(answer))
+
+    def fallback_handler(request: httpx.Request) -> httpx.Response:
+        calls.append("groq")
+        check_context(json.loads(request.content)["messages"][1]["content"])
+        return httpx.Response(200, request=request, json=_groq_payload(json.dumps(answer)))
+
+    client, primary_http, fallback_http = _clients(primary_handler, fallback_handler)
+    monkeypatch.setattr(answering, "get_settings", lambda: SimpleNamespace(
+        CIL_ENABLED=True, OPENAI_API_KEY_ARN="arn:openai", GROQ_API_KEY_ARN="arn:groq",
+        LLM_MAX_RETRIES=0, LLM_PRIMARY_PROVIDER="openai",
+    ))
+    monkeypatch.setattr(answering, "build_generation_client", lambda **kwargs: client)
+    try:
+        generated = await answering.answer_query("What changed?", result)
+    finally:
+        await primary_http.aclose()
+        await fallback_http.aclose()
+
+    assert generated.provider == ("groq" if primary_fails else "openai")
+    assert generated.answer.cited_signal_ids == [signal_id]
+    assert calls == (["openai", "groq"] if primary_fails else ["openai"])
 
 
 @pytest.mark.asyncio
