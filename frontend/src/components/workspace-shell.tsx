@@ -119,7 +119,7 @@ export function WorkspaceShell({ children }: { children: ReactNode }) {
 
   const displayName = String(user.display_name ?? "Stem user");
   const workspaceName = String(user.workspace_name ?? "Workspace");
-  const permissionLabel = user.permission_role === "ADMIN" ? "Workspace owner" : String(user.permission_role ?? "Member").replaceAll("_", " ");
+  const permissionLabel = user.permission_role === "ADMIN" ? "Workspace administrator" : String(user.permission_role ?? "Member").replaceAll("_", " ");
   const unreadAlerts = alerts.filter((alert) => !alert.read_at).length;
   const initials = displayName.split(/\s+/).slice(0, 2).map((part) => part[0]).join("").toUpperCase();
 

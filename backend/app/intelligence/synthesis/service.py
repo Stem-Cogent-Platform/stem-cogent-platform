@@ -5,7 +5,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from app.intelligence.synthesis.client import OpenAIResponsesClient
+from app.intelligence.synthesis.client import StructuredGenerationClient
 from app.intelligence.synthesis.context import GlobalContextPackage
 
 
@@ -46,7 +46,7 @@ class SynthesisValidationError(RuntimeError):
 
 
 class SynthesisService:
-    def __init__(self, client: OpenAIResponsesClient) -> None:
+    def __init__(self, client: StructuredGenerationClient) -> None:
         self._client = client
 
     async def synthesize(self, context: GlobalContextPackage) -> tuple[GlobalSynthesis, bool]:

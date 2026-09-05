@@ -12,6 +12,7 @@ from sqlalchemy import text
 
 from app.api.auth import RequestContext, get_request_context, require_permission
 from app.billing import require_feature
+from app.context.completeness import company_context_status
 from app.core.config import get_settings
 
 router = APIRouter(prefix="/api/v1", tags=["product"])
@@ -288,8 +289,11 @@ async def record_decision_action(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Decision Brief not found")
     next_status = "WATCHING" if body.action_type == "ACKNOWLEDGED" else body.action_type
     lifecycle_enabled = get_settings().PHASE5_BRIEF_LIFECYCLE_ENABLED
-    update_parameters = {"status": next_status, "brief_id": brief_id,
-                         "tenant_id": context.principal.tenant_id}
+    update_parameters = {
+        "status": next_status,
+        "brief_id": brief_id,
+        "tenant_id": context.principal.tenant_id,
+    }
     if lifecycle_enabled:
         await context.session.execute(
             text(
@@ -300,15 +304,6 @@ async def record_decision_action(
             ),
             update_parameters,
         )
-    else:
-        await context.session.execute(
-            text(
-                "UPDATE decision.briefs SET brief_status=:status,updated_at=NOW() "
-                "WHERE id=:brief_id AND tenant_id=:tenant_id"
-            ),
-            update_parameters,
-        )
-    if lifecycle_enabled:
         await context.session.execute(
             text(
                 """
@@ -323,8 +318,18 @@ async def record_decision_action(
                 )
                 """
             ),
-            {"tenant_id": context.principal.tenant_id, "brief_id": brief_id,
-             "status": next_status, "action_type": body.action_type},
+            {
+                **update_parameters,
+                "action_type": body.action_type,
+            },
+        )
+    else:
+        await context.session.execute(
+            text(
+                "UPDATE decision.briefs SET brief_status=:status,updated_at=NOW() "
+                "WHERE id=:brief_id AND tenant_id=:tenant_id"
+            ),
+            update_parameters,
         )
     await _audit(context, "DECISION_ACTION_RECORDED", "DECISION_BRIEF", brief_id,
                  {"action_type": body.action_type, "action_id": str(row["id"])})
@@ -362,6 +367,15 @@ async def company_lens(context: RequestContext = Depends(get_request_context)) -
             {"tenant_id": context.principal.tenant_id},
         )
     ).mappings().one_or_none()
+    context_objects = (
+        await context.session.execute(
+            text(
+                "SELECT * FROM context.company_objects "
+                "WHERE tenant_id=:tenant_id AND active ORDER BY object_type,name"
+            ),
+            {"tenant_id": context.principal.tenant_id},
+        )
+    ).mappings().all()
     rows = (
         await context.session.execute(
             text(
@@ -392,8 +406,16 @@ async def company_lens(context: RequestContext = Depends(get_request_context)) -
                 "message": "Company Lens cannot be shown because a Decision Brief has no stored evidence.",
             },
         )
-    return jsonable_encoder({"profile": dict(profile) if profile else None,
-                             "briefs": [dict(row) for row in rows]})
+    profile_value = dict(profile) if profile else None
+    object_values = [dict(item) for item in context_objects]
+    return jsonable_encoder(
+        {
+            "profile": profile_value,
+            "objects": object_values,
+            "context_status": company_context_status(profile_value, object_values),
+            "briefs": [dict(row) for row in rows],
+        }
+    )
 
 
 @router.get("/signals")
@@ -451,13 +473,34 @@ async def entity_profile(
         await context.session.execute(
             text(
                 """
-                SELECT signal.id, signal.title, signal.primary_domain, signal.urgency_band,
-                       signal.confidence_band, signal.published_at, signal.source_url
+                SELECT activity.id,activity.title,activity.primary_domain,
+                       activity.event_type,activity.urgency_band,
+                       activity.confidence_band,activity.published_at,
+                       activity.source_url,activity.source_name
+                FROM (
+                SELECT DISTINCT ON (
+                         COALESCE(signal.content_fingerprint,
+                                  signal.source_id::TEXT||':'||
+                                  COALESCE(signal.source_url,'')||':'||
+                                  COALESCE(signal.body_text_hash,''))
+                       ) signal.id,signal.title,signal.primary_domain,
+                         signal.subcategory_tags[1] AS event_type,
+                         signal.urgency_band,signal.confidence_band,
+                         signal.published_at,signal.source_url,source.source_name
                 FROM intelligence.signal_entities AS link
                 JOIN pipeline.signals AS signal ON signal.id = link.signal_id
+                JOIN config.sources source ON source.id=signal.source_id
                 WHERE link.entity_id = :entity_id
                   AND (signal.tenant_id IS NULL OR signal.tenant_id = :tenant_id)
-                ORDER BY signal.published_at DESC NULLS LAST LIMIT 30
+                  AND signal.dedup_status NOT IN ('EXACT_DUPLICATE','SEMANTIC_DUPLICATE')
+                ORDER BY COALESCE(signal.content_fingerprint,
+                                  signal.source_id::TEXT||':'||
+                                  COALESCE(signal.source_url,'')||':'||
+                                  COALESCE(signal.body_text_hash,'')),
+                         signal.published_at DESC NULLS LAST,signal.created_at DESC
+                ) activity
+                ORDER BY activity.published_at DESC NULLS LAST,activity.id
+                LIMIT 30
                 """
             ),
             {"entity_id": entity_id, "tenant_id": context.principal.tenant_id},
@@ -468,6 +511,8 @@ async def entity_profile(
             text(
                 """
                 SELECT relationship.relationship_type, relationship.confidence_score,
+                       cardinality(relationship.evidence_signal_ids) > 0
+                         AS evidence_available,
                        CASE WHEN relationship.source_entity_id = :entity_id
                             THEN target.id ELSE source.id END AS related_entity_id,
                        CASE WHEN relationship.source_entity_id = :entity_id
@@ -855,14 +900,58 @@ async def relevant_monitoring(
         await context.session.execute(
             text(
                 """
-                SELECT monitoring.*,signal.primary_domain,signal.urgency_band,
-                       signal.confidence_band,signal.published_at
+                SELECT * FROM (
+                SELECT DISTINCT ON (signal.source_id,signal.source_url,signal.body_text_hash)
+                       monitoring.id,monitoring.user_id,monitoring.global_output_id,
+                       monitoring.signal_id,monitoring.company_context_version,
+                       monitoring.relevance_score,monitoring.matched_object_ids,
+                       monitoring.detected_at,monitoring.last_verified_at,
+                       COALESCE(NULLIF(BTRIM(signal.title),''),
+                                NULLIF(BTRIM(output.summary),''),
+                                monitoring.summary) AS display_title,
+                       monitoring.summary AS what_changed,
+                       signal.primary_domain,signal.subcategory_tags[1] AS event_type,
+                       signal.urgency_band,signal.confidence_band,
+                       signal.published_at,signal.source_url,
+                       source.source_name,
+                       jsonb_array_length(output.citations)>0 AS evidence_available,
+                       assessment.rationale AS relevance_trace,
+                       ARRAY(
+                         SELECT object.name FROM context.company_objects object
+                         WHERE object.tenant_id=monitoring.tenant_id
+                           AND object.id=ANY(monitoring.matched_object_ids)
+                           AND object.active
+                         ORDER BY object.importance DESC,object.name
+                       ) AS matched_company_objects,
+                       (
+                         SELECT entity.canonical_name
+                         FROM intelligence.signal_entities link
+                         JOIN intelligence.entities entity ON entity.id=link.entity_id
+                         WHERE link.signal_id=monitoring.signal_id
+                         ORDER BY link.resolution_confidence DESC,entity.canonical_name
+                         LIMIT 1
+                       ) AS primary_entity
                 FROM context.relevant_monitoring monitoring
+                JOIN context.company_profiles profile
+                  ON profile.tenant_id=monitoring.tenant_id
+                 AND profile.version=monitoring.company_context_version
                 JOIN pipeline.signals signal ON signal.id=monitoring.signal_id
+                JOIN intelligence.global_outputs output
+                  ON output.id=monitoring.global_output_id
+                JOIN config.sources source ON source.id=signal.source_id
+                LEFT JOIN decision.assessments assessment
+                  ON assessment.tenant_id=monitoring.tenant_id
+                 AND assessment.global_output_id=monitoring.global_output_id
+                 AND assessment.company_context_version=monitoring.company_context_version
                 WHERE monitoring.tenant_id=:tenant_id
                   AND (monitoring.user_id=:user_id OR monitoring.user_id IS NULL)
-                ORDER BY (monitoring.user_id IS NOT NULL) DESC,
-                         monitoring.relevance_score DESC,monitoring.detected_at DESC
+                  AND signal.dedup_status NOT IN ('EXACT_DUPLICATE','SEMANTIC_DUPLICATE')
+                ORDER BY signal.source_id,signal.source_url,signal.body_text_hash,
+                         (monitoring.user_id IS NOT NULL) DESC,
+                         monitoring.relevance_score DESC,monitoring.detected_at DESC,
+                         monitoring.id
+                ) visible_monitoring
+                ORDER BY (user_id IS NOT NULL) DESC,relevance_score DESC,detected_at DESC,id
                 LIMIT :limit
                 """
             ),
@@ -920,8 +1009,14 @@ async def briefing_changes(
                   (SELECT COUNT(*) FROM decision.brief_events event
                    WHERE event.tenant_id=:tenant_id AND event.event_type='EVIDENCE_ADDED'
                      AND event.created_at>:since) new_evidence_items,
-                  (SELECT COUNT(*) FROM context.relevant_monitoring monitoring
+                  (SELECT COUNT(DISTINCT (signal.source_id,signal.source_url,signal.body_text_hash))
+                   FROM context.relevant_monitoring monitoring
+                   JOIN pipeline.signals signal ON signal.id=monitoring.signal_id
+                   JOIN context.company_profiles profile
+                     ON profile.tenant_id=monitoring.tenant_id
+                    AND profile.version=monitoring.company_context_version
                    WHERE monitoring.tenant_id=:tenant_id
+                     AND signal.dedup_status NOT IN ('EXACT_DUPLICATE','SEMANTIC_DUPLICATE')
                      AND (monitoring.user_id=:user_id OR monitoring.user_id IS NULL)
                      AND monitoring.detected_at>:since) new_relevant_monitoring,
                   (SELECT COUNT(*) FROM decision.briefs brief

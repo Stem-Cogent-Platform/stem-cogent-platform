@@ -19,7 +19,7 @@ async function pilotProductApi(page: Page) {
   await page.route(`**/api/v1/briefs/${briefId}`, (route) => route.fulfill({ json: brief }));
   await page.route("**/api/v1/relevant-monitoring**", (route) => route.fulfill({ json: [] }));
   await page.route("**/api/v1/briefing/changes", (route) => route.fulfill({ json: { new_briefs: 1, updated_briefs: 0, new_evidence_items: 1, new_relevant_monitoring: 0 } }));
-  await page.route("**/api/v1/company/briefs", (route) => route.fulfill({ json: { profile: { company_type: "Payments fintech", headquarters_country: "Nigeria", strategic_priorities: ["Transaction reliability"], operating_markets: ["Nigeria"] }, briefs: [brief] } }));
+  await page.route("**/api/v1/company/briefs", (route) => route.fulfill({ json: { profile: { business_categories: ["Payments fintech"], strategic_priorities: ["Transaction reliability"], operating_markets: ["Nigeria"] }, context_status: { complete: true, completeness: 1, missing_fields: [], version: 1 }, briefs: [brief] } }));
   await page.route("**/api/v1/watchlist", (route) => route.fulfill({ json: { company: [{ id: "80000000-0000-4000-8000-000000000001", name: "NIBSS", object_type: "DEPENDENCY", importance: "HIGH", recent_activity_count: 1, open_brief_count: 1 }], focus: [{ id: "90000000-0000-4000-8000-000000000001", label: "Merchant profitability", focus_type: "TOPIC", recent_activity_count: 2, open_brief_count: 1 }] } }));
   await page.route("**/api/v1/signals", (route) => route.fulfill({ json: [{ id: "a0000000-0000-4000-8000-000000000001", signal_id: "40000000-0000-4000-8000-000000000001", title: "Verified infrastructure update", global_implication: "Payment operators should review service dependencies.", primary_domain: "INFRASTRUCTURE", urgency_band: "MODERATE", confidence_band: "HIGH", source_name: "NIBSS" }] }));
   await page.route("**/api/v1/alerts", (route) => route.fulfill({ json: [{ id: "b0000000-0000-4000-8000-000000000001", brief_id: briefId, priority: "HIGH", subject: "Settlement implementation review", status: "DELIVERED", created_at: "2026-08-31T10:00:00Z", payload: { why_delivered: "Matches your settlement Focus Area." } }] }));
@@ -44,7 +44,7 @@ test("accepts a single-use pilot invitation", async ({ page }) => {
 test("renders the evidence-first briefing and responsive monitoring", async ({ page }) => {
   await authenticatedApi(page);
   await page.route("**/api/v1/briefs", (route) => route.fulfill({ json: [brief] }));
-  await page.route("**/api/v1/relevant-monitoring**", (route) => route.fulfill({ json: [{ id: "50000000-0000-4000-8000-000000000001", headline: "NIBSS publishes a routine availability update.", relevance_reasons: ["Infrastructure"], primary_domain: "INFRASTRUCTURE", detected_at: "2026-08-31T11:00:00Z" }] }));
+  await page.route("**/api/v1/relevant-monitoring**", (route) => route.fulfill({ json: [{ id: "50000000-0000-4000-8000-000000000001", display_title: "NIBSS publishes a routine availability update.", what_changed: "A verified infrastructure availability update was published.", matched_company_objects: ["NIBSS"], primary_domain: "INFRASTRUCTURE", event_type: "SERVICE_UPDATE", detected_at: "2026-08-31T11:00:00Z", evidence_available: true, source_name: "NIBSS", source_url: "https://nibss-plc.com.ng/" }] }));
   await page.route("**/api/v1/briefing/changes", (route) => route.fulfill({ json: { new_briefs: 1, updated_briefs: 1, new_evidence_items: 2, new_relevant_monitoring: 1 } }));
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/briefing");

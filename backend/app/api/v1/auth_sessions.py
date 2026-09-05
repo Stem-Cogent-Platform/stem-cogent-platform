@@ -204,7 +204,8 @@ async def login(
                     text(
                         """
                     SELECT users.id, users.tenant_id, users.email, users.display_name,
-                           users.permission_role, users.password_hash, tenants.name AS tenant_name
+                           users.permission_role, users.password_hash,
+                           users.onboarding_completed_at, tenants.name AS tenant_name
                     FROM auth.users AS users
                     JOIN auth.tenants AS tenants ON tenants.id = users.tenant_id
                     WHERE users.tenant_id = :tenant_id
@@ -266,6 +267,7 @@ async def admin_mfa_login(
                     """
                     SELECT users.id,users.tenant_id,users.email,users.display_name,
                            users.permission_role,users.password_hash,
+                           users.onboarding_completed_at,
                            tenants.name AS tenant_name
                     FROM auth.users users
                     JOIN auth.tenants tenants ON tenants.id=users.tenant_id
@@ -327,7 +329,8 @@ async def refresh(
                     text(
                         """
                     SELECT users.id, users.tenant_id, users.email, users.display_name,
-                           users.permission_role, tenants.name AS tenant_name,
+                           users.permission_role, users.onboarding_completed_at,
+                           tenants.name AS tenant_name,
                            sessions.refresh_token_hash, sessions.mfa_verified_at
                     FROM auth.sessions AS sessions
                     JOIN auth.users AS users
@@ -405,7 +408,8 @@ async def me(context: RequestContext = Depends(get_request_context)) -> dict[str
             await context.session.execute(
                 text(
                     """
-                SELECT users.email, users.display_name, tenants.name AS tenant_name
+                SELECT users.email,users.display_name,users.onboarding_completed_at,
+                       tenants.name AS tenant_name
                 FROM auth.users AS users
                 JOIN auth.tenants AS tenants ON tenants.id = users.tenant_id
                 WHERE users.id = :user_id AND users.tenant_id = :tenant_id
@@ -505,6 +509,7 @@ def _public_user(row: Any) -> dict[str, Any]:
         "display_name": row["display_name"],
         "permission_role": row["permission_role"],
         "workspace_name": row["tenant_name"],
+        "onboarding_completed_at": row.get("onboarding_completed_at"),
     }
 
 

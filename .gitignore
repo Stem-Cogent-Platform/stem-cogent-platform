@@ -1,7 +1,17 @@
 .venv/
+.env*
+!.env.example
+!.env.*.example
 __pycache__/
 *.py[cod]
+*.log
+logs/
+_tmp_*
+.DS_Store
+.idea/
+.vscode/
 .coverage
+.coverage.*
 coverage.xml
 bandit-report.json
 frontend/node_modules/

@@ -182,3 +182,44 @@ This record covers the approved production-critical remediation work that must p
 | Paystack webhook endpoints | Staging: `https://api.staging.stem-cogent.com/webhooks/paystack`; production: `https://api.stem-cogent.com/webhooks/paystack`. Dashboard/API registration and signed-delivery confirmation remain deployment gates. |
 | Local dependency integration test | Environment-blocked — the local test environment has no configured PostgreSQL and cannot resolve the private pre-production Redis endpoint. All 223 backend unit tests pass; live dependency readiness must be repeated through staging CD. |
 | Phase 4 sequence | 4.1 production-critical foundation is implemented but browser authentication and deployed end-to-end evidence remain open. Tasks 4.2–4.8 and the MVP completion gate are not marked complete. |
+
+## Phase 5 live acceptance repair — 2026-09-04
+
+Status: **local repair implemented; live production gate remains closed**.
+
+| Area | Current evidence |
+|---|---|
+| Onboarding and invitations | Independent alert threshold/digest cadence, durable completion timestamp, retry-safe context objects, customer-name validation, invitation migration repair, and customer-safe copy implemented locally |
+| Canonical Company Context | Shared completeness/version contract now drives onboarding, Settings, Company Lens, admin readiness, and activation |
+| Intelligence integrity | Canonical URL/content fingerprinting, cross-job normalization idempotency, defensive entity activity distinctness, meaningful monitoring DTO, and stricter readiness count implemented |
+| CIL and AI | OpenAI→Groq bounded generation fallback, actual attribution, validation, deterministic degradation, CIL rate limit, API provider-secret IAM, embedding reuse identity, and synthesis reuse lock implemented |
+| Runtime repairs merged | Staging feature flags, explicit physical SQS exchanges/routing, activation UUID serialization, cross-tenant actor nulling, audit JSON typing/timestamps, and URL query-string log redaction are present in canonical source |
+| Database | Single Alembic head `0028`; 18 migration tests pass; complete offline upgrade renders through `0028` |
+| Backend tests | Full unit sweep: 320/320 passed; final provider/CIL/acceptance regression set 27/27 passed; Ruff clean. The separate dependency integration check remains environment-blocked because local PostgreSQL is absent and the configured private Redis hostname is unreachable. |
+| Frontend tests | 22/22 unit tests; lint; type-check; production build; seven E2E flows plus the 1440/1024/768/390 seven-surface responsive sweep pass |
+| Terraform tests | IAM 7/7; ECS 4/4; format check passes |
+| AWS/provider/live tenant | Blocked: AWS session expired; no current Cost Explorer, ECS, logs, DB, OpenAI/Groq usage, destructive dedup, or fresh-tenant evidence available |
+| Production decision | **NOT READY — BLOCKERS REMAIN** until deployment, live data trace, provider fault injection, cost inspection, tenant/RLS validation, and a new-tenant staging transcript pass |
+
+Detailed evidence and the blocker ledger are in `docs/qa/phase5-live-acceptance.md`.
+
+## Phase 5 authenticated live follow-up — 2026-09-05
+
+The previous AWS-session blocker is cleared. Staging still runs `dc4755b` at
+migration `0027`; candidate migration `0028` and application/IAM repairs remain
+local. The latest evidence is in `docs/qa/phase5-live-followup-2026-09-05.md`.
+
+| Area | Current evidence |
+|---|---|
+| Actual duplicate ingestion | Paystack: 4,703 distinct signal IDs for 29 source/URL/body identities; one TechCabal article has 117 IDs. No historical rows deleted. |
+| Actual embedding redundancy | 11,297 vectors for 145 distinct input hashes; these are stored-row counts, not billing-call totals. |
+| Context/freshness | Active profile version 6; monitoring/activation version 1. Top eight monitoring rows repeat 2019 circulars. Candidate queries now require current context, distinct content and publication-based activation lookback. |
+| Query verification | Four actual candidate SELECTs passed read-only under the staging runtime role: three recent distinct activation candidates, zero current-version monitoring/readiness items. |
+| CIL fault | Controlled live request returns 500. API task role has implicitDeny on both provider secrets. Candidate fallback now also catches client-construction/secret errors. |
+| OpenAI blocker | Bounded live embedding request returns 429 / insufficient_quota / credit_balance_exhausted. Clustering's documented 0/0 pause retained. |
+| Groq candidate | Retired llama-3.3 model failed with 404; updated to account-available openai/gpt-oss-120b. Candidate timeout→Groq probe passed inside staging with grounded title and valid citation. Deployed CIL remains uncorrected. |
+| Current local regressions | 43 focused generation/provider/acceptance/product/CIL tests passed; Ruff and normal git diff whitespace checks passed. |
+| Queue recovery | Scored queue: 42,764 pending and 151,016 DLQ at sampling; no redrive performed. |
+| AWS reported cost | Staging: $122.59 September through September 4, $224.92 last 7 days, $834.95 last 30 days. September figures remain estimated by AWS. |
+| Existing payer controls | $100 monthly budget with actual 85/100% and forecast 100% alerts; service anomaly monitor and daily subscription exist outside current IaC. Requested full threshold matrix remains open. |
+| Production gate | NOT READY — BLOCKERS REMAIN: provider funding, deployment, historical cleanup, current-context activation, fresh-tenant journey, continuous flow and full isolation proof. |

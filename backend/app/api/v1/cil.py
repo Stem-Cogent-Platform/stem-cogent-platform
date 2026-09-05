@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 from time import monotonic
 from typing import Any, Literal
 from uuid import UUID
@@ -15,9 +16,11 @@ from app.cil import retrieve_context
 from app.cil.answering import answer_query
 from app.billing import require_feature
 from app.core.config import get_settings
+from app.core.redis import get_redis_client
 
 
 router = APIRouter(prefix="/api/v1/cil", tags=["cil"])
+logger = logging.getLogger(__name__)
 
 
 class CILQuery(BaseModel):
@@ -45,6 +48,7 @@ async def query_cil(
 ) -> CILQueryResponse:
     require_permission(context, "USE_CIL")
     require_feature(context, "cil")
+    await _enforce_rate_limit(context)
     started = monotonic()
     result = await retrieve_context(
         context.session,
@@ -56,7 +60,13 @@ async def query_cil(
     grounded = result.confidence_indicator != "INSUFFICIENT_DATA"
     session_id = await _upsert_session(payload, context, grounded)
     generated = await answer_query(payload.query, result) if grounded else None
-    answer = generated.answer_text if generated else "Insufficient authorised evidence is available for this anchor."
+    answer = (
+        generated.answer.answer_text
+        if generated
+        else "Insufficient authorised evidence is available for this anchor."
+    )
+    provider = generated.provider if generated else "deterministic"
+    model = generated.model if generated else "structured-retrieval-v1"
     citations = [
         {
             "claim_text": "Retrieved source evidence",
@@ -77,7 +87,7 @@ async def query_cil(
             ) VALUES (
               :tenant_id, :session_id, :user_id, :brief_id, :query,
               :response, :signal_ids, :output_ids, :brief_ids,
-              CAST(:citations AS JSONB), 'deterministic', 'structured-retrieval-v1',
+              CAST(:citations AS JSONB), :provider, :model,
               '2026.08-v1', :latency_ms
             )
             """
@@ -97,6 +107,8 @@ async def query_cil(
             "output_ids": list(result.retrieved_global_output_ids),
             "brief_ids": list(result.retrieved_brief_ids),
             "citations": json.dumps(citations),
+            "provider": provider,
+            "model": model,
             "latency_ms": round((monotonic() - started) * 1000),
         },
     )
@@ -109,7 +121,9 @@ async def query_cil(
                 ) VALUES (
                     :tenant_id,:user_id,'CIL_QUERY_SUBMITTED',:object_type,
                     :object_id,jsonb_build_object(
-                        'grounded',CAST(:grounded AS BOOLEAN)
+                        'grounded',CAST(:grounded AS BOOLEAN),
+                        'provider',CAST(:provider AS TEXT),
+                        'fallback_used',CAST(:fallback_used AS BOOLEAN)
                     )
                 )
                 """
@@ -117,7 +131,8 @@ async def query_cil(
             {"tenant_id": context.principal.tenant_id,
              "user_id": context.principal.user_id,
              "object_type": payload.anchor_type, "object_id": payload.anchor_id,
-             "grounded": grounded},
+             "grounded": grounded, "provider": provider,
+             "fallback_used": generated.fallback_used if generated else False},
         )
     await context.session.execute(
         text(
@@ -151,8 +166,32 @@ async def query_cil(
         citations=citations,
         confidence_indicator=result.confidence_indicator,
         response_grounded=grounded,
-        follow_up_suggestions=generated.follow_up_suggestions if generated else [],
+        follow_up_suggestions=(
+            generated.answer.follow_up_suggestions if generated else []
+        ),
     )
+
+
+async def _enforce_rate_limit(context: RequestContext) -> None:
+    """Bound per-user CIL spend without exposing provider state to customers."""
+    client = get_redis_client()
+    if client is None:
+        return
+    settings = get_settings()
+    key = f"cil:rate:{context.principal.tenant_id}:{context.principal.user_id}"
+    try:
+        requests = await client.incr(key)
+        if requests == 1:
+            await client.expire(key, 60)
+        if requests > settings.CIL_RATE_LIMIT_PER_MINUTE:
+            raise HTTPException(
+                status.HTTP_429_TOO_MANY_REQUESTS,
+                "Too many investigations. Please wait a moment and try again.",
+            )
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception("CIL rate limiter is unavailable")
 
 
 async def _upsert_session(

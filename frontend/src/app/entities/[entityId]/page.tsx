@@ -12,7 +12,7 @@ import { LoadState } from "@/lib/types";
 type EntityProfile = {
   entity: { id: string; canonical_name: string; entity_type: string; aliases: string[]; region_tags: string[] };
   activity: { id: string; title: string; source_url?: string; primary_domain?: string; published_at?: string }[];
-  relationships: { relationship_type: string; related_entity_id: string; related_entity_name: string; confidence_score?: number }[];
+  relationships: { relationship_type: string; related_entity_id: string; related_entity_name: string; confidence_score?: number; evidence_available: boolean }[];
 };
 
 export default function EntityPage() {
@@ -47,13 +47,13 @@ export default function EntityPage() {
                   <ul className="evidence-list">
                     {state.data.activity.map((item) => <li key={item.id}><div><strong>{item.title}</strong><small>{item.primary_domain?.replaceAll("_", " ")}</small></div>{item.source_url && <a href={item.source_url} rel="noreferrer" target="_blank">Open source</a>}</li>)}
                   </ul>
-                ) : <p>No verified activity rows were returned for this entity.</p>}
+                ) : <p>No verified recent activity is available for this entity yet.</p>}
                 <h2>Known relationships</h2>
                 {state.data.relationships.length ? (
                   <ul>{state.data.relationships.map((item) => <li key={`${item.relationship_type}-${item.related_entity_id}`}>{item.relationship_type.replaceAll("_", " ")} — {item.related_entity_name}</li>)}</ul>
-                ) : <p>No stored entity relationships were returned.</p>}
+                ) : <p>No verified relationships are available for this entity yet.</p>}
               </article>
-              <CILPanel anchorId={id} anchorType="ENTITY" />
+              <CILPanel anchorId={id} anchorType="ENTITY" hasRelationships={state.data.relationships.some((item) => item.evidence_available)} />
             </div>
           </>
         )}

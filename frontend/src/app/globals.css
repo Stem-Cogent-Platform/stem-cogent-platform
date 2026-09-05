@@ -251,7 +251,7 @@ fieldset legend { margin-bottom: 12px; }
 .wizard-sidebar li span { align-items: center; border: 1px solid var(--border); border-radius: 50%; display: flex; font-size: .65rem; height: 28px; justify-content: center; width: 28px; }
 .wizard-sidebar li.current { color: var(--text-primary); }
 .wizard-sidebar li.current span { background: var(--accent); border-color: var(--accent); }
-.wizard-sidebar li.complete { color: var(--accent); }
+.wizard-sidebar li.visited { color: var(--text-primary); }
 .wizard-stage { background: white; display: flex; flex-direction: column; height: 100%; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: clamp(24px,4vmin,58px); }
 .wizard-progress { background: var(--bg-subtle); border-radius: 99px; height: 4px; overflow: hidden; }
 .wizard-progress i { background: var(--accent); display: block; height: 100%; transition: width 180ms ease; }
