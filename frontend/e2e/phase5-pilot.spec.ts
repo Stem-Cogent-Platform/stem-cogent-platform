@@ -128,7 +128,7 @@ test("provisions complete company context and retains fields on failure", async 
   await page.getByLabel("Products (comma-separated)").fill("Merchant payments, Settlement");
   await page.getByLabel("Strategic priorities (comma-separated)").fill("Reliability");
   await page.getByRole("button", { name: "Create tenant" }).click();
-  await expect(page.getByRole("alert")).toBeVisible();
+  await expect(page.getByRole("alert").filter({ hasText: "The company could not be created" })).toBeVisible();
   await expect(page.getByLabel("Company display name")).toHaveValue("Acme Payments");
   await page.getByRole("button", { name: "Create tenant" }).click();
   await expect(page.getByLabel("Company display name")).toHaveValue("");
