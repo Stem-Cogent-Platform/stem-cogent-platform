@@ -581,7 +581,7 @@ async def start_activation(
             {"tenant_id": tenant_id},
         )
     ).mappings().all()
-    if not company_context_status(
+    if profile is None or not company_context_status(
         dict(profile) if profile else None, [dict(item) for item in objects]
     )["complete"]:
         raise HTTPException(status.HTTP_409_CONFLICT, "Company Context is incomplete")

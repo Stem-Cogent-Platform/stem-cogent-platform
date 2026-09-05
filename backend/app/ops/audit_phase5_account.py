@@ -8,6 +8,7 @@ import subprocess
 from collections import defaultdict
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
+from typing import Any
 
 import boto3
 from botocore.config import Config
@@ -41,7 +42,7 @@ def audit(profile: str, billing: bool) -> dict:
     else:
         session = boto3.Session(profile_name=profile, region_name="eu-west-1")
     config = Config(connect_timeout=10, read_timeout=30, retries={"max_attempts": 2})
-    result = {"profile": profile, "observed_at": datetime.now(UTC).isoformat()}
+    result: dict[str, Any] = {"profile": profile, "observed_at": datetime.now(UTC).isoformat()}
     account = session.client("sts", config=config).get_caller_identity()["Account"]
     result["account"] = account
     if billing:
@@ -60,7 +61,7 @@ def audit(profile: str, billing: bool) -> dict:
                     Metrics=["UnblendedCost"],
                     GroupBy=[{"Type": "DIMENSION", "Key": "SERVICE"}],
                 )
-                by_service = defaultdict(Decimal)
+                by_service: defaultdict[str, Decimal] = defaultdict(Decimal)
                 daily = []
                 for day in response["ResultsByTime"]:
                     daily_total = Decimal(0)
@@ -113,7 +114,7 @@ def audit(profile: str, billing: bool) -> dict:
                     Metrics=["UnblendedCost"],
                     GroupBy=[{"Type": kind, "Key": key}],
                 )
-                groups = defaultdict(Decimal)
+                groups: defaultdict[str, Decimal] = defaultdict(Decimal)
                 for period in response["ResultsByTime"]:
                     for group in period["Groups"]:
                         groups[group["Keys"][0]] += Decimal(
