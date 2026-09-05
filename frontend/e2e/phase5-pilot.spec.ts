@@ -107,6 +107,40 @@ test("logs in and loads an evidence-backed customer workspace", async ({ page })
   await expect(page.getByRole("heading", { name: /Good (morning|afternoon|evening), Ada/ })).toBeVisible();
 });
 
+test("provisions complete company context and retains fields on failure", async ({ page }) => {
+  await authenticatedApi(page, "SYSTEM_ADMIN");
+  let attempts = 0;
+  let submitted: Record<string, unknown> = {};
+  await page.route("**/api/v1/internal/admin/tenants", async (route) => {
+    if (route.request().method() === "GET") return route.fulfill({ json: [] });
+    submitted = route.request().postDataJSON();
+    attempts++;
+    await route.fulfill(attempts === 1
+      ? { status: 503, json: { detail: "Temporarily unavailable" } }
+      : { status: 201, json: { tenant: { id: user.workspace_id } } });
+  });
+  await page.goto("/internal/admin/tenants");
+  await page.getByLabel("Company display name").fill("Acme Payments");
+  await page.getByLabel("Company website").fill("https://acme.example");
+  await page.getByLabel("Pilot owner", { exact: true }).fill("Stem Operator");
+  await page.getByLabel("Business categories (comma-separated)").fill("Payments");
+  await page.getByLabel("Operating markets (comma-separated)").fill("Nigeria");
+  await page.getByLabel("Products (comma-separated)").fill("Merchant payments, Settlement");
+  await page.getByLabel("Strategic priorities (comma-separated)").fill("Reliability");
+  await page.getByRole("button", { name: "Create tenant" }).click();
+  await expect(page.getByRole("alert")).toBeVisible();
+  await expect(page.getByLabel("Company display name")).toHaveValue("Acme Payments");
+  await page.getByRole("button", { name: "Create tenant" }).click();
+  await expect(page.getByLabel("Company display name")).toHaveValue("");
+  expect(attempts).toBe(2);
+  expect(submitted).toEqual({
+    canonical_company_name: "Acme Payments", company_website: "https://acme.example",
+    pilot_owner: "Stem Operator", business_categories: ["Payments"], markets: ["Nigeria"],
+    products: ["Merchant payments", "Settlement"], strategic_priorities: ["Reliability"],
+    dependencies: [], competitors: [],
+  });
+});
+
 test("starts activation from the MFA-protected tenant console", async ({ page }) => {
   await authenticatedApi(page, "SYSTEM_ADMIN");
   const detail = {

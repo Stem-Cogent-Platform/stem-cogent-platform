@@ -141,6 +141,15 @@ def test_monitoring_contract_requires_identity_evidence_and_relevance() -> None:
     assert "matched_object_ids" in activation
 
 
+def test_entity_identity_does_not_split_backfilled_and_legacy_fingerprints() -> None:
+    from app.ops.audit_phase5_queries import select_sql
+
+    query = select_sql(ROOT / "backend/app/api/v1/product.py", ") activity")
+    assert "signal.content_fingerprint" not in query
+    assert query.count("COALESCE(signal.canonical_url,signal.source_url,'')") == 2
+    assert "signal.body_text_hash" in query
+
+
 def test_live_staging_runtime_repairs_are_present_in_canonical_source() -> None:
     celery = (ROOT / "backend/app/workers/celery_app.py").read_text()
     logging = (ROOT / "backend/app/core/logging.py").read_text()
