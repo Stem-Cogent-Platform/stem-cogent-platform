@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Any
 from uuid import UUID
 
+from fastapi.encoders import jsonable_encoder
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.cil.retrieval import CILRetrievalResult
@@ -42,7 +43,8 @@ async def answer_query(query: str, result: CILRetrievalResult) -> AnswerGenerati
             client = build_generation_client(max_retries=min(settings.LLM_MAX_RETRIES, 2))
             raw = await client.generate(
                 instructions=_INSTRUCTIONS,
-                context={"question": query, "authorised_context": result.structured_context,
+                context={"question": query,
+                         "authorised_context": jsonable_encoder(result.structured_context),
                          "allowed_signal_ids": [str(item) for item in result.retrieved_signal_ids]},
                 schema=GroundedAnswer.model_json_schema(),
             )
