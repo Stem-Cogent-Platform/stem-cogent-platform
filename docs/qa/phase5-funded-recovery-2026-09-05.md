@@ -77,6 +77,51 @@ Migration 0028 is additive. Do not downgrade a populated environment as cleanup.
 
 ## Remaining gate
 
+### Staging rollout and authenticated verification
+
+Connectivity recovered; the interrupted contract probe's existing CloudWatch
+log reports HTTP 200, exact title grounding and a valid citation with
+`gpt-4.1-mini-2025-04-14` (181 input + 69 output = 250 tokens). No repeat
+request was needed. PR #89 merged at `16d3f0e`; Application CD
+`33991785563` and Infrastructure CD `33991785579` succeeded.
+Pre-merge backend CI `33991558761` passed 360 unit tests, 75.33% coverage,
+the one PostgreSQL/Redis dependency integration check, migration round-trip
+and security/type checks.
+
+Post-deployment task `20027aeb04b14beaa8d459b3d6bb83cf` verified:
+
+- Database head `0028`; diagnostic context version 6.
+- API revision 66 and frontend revision 54 have completed rollouts, 2/2 each.
+  Clustering revision 27 remains deliberately 0/0.
+- Live/ready, auth/me, context/company, company, team and Paystack entity
+  endpoints return 200. Both company surfaces return 29 context objects.
+- Tenant ADMIN receives 403 from internal-admin tenants.
+- Paystack activity returns 29 items; no historical evidence rows were deleted.
+- Current-context relevant monitoring is zero; this does not pass first value.
+- CIL returns 200 with an answer and one citation, but query-log attribution is
+  `deterministic / structured-retrieval-v1`, latency 214 ms. This is graceful
+  degradation, not a pass for normal OpenAI generation.
+
+The additional CIL defect is JSON encoding: retrieval retains UUID, datetime
+and Decimal database values, while both provider clients use plain
+`json.dumps`. Two HTTP-transport regression cases reproduced deterministic
+fallback before the fix. Encoding at the CIL boundary makes primary and
+fallback cases pass. PR #90 carries this correction; its live proof is pending.
+
+The post-merge infrastructure plan also observed the scheduler's temporary
+migration pause and restored desired count 0 to 1 (one change, no destroys).
+This overlapped Application CD. The corrective workflow change shares one
+non-cancelling queue between infrastructure and application workflows, using
+[GitHub's documented concurrency queue](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#concurrency).
+This is separate from the permanent clustering pause, which was preserved.
+
+The user delegated the fresh pilot choice. Proposed controlled staging profile:
+Paystack, reserved example email, public payment-products context from
+[Paystack](https://paystack.com/). It is not an actual Paystack customer invitation;
+no email will be sent externally. Fresh tenant creation has not occurred.
+Provisioning requires the real SYSTEM_ADMIN password-plus-MFA flow; no MFA
+claims will be fabricated and no role/password reset is authorized by this plan.
+
 Clustering remains deliberately at zero; no scored/DLQ bulk replay occurred.
 Application deployment, live CIL primary/fallback, current-context activation,
 backup-backed historical duplicate remediation, full provider cost ceilings,
