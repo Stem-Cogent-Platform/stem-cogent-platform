@@ -251,3 +251,28 @@ bounded provider-contract task `8f2fa50617634aed9a1a8496e08f9246` was launched,
 but its result/stopped state could not be retrieved after DNS failure. Resume
 by inspecting that existing task, not by creating another paid request. PR #89
 remains unmerged; no application rollout or production change is claimed.
+
+### 2026-09-05 — Staging deployed; CIL encoding follow-up
+
+The preceding connectivity blocker was resolved. PR #89 merged to staging at
+`16d3f0e`; Application CD `33991785563` succeeded. Database head 0028 was
+verified live. API revision 66 and frontend revision 54 are healthy at 2/2;
+clustering revision 27 remains paused at 0/0. Pre-merge CI passed 360 unit
+tests with 75.33% coverage and the separate dependency integration check.
+
+The interrupted OpenAI probe's existing log proved HTTP 200, exact title and
+valid citation (250 tokens). Post-deploy authenticated API checks passed,
+including denial of tenant ADMIN access to internal admin. Paystack returns
+29 activity items. Current-context relevant monitoring remains zero.
+
+CIL now responds 200 but used deterministic fallback: UUID/datetime/Decimal
+retrieval values failed plain JSON serialization before either provider call.
+PR #90 fixes encoding and adds primary/fallback regression coverage. It also
+serializes infrastructure and application workflows after observing Terraform
+restore the scheduler during Application CD's temporary migration pause.
+27 targeted tests and Ruff pass; follow-up release verification is pending.
+
+Fresh-pilot input is in `docs/qa/phase5-fresh-pilot-input.md`. The user's delegated
+company choice does not bypass SYSTEM_ADMIN MFA. Actual operator provisioning
+is required; no fresh tenant or production invitation has been created.
+Verdict remains NOT READY — BLOCKERS REMAIN.
