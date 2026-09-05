@@ -122,6 +122,15 @@ no email will be sent externally. Fresh tenant creation has not occurred.
 Provisioning requires the real SYSTEM_ADMIN password-plus-MFA flow; no MFA
 claims will be fabricated and no role/password reset is authorized by this plan.
 
+PR #90 subsequently passed 363 unit tests (75.48% coverage), deployment
+definition validation, and a no-change staging Terraform plan. It merged at
+`21d5d61` on September 5 at 22:16:58 UTC. Infrastructure run `33995462712`
+starts first; Application CD `33995462721` waits in the shared environment
+queue. Follow-up deployment and actual HTTP CIL OpenAI attribution are not
+yet claimed. All ten services were stable before this follow-up release;
+the clustering service remained 0/0. Canonical source matches the merged
+backend, frontend, infrastructure and workflow code.
+
 Clustering remains deliberately at zero; no scored/DLQ bulk replay occurred.
 Application deployment, live CIL primary/fallback, current-context activation,
 backup-backed historical duplicate remediation, full provider cost ceilings,

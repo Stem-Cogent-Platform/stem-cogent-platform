@@ -276,3 +276,9 @@ Fresh-pilot input is in `docs/qa/phase5-fresh-pilot-input.md`. The user's delega
 company choice does not bypass SYSTEM_ADMIN MFA. Actual operator provisioning
 is required; no fresh tenant or production invitation has been created.
 Verdict remains NOT READY — BLOCKERS REMAIN.
+
+PR #90 is now merged at `21d5d61` after 363 unit tests (75.48% coverage),
+deployment validation and a no-change Terraform plan. Follow-up release runs:
+Infrastructure CD `33995462712`, Application CD `33995462721`. The shared
+queue is observed holding Application CD while infrastructure runs first.
+Corrected live CIL provider attribution still requires post-rollout testing.

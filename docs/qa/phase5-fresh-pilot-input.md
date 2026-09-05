@@ -31,8 +31,9 @@ returns a link; it does not send mail. Keep the link private in the staging UI.
 ## Operator hand-off
 
 1. Create the tenant once through the internal admin form.
-2. Report only its tenant ID (not any credential or invitation token).
-3. Do not override readiness or issue an invitation yet. Entity resolution,
+2. Open its Internal Notes tab and save the controlled-staging note above.
+3. Report only its tenant ID (not any credential or invitation token).
+4. Do not override readiness or issue an invitation yet. Entity resolution,
    bounded activation, meaningful first value and the remaining acceptance
    checks must be verified first.
 
