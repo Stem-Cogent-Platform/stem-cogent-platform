@@ -282,3 +282,24 @@ deployment validation and a no-change Terraform plan. Follow-up release runs:
 Infrastructure CD `33995462712`, Application CD `33995462721`. The shared
 queue is observed holding Application CD while infrastructure runs first.
 Corrected live CIL provider attribution still requires post-rollout testing.
+
+### 2026-09-06 — Bounded fresh-tenant acceptance results
+
+The post-rollout check now proves actual HTTPS CIL OpenAI attribution with
+`gpt-4.1-mini-2025-04-14`, a grounded answer and valid citation (3,027 ms).
+Isolated deployed-code primary fault injection reached actual Groq with valid
+citations; both-provider unavailability degraded safely. Targeted live RLS
+checks hid other-tenant users and exposed only the requested tenant profile.
+22 targeted backend tests and all four responsive browser widths passed.
+
+The new Paystack tenant `f0075fb0-3f6a-4d82-afbf-43932b425019` has complete
+version-1 context, resolved/not-applicable objects and two completed activations.
+However, final sampling still shows one pending invitation, no users, no saved
+onboarding/delivery preferences, zero briefs and only two structurally counted
+monitoring rows. Those rows are NDPC/SEC index-page titles, both without stored
+publication dates; the SEC title references 2023. First-value quality is not
+proven and the detected_at fallback can admit these undated pages.
+
+No production changes, readiness override, fake third item or queue replay.
+Full evidence and remaining blockers: `docs/qa/phase5-2026-09-06-15-minute-acceptance.md`.
+Verdict: NOT READY — BLOCKERS REMAIN.
