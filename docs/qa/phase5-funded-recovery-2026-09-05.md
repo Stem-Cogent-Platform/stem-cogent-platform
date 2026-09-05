@@ -14,7 +14,41 @@ in the earlier same-day follow-up. It does not constitute production acceptance.
 | Reconciled admin fixtures | PASS | Eight tests; canonical products/priorities now supplied instead of legacy count-only fixtures |
 | Initial PR frontend CI | PASS | Run `33960362854` |
 | Initial PR Terraform plan | PASS | Run `33960362948` |
-| Initial backend CI | FAILED, correction in progress | Run `33960362838`: eight mypy errors in audit output typing and optional profile narrowing; migration step had already passed |
+| Initial backend CI | RESOLVED | Initial run `33960362838` exposed audit typing and optional-profile narrowing errors; subsequent backend run `33960997652` passed 358 unit tests, 75.12% coverage, dependency integration check, migration round-trip, typing and security scans |
+| Latest pre-schema release checks | PASS | Backend `33961487629`, frontend `33961487634`, Terraform `33961487631` |
+| Full staging Terraform plan | NO CHANGES | Run `33961487631`; clustering pause is codified, not implicitly restored |
+| ECS desired-count safeguards | PASS | Six local module tests, including staging zero-count allowance and production zero-count rejection |
+| Admin provisioning form | PASS locally | Required canonical context fields submitted; one browser test proves safe failure, retained input, complete retry payload and reset on success |
+| CIL strict output schema | 12 targeted tests PASS; live probe pending | Every schema property is now required, including an empty-capable follow-up list |
+
+## Latest continuation
+
+The CIL schema now follows the required-all-properties rule in the
+[official OpenAI structured-output documentation](https://developers.openai.com/api/docs/guides/structured-outputs).
+Previously, the defaulted follow-up list was omitted from the schema's required
+fields. The regression test checks exact required/property parity and rejects
+additional properties. This is a contract correction, not yet proof of live
+primary generation.
+
+Two attempts to launch the bounded live probe failed before ECS task creation
+because the local Python AWS SSO provider reported an expired, unrefreshable
+token. The AWS CLI identity check succeeded for staging account
+`437040615141`. An in-memory CLI credential-provider fallback then successfully
+launched task `8f2fa50617634aed9a1a8496e08f9246`, but local DNS resolution
+failed while polling ECS. Its result and stopped state are unconfirmed.
+The task permits one OpenAI request, 160 output tokens, no provider retry, and
+no intelligence persistence. Retrieve this task's existing logs after connectivity
+returns; do not launch another paid probe merely because polling failed.
+
+Local connectivity also failed for GitHub (`Could not resolve host: github.com`),
+AWS STS (connect timeout), and the staging API (name resolution failure).
+Both pushes of the schema commit failed. Canonical local commit: `5a5311b`;
+integration local commit: `3584512`. Last verified remote head: `a2bf4fe`.
+The schema has 12 passing targeted tests and a clean targeted Ruff check.
+No PR merge, application deployment, or production mutation occurred.
+
+Entity activity now uses the same source/URL/body identity for both legacy and
+fingerprinted rows. Historical evidence has not been deleted or consolidated.
 
 ## Replay correctness
 
