@@ -181,7 +181,17 @@ async def put_company_context(
                     regulatory_categories = EXCLUDED.regulatory_categories,
                     strategic_priorities = EXCLUDED.strategic_priorities,
                     profile_completeness = EXCLUDED.profile_completeness,
-                    version = context.company_profiles.version + 1,
+                    version = context.company_profiles.version + CASE WHEN (
+                      context.company_profiles.business_categories,
+                      context.company_profiles.operating_markets,
+                      context.company_profiles.customer_segments,
+                      context.company_profiles.regulatory_categories,
+                      context.company_profiles.strategic_priorities
+                    ) IS DISTINCT FROM (
+                      EXCLUDED.business_categories, EXCLUDED.operating_markets,
+                      EXCLUDED.customer_segments, EXCLUDED.regulatory_categories,
+                      EXCLUDED.strategic_priorities
+                    ) THEN 1 ELSE 0 END,
                     updated_by = EXCLUDED.updated_by,
                     updated_at = NOW()
                 RETURNING *

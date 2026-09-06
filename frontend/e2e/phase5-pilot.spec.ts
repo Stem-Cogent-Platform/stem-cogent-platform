@@ -7,11 +7,41 @@ const brief = {
 };
 
 async function authenticatedApi(page: Page, permissionRole = "ADMIN", phase5Ui = true) {
+  await page.route("**/api/v1/briefing/readiness", (route) => route.fulfill({ json: { state: "ASSESSED", message: null } }));
   await page.route("**/api/v1/auth/refresh", (route) => route.fulfill({ json: { access_token: "test-token", expires_in: 900, user: { ...user, permission_role: permissionRole } } }));
   await page.route("**/api/v1/alerts", (route) => route.fulfill({ json: [] }));
   await page.route("**/api/v1/events", (route) => route.fulfill({ status: 202, json: { accepted: true } }));
   await page.route("**/api/v1/capabilities", (route) => route.fulfill({ json: { phase5_brief_lifecycle_enabled: phase5Ui, phase5_new_ui_enabled: phase5Ui } }));
 }
+
+test("opens a signal dossier, preserves it on refresh, and only asks AI on request", async ({ page }) => {
+  await authenticatedApi(page);
+  const signalId = "40000000-0000-4000-8000-000000000009";
+  const evidence = { id: signalId, title: "Dated source development", source_name: "Public source", source_url: "https://example.invalid/circular", published_at: "2026-08-30T10:00:00Z", detected_at: "2026-08-31T10:00:00Z" };
+  const signal = { ...evidence, primary_domain: "REGULATORY_POLICY", summary: "Stored source summary", llm_synthesis_failed: true, confidence_band: "LOW_CONFIDENCE" };
+  await page.route("**/api/v1/signals", (route) => route.fulfill({ json: [{ ...signal, id: "output-id-not-signal-id", signal_id: signalId }] }));
+  await page.route(`**/api/v1/signals/${signalId}`, (route) => route.fulfill({ json: { signal, evidence: [evidence], entities: [] } }));
+  let aiCalls = 0;
+  await page.route("**/api/v1/cil/query", async (route) => {
+    aiCalls++;
+    expect(route.request().postDataJSON()).toMatchObject({ anchor_type: "SIGNAL", anchor_id: signalId });
+    await route.fulfill({ json: { answer_text: "The source supports this event.", citations: [{ source_signal_id: signalId, source_name: "Public source" }], confidence_indicator: "LOW", follow_up_suggestions: [] } });
+  });
+  await page.goto("/intelligence");
+  await expect(page.getByText("Analysis unavailable")).toBeVisible();
+  await expect(page.getByText("Evidence current")).toHaveCount(0);
+  await page.getByRole("link", { name: "Dated source development" }).click();
+  await expect(page).toHaveURL(new RegExp(`/signals/${signalId}$`));
+  await expect(page.getByRole("heading", { name: "Evidence and timing" })).toBeVisible();
+  await expect(page.getByText(/Automated analysis was unavailable/)).toBeVisible();
+  await page.reload();
+  await expect(page.getByRole("heading", { name: "Dated source development" })).toBeVisible();
+  expect(aiCalls).toBe(0);
+  await page.getByLabel("Question about this evidence").fill("What does the source establish?");
+  await page.getByRole("button", { name: "Ask Cogent", exact: true }).click();
+  await expect(page.getByText("The source supports this event.")).toBeVisible();
+  expect(aiCalls).toBe(1);
+});
 
 async function pilotProductApi(page: Page) {
   await authenticatedApi(page);

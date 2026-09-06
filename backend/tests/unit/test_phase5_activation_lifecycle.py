@@ -152,6 +152,12 @@ async def test_personalisation_rebuilds_each_output_then_checks_readiness(
     )
 
     assert result == "PERSONALISED:2"
+    candidates = session.statements[1]
+    assert "FROM intelligence.global_outputs output" in candidates
+    assert "FROM decision.assessments" not in candidates
+    assert "signal.published_at >= NOW()" in candidates
+    assert "signal.dedup_status NOT IN" in candidates
+    assert session.parameters[1]["lookback"] == 45
     assert decide.await_count == 2
     for call in decide.await_args_list:
         payload = call.args[0]["payload"]

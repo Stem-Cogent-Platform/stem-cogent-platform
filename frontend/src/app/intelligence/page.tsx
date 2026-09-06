@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 
 import { ModuleFailure, ModuleLoading } from "@/components/module-state";
@@ -19,6 +20,8 @@ type Intelligence = {
   source_name: string;
   source_url?: string;
   published_at?: string;
+  detected_at?: string;
+  llm_synthesis_failed?: boolean;
 };
 
 export default function IntelligencePage() {
@@ -61,9 +64,9 @@ export default function IntelligencePage() {
           <div>
             <p className="eyebrow">Supporting market view</p>
             <h1>Wider Intelligence</h1>
-            <p>Verified developments that do not currently require a Decision Brief.</p>
+            <p>Source-backed market developments. Open a dossier to review the evidence and analysis status.</p>
           </div>
-          {state.status === "ready" && <div className="page-status"><i />Evidence current</div>}
+          {state.status === "ready" && <div className="page-status">{items.length} stored developments</div>}
         </div>
         {state.status === "loading" && <ModuleLoading label="Loading Wider Intelligence" />}
         {state.status === "error" && <ModuleFailure message={state.message} retry={() => void load()} />}
@@ -92,13 +95,16 @@ export default function IntelligencePage() {
                   <div className="brief-meta">
                     <span className={`priority-chip priority-${(item.urgency_band ?? "standard").toLowerCase()}`}>{item.urgency_band ?? "MONITOR"}</span>
                     <span>{item.primary_domain?.replaceAll("_", " ")}</span>
-                    <span>{item.confidence_band} confidence</span>
+                    <span>{item.confidence_band?.replaceAll("_", " ").toLowerCase() || "Unassessed"} confidence</span>
+                    {item.llm_synthesis_failed && <span>Analysis unavailable</span>}
                   </div>
-                  <h2>{item.title || item.summary}</h2>
-                  <p>{item.global_implication || item.summary}</p>
+                  <h2><Link href={`/signals/${item.signal_id}`} prefetch={false}>{item.title || item.summary}</Link></h2>
+                  <p>{item.llm_synthesis_failed ? "Source evidence retained. Open the dossier to review what is known and what remains unassessed." : item.global_implication || item.summary}</p>
+                  <p>{item.published_at ? `Published ${new Date(item.published_at).toLocaleDateString()}` : "Publication date unavailable"}{item.detected_at ? ` · Detected ${new Date(item.detected_at).toLocaleDateString()}` : ""}</p>
                   <footer>
                     <span><b>Source</b>{item.source_name}</span>
-                    {item.source_url && <a href={item.source_url} rel="noreferrer" target="_blank">Open verified source →</a>}
+                    <Link href={`/signals/${item.signal_id}`} prefetch={false}>View dossier →</Link>
+                    {item.source_url && <a href={item.source_url} rel="noreferrer" target="_blank">Open source ↗</a>}
                   </footer>
                 </article>
               ))}

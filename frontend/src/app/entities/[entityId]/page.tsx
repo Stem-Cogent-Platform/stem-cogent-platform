@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 
@@ -45,7 +46,7 @@ export default function EntityPage() {
                 <h2>Recent verified activity</h2>
                 {state.data.activity.length ? (
                   <ul className="evidence-list">
-                    {state.data.activity.map((item) => <li key={item.id}><div><strong>{item.title}</strong><small>{item.primary_domain?.replaceAll("_", " ")}</small></div>{item.source_url && <a href={item.source_url} rel="noreferrer" target="_blank">Open source</a>}</li>)}
+                    {state.data.activity.map((item) => <li key={item.id}><div><strong><Link href={`/signals/${item.id}`}>{item.title}</Link></strong><small>{item.primary_domain?.replaceAll("_", " ")}</small></div>{item.source_url && <a href={item.source_url} rel="noreferrer" target="_blank">Open source</a>}</li>)}
                   </ul>
                 ) : <p>No verified recent activity is available for this entity yet.</p>}
                 <h2>Known relationships</h2>
