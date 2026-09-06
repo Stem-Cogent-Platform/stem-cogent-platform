@@ -1,6 +1,11 @@
 # Phase 5 Live Acceptance
 
-Status date: 2026-09-05
+Status date: 2026-09-06
+
+Latest founder retry: invitation acceptance succeeded, but final onboarding
+fails at company-object SQL (`uuid = text`). The repair and real-PostgreSQL
+regression evidence are tracked in
+[the onboarding follow-up](phase5-2026-09-06-onboarding-uuid-repair.md).
 
 The expired AWS-session blocker was cleared on 2026-09-05. The sections below
 retain the original repair baseline; current live findings and cost figures are

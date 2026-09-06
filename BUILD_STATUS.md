@@ -1,5 +1,15 @@
 # Build Status
 
+## 2026-09-06 — Fresh-pilot onboarding regression
+
+The founder accepted the Paystack invitation, then hit a reproduced PostgreSQL
+`uuid = text` error on final onboarding's company-object creation. The text
+advisory-lock parameter was reused as a UUID. Separate lock acquisition and
+typed UUID insertion are repaired locally; 25 targeted tests and Ruff pass.
+PR 91 adds real PostgreSQL/RLS persistence regression; CI and staging proof
+remain pending. No production release or forced completion. Details:
+`docs/qa/phase5-2026-09-06-onboarding-uuid-repair.md`.
+
 ## Phase 5 — Pilot Readiness & Product Experience Hardening
 
 | Task | Status | Evidence | Changes | Tests | Suggested commit |
