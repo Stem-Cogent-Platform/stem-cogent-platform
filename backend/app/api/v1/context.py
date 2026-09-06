@@ -208,21 +208,31 @@ async def create_company_object(
 ) -> dict[str, Any]:
     require_permission(context, "CONFIGURE_COMPANY_CONTEXT")
     require_current_legal_acceptance(context)
+    # Acquire the lock before the read/insert statement so a waiting request gets
+    # a fresh READ COMMITTED snapshot. Keep text lock parameters separate from
+    # UUID insert parameters: PostgreSQL otherwise infers tenant_id as text.
+    await context.session.execute(
+        text(
+            "SELECT pg_advisory_xact_lock(hashtextextended("
+            ":tenant_key||':'||:object_type||':'||LOWER(:name),0))"
+        ),
+        {
+            "tenant_key": str(context.principal.tenant_id),
+            "object_type": body.object_type,
+            "name": body.name,
+        },
+    )
     row = (
         await context.session.execute(
             text(
                 """
-                WITH lock AS MATERIALIZED (
-                  SELECT pg_advisory_xact_lock(hashtextextended(
-                    CAST(:tenant_id AS TEXT)||':'||:object_type||':'||LOWER(:name),0
-                  ))
-                ), inserted AS (
+                WITH inserted AS (
                   INSERT INTO context.company_objects (
                     tenant_id, object_type, name, entity_id, metadata, importance
                   )
-                  SELECT :tenant_id, :object_type, :name, :entity_id,
+                  SELECT CAST(:tenant_id AS UUID), :object_type, :name,
+                         CAST(:entity_id AS UUID),
                          CAST(:metadata AS JSONB), :importance
-                  FROM lock
                   WHERE NOT EXISTS (
                     SELECT 1 FROM context.company_objects
                     WHERE tenant_id=:tenant_id AND object_type=:object_type
