@@ -4,17 +4,18 @@ Only an explicitly configured local test database is allowed. All fixture and
 endpoint writes roll back, including endpoint-level commits via savepoints.
 """
 
-from datetime import UTC, datetime
+from dataclasses import replace
 from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import pytest
 import pytest_asyncio
+from fastapi import Request
 from sqlalchemy import make_url, text
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 
 from app.api.auth import Principal, RequestContext
-from app.api.v1 import context
+from app.api.v1 import compliance, context
 from app.compliance.documents import current_legal_documents
 from app.core.config import get_settings
 
@@ -34,9 +35,10 @@ async def onboarding_context(monkeypatch):
     monkeypatch.setattr(context, "invalidate_company", AsyncMock())
     monkeypatch.setattr(context, "invalidate_user", AsyncMock())
     monkeypatch.setattr(context, "_queue_personalisation", lambda _: False)
+    monkeypatch.setattr(settings, "JWT_SIGNING_SECRET_ARN", "local-test-consent-key")
+    monkeypatch.setattr(compliance, "get_secret_string", lambda _: "local-test-only")
     tenant_id, user_id = uuid4(), uuid4()
     legal = current_legal_documents()
-    accepted_at = datetime.now(UTC)
     principal = Principal(
         user_id=user_id,
         tenant_id=tenant_id,
@@ -45,14 +47,6 @@ async def onboarding_context(monkeypatch):
             "CONFIGURE_COMPANY_CONTEXT", "CONFIGURE_DECISION_LENS",
             "CONFIGURE_FOCUS_AREAS", "CONFIGURE_ALERTS",
         }),
-        tos_accepted_at=accepted_at,
-        tos_version=legal["terms"].version,
-        privacy_policy_accepted_at=accepted_at,
-        privacy_policy_version=legal["privacy"].version,
-        ndpa_consent_accepted_at=accepted_at,
-        ndpa_consent_version=legal["ndpa"].version,
-        binding_app_version=settings.APPLICATION_VERSION,
-        current_compliance_ledger_id=uuid4(),
     )
     try:
         async with engine.connect() as connection:
@@ -79,6 +73,29 @@ async def onboarding_context(monkeypatch):
                     expire_on_commit=False,
                 ) as session:
                     request_context = RequestContext(principal, session)
+                    consent = await compliance.accept_compliance_documents(
+                        compliance.ConsentAcceptance(
+                            idempotency_key=uuid4(), terms_accepted=True,
+                            privacy_notice_acknowledged=True, ndpa_consent_granted=True,
+                            terms_version=legal["terms"].version,
+                            privacy_policy_version=legal["privacy"].version,
+                            ndpa_consent_version=legal["ndpa"].version,
+                            application_version=settings.APPLICATION_VERSION,
+                        ),
+                        Request({"type": "http", "headers": [], "client": ("127.0.0.1", 1)}),
+                        request_context,
+                    )
+                    request_context.principal = replace(
+                        principal,
+                        tos_accepted_at=consent["accepted_at"],
+                        tos_version=legal["terms"].version,
+                        privacy_policy_accepted_at=consent["accepted_at"],
+                        privacy_policy_version=legal["privacy"].version,
+                        ndpa_consent_accepted_at=consent["accepted_at"],
+                        ndpa_consent_version=legal["ndpa"].version,
+                        binding_app_version=settings.APPLICATION_VERSION,
+                        current_compliance_ledger_id=consent["ledger_id"],
+                    )
                     await context.put_company_context(
                         context.CompanyProfileInput(
                             business_categories=["FINTECH"], operating_markets=["NG"],
