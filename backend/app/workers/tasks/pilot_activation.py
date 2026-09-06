@@ -93,9 +93,9 @@ async def run_activation(payload: dict[str, Any]) -> str:
                         WHERE output.tenant_id IS NULL AND output.synthesis_status='COMPLETED'
                           AND signal.tenant_id IS NULL
                           AND signal.dedup_status NOT IN ('EXACT_DUPLICATE','SEMANTIC_DUPLICATE')
-                          AND COALESCE(signal.published_at,signal.detected_at)
+                          AND signal.published_at
                               >= NOW() - make_interval(days => :lookback_days)
-                          AND COALESCE(signal.published_at,signal.detected_at) <= NOW()
+                          AND signal.published_at <= NOW()
                         ORDER BY signal.source_id,signal.source_url,signal.body_text_hash,
                                  output.created_at,output.id
                         """
@@ -218,16 +218,26 @@ async def personalise_user(payload: dict[str, Any]) -> str:
                 await session.execute(
                     text(
                         """
-                        SELECT DISTINCT assessment.global_output_id,assessment.signal_id
-                        FROM decision.assessments assessment
-                        JOIN context.company_profiles profile
-                          ON profile.tenant_id=assessment.tenant_id
-                         AND profile.version=assessment.company_context_version
-                        WHERE assessment.tenant_id=:tenant_id
-                        ORDER BY assessment.global_output_id
+                        SELECT * FROM (
+                        SELECT DISTINCT ON (signal.source_id,signal.source_url,
+                                            signal.body_text_hash)
+                               output.id AS global_output_id,output.signal_id,signal.published_at
+                        FROM intelligence.global_outputs output
+                        JOIN pipeline.signals signal ON signal.id=output.signal_id
+                        WHERE output.synthesis_status='COMPLETED'
+                          AND (output.tenant_id IS NULL OR output.tenant_id=:tenant_id)
+                          AND (signal.tenant_id IS NULL OR signal.tenant_id=:tenant_id)
+                          AND signal.dedup_status NOT IN ('EXACT_DUPLICATE','SEMANTIC_DUPLICATE')
+                          AND jsonb_array_length(output.citations)>0
+                          AND signal.published_at >= NOW() - make_interval(days => :lookback)
+                          AND signal.published_at <= NOW()
+                        ORDER BY signal.source_id,signal.source_url,signal.body_text_hash,
+                                 output.synthesized_at DESC,output.id
+                        ) candidates ORDER BY published_at DESC,global_output_id LIMIT 100
                         """
                     ),
-                    {"tenant_id": tenant_id},
+                    {"tenant_id": tenant_id,
+                     "lookback": get_settings().PILOT_ACTIVATION_LOOKBACK_DAYS},
                 )
             )
             .mappings()

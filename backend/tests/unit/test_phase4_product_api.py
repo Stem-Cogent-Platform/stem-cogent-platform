@@ -83,6 +83,55 @@ def context(session: Session) -> RequestContext:
 
 
 @pytest.mark.asyncio
+async def test_signal_dossier_reads_evidence_without_generation():
+    signal_id, entity_id = uuid4(), uuid4()
+    row = {"id": signal_id, "title": "Source event", "citations": [
+        {"source_signal_id": str(signal_id), "source_name": "Source"}
+    ]}
+    session = Session(Result(row=row), Result(rows=[{"id": entity_id}]),
+                      Result(rows=[{"id": signal_id}]))
+    result = await product.signal_detail(signal_id, context(session))
+    assert result["signal"]["id"] == str(signal_id)
+    assert result["entities"] == [{"id": str(entity_id)}]
+    assert result["evidence"] == [{"id": str(signal_id)}]
+    assert session.commits == 0
+    assert all(":tenant_id" in query for query in session.statements)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("row,state", [
+    (None, "SETUP_REQUIRED"),
+    ({"context_version": 6, "current_assessments": 0, "recent_analysis_at": None},
+     "AWAITING_SOURCE_ANALYSIS"),
+    ({"context_version": 6, "current_assessments": 0, "recent_analysis_at": datetime.now(UTC)},
+     "CONTEXT_UPDATE_PENDING"),
+    ({"context_version": 6, "current_assessments": 1, "recent_analysis_at": datetime.now(UTC)},
+     "ASSESSED"),
+])
+async def test_briefing_readiness_distinguishes_empty_from_unprocessed(row, state):
+    result = await product.briefing_readiness(context(Session(Result(row=row))))
+    assert result["state"] == state
+
+
+@pytest.mark.asyncio
+async def test_signal_dossier_unknown_returns_404():
+    with pytest.raises(HTTPException) as error:
+        await product.signal_detail(uuid4(), context(Session(Result())))
+    assert error.value.status_code == 404
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("malformed", [True, False])
+async def test_signal_dossier_fails_closed_on_invalid_or_inaccessible_evidence(malformed):
+    signal_id = uuid4()
+    row = {"id": signal_id, "citations": [{"source_signal_id": "invalid" if malformed else str(uuid4())}]}
+    session = Session(Result(row=row), Result(rows=[]), Result(rows=[{"id": signal_id}]))
+    with pytest.raises(HTTPException) as error:
+        await product.signal_detail(signal_id, context(session))
+    assert error.value.status_code == 503
+
+
+@pytest.mark.asyncio
 async def test_brief_listing_detail_and_action_paths(monkeypatch) -> None:
     monkeypatch.setattr(
         product,

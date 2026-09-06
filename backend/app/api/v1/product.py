@@ -418,6 +418,42 @@ async def company_lens(context: RequestContext = Depends(get_request_context)) -
     )
 
 
+@router.get("/briefing/readiness")
+async def briefing_readiness(
+    context: RequestContext = Depends(get_request_context),
+) -> dict[str, Any]:
+    require_permission(context, "READ_INTELLIGENCE")
+    row = (
+        await context.session.execute(text("""
+            SELECT profile.version AS context_version,
+              (SELECT COUNT(*) FROM decision.assessments assessment
+               WHERE assessment.tenant_id=:tenant_id
+                 AND assessment.company_context_version=profile.version) AS current_assessments,
+              (SELECT MAX(output.synthesized_at) FROM intelligence.global_outputs output
+               JOIN pipeline.signals signal ON signal.id=output.signal_id
+               WHERE output.synthesis_status='COMPLETED' AND NOT output.llm_synthesis_failed
+                 AND (output.tenant_id IS NULL OR output.tenant_id=:tenant_id)
+                 AND (signal.tenant_id IS NULL OR signal.tenant_id=:tenant_id)
+                 AND signal.published_at BETWEEN NOW()-INTERVAL '45 days' AND NOW()
+                 AND signal.dedup_status NOT IN ('EXACT_DUPLICATE','SEMANTIC_DUPLICATE'))
+                 AS recent_analysis_at
+            FROM context.company_profiles profile WHERE profile.tenant_id=:tenant_id
+        """), {"tenant_id": context.principal.tenant_id})
+    ).mappings().one_or_none()
+    if row is None:
+        return {"state": "SETUP_REQUIRED", "message": "Complete your Company Context to prepare a briefing."}
+    if row["recent_analysis_at"] is None:
+        state = "AWAITING_SOURCE_ANALYSIS"
+        message = ("Your setup is saved, but recent source analysis is not yet available. "
+                   "This briefing is not ready; an empty screen does not mean there are no developments.")
+    elif not row["current_assessments"]:
+        state = "CONTEXT_UPDATE_PENDING"
+        message = "Your saved Company Context has not yet been evaluated against recent intelligence."
+    else:
+        state, message = "ASSESSED", None
+    return jsonable_encoder({**dict(row), "state": state, "message": message})
+
+
 @router.get("/signals")
 @router.get("/intelligence", include_in_schema=False)
 async def wider_intelligence(
@@ -429,17 +465,30 @@ async def wider_intelligence(
         await context.session.execute(
             text(
                 """
-                SELECT output.id, output.signal_id, output.summary, output.key_developments,
+                SELECT * FROM (
+                SELECT DISTINCT ON (signal.source_id, signal.source_url, signal.body_text_hash,
+                    CASE WHEN signal.source_url IS NULL OR signal.body_text_hash IS NULL
+                         THEN signal.id END)
+                       output.id, output.signal_id, output.summary, output.key_developments,
                        output.global_implication, output.confidence_note, output.citations,
                        output.synthesized_at, signal.title, signal.primary_domain,
                        signal.urgency_band, signal.confidence_band, signal.source_url,
-                       signal.published_at, source.source_name AS source_name
+                       signal.published_at, signal.detected_at, output.llm_synthesis_failed,
+                       source.source_name AS source_name
                 FROM intelligence.global_outputs AS output
                 JOIN pipeline.signals AS signal ON signal.id = output.signal_id
                 JOIN config.sources AS source ON source.id = signal.source_id
                 WHERE output.synthesis_status = 'COMPLETED'
                   AND (signal.tenant_id IS NULL OR signal.tenant_id = :tenant_id)
-                ORDER BY output.synthesized_at DESC NULLS LAST LIMIT :limit
+                  AND (output.tenant_id IS NULL OR output.tenant_id = :tenant_id)
+                  AND signal.dedup_status NOT IN ('EXACT_DUPLICATE','SEMANTIC_DUPLICATE')
+                ORDER BY signal.source_id, signal.source_url, signal.body_text_hash,
+                    CASE WHEN signal.source_url IS NULL OR signal.body_text_hash IS NULL
+                         THEN signal.id END,
+                    output.synthesized_at DESC NULLS LAST, output.id
+                ) feed
+                ORDER BY published_at DESC NULLS LAST, synthesized_at DESC NULLS LAST, id
+                LIMIT :limit
                 """
             ),
             {"tenant_id": context.principal.tenant_id, "limit": limit},
@@ -454,6 +503,79 @@ async def wider_intelligence(
             },
         )
     return jsonable_encoder([dict(row) for row in rows])
+
+
+@router.get("/signals/{signal_id}")
+async def signal_detail(
+    signal_id: UUID, context: RequestContext = Depends(get_request_context)
+) -> dict[str, Any]:
+    """Read stored signal evidence; opening a dossier never invokes generation."""
+    require_permission(context, "READ_INTELLIGENCE")
+    parameters = {"signal_id": signal_id, "tenant_id": context.principal.tenant_id}
+    signal = (
+        await context.session.execute(text("""
+            SELECT signal.id, signal.title, LEFT(signal.body_text,3000) AS evidence_excerpt,
+                   signal.source_url, signal.published_at, signal.detected_at,
+                   signal.primary_domain, signal.subcategory_tags, signal.confidence_band,
+                   signal.urgency_band, signal.review_flag, source.source_name,
+                   output.id AS global_output_id, output.summary, output.key_developments,
+                   output.global_implication, output.confidence_note, output.citations,
+                   output.llm_synthesis_failed, output.synthesized_at
+            FROM pipeline.signals signal
+            JOIN config.sources source ON source.id=signal.source_id
+            LEFT JOIN intelligence.global_outputs output ON output.signal_id=signal.id
+              AND output.synthesis_status='COMPLETED'
+              AND (output.tenant_id IS NULL OR output.tenant_id=:tenant_id)
+            WHERE signal.id=:signal_id
+              AND (signal.tenant_id IS NULL OR signal.tenant_id=:tenant_id)
+            ORDER BY signal.created_at DESC LIMIT 1
+        """), parameters)
+    ).mappings().one_or_none()
+    if signal is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Signal not found")
+    entities = (
+        await context.session.execute(text("""
+            SELECT DISTINCT entity.id, entity.canonical_name, entity.entity_type
+            FROM intelligence.signal_entities link
+            JOIN intelligence.entities entity ON entity.id=link.entity_id AND entity.active
+            WHERE link.signal_id=:signal_id
+              AND (link.tenant_id IS NULL OR link.tenant_id=:tenant_id)
+            ORDER BY entity.canonical_name LIMIT 30
+        """), parameters)
+    ).mappings().all()
+    evidence_ids = {signal_id}
+    for citation in signal["citations"] or []:
+        try:
+            evidence_ids.add(UUID(str(citation["source_signal_id"])))
+        except (ValueError, KeyError, TypeError) as exc:
+            raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE,
+                                "Stored evidence requires review") from exc
+    evidence = (
+        await context.session.execute(text("""
+            SELECT DISTINCT signal.id, signal.title, signal.source_url,
+                   signal.published_at, signal.detected_at, source.source_name
+            FROM pipeline.signals signal
+            JOIN config.sources source ON source.id=signal.source_id
+            WHERE signal.id=ANY(CAST(:ids AS UUID[]))
+              AND (signal.tenant_id IS NULL OR signal.tenant_id=:tenant_id)
+            ORDER BY signal.published_at DESC NULLS LAST, signal.id LIMIT 31
+        """), {"ids": list(evidence_ids), "tenant_id": context.principal.tenant_id})
+    ).mappings().all()
+    # Do not serialize unfiltered citation identifiers from another tenant.
+    allowed_ids = {str(item["id"]) for item in evidence}
+    if {str(item) for item in evidence_ids} - allowed_ids:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE,
+                            "Stored evidence requires review")
+    payload = dict(signal)
+    payload["citations"] = [
+        citation for citation in signal["citations"] or []
+        if str(citation.get("source_signal_id")) in allowed_ids
+    ]
+    return jsonable_encoder({
+        "signal": payload,
+        "entities": [dict(item) for item in entities],
+        "evidence": [dict(item) for item in evidence],
+    })
 
 
 @router.get("/entities/{entity_id}")
@@ -538,7 +660,16 @@ async def watchlist(context: RequestContext = Depends(get_request_context)) -> d
                 """
                 SELECT object.id, object.name, object.object_type, object.importance,
                        object.entity_id,
-                       CASE WHEN object.entity_id IS NULL THEN NULL ELSE (
+                       CASE WHEN object.entity_id IS NULL THEN (
+                         SELECT COUNT(DISTINCT monitoring.signal_id)
+                         FROM context.relevant_monitoring monitoring
+                         JOIN context.company_profiles profile
+                           ON profile.tenant_id=monitoring.tenant_id
+                          AND profile.version=monitoring.company_context_version
+                         WHERE monitoring.tenant_id=object.tenant_id
+                           AND object.id=ANY(monitoring.matched_object_ids)
+                           AND monitoring.last_verified_at >= NOW() - INTERVAL '30 days'
+                       ) ELSE (
                          SELECT COUNT(DISTINCT link.signal_id)
                          FROM intelligence.signal_entities AS link
                          JOIN pipeline.signals AS signal ON signal.id = link.signal_id
