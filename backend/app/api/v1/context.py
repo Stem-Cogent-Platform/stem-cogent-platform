@@ -230,9 +230,10 @@ async def create_company_object(
                   INSERT INTO context.company_objects (
                     tenant_id, object_type, name, entity_id, metadata, importance
                   )
-                  SELECT CAST(:tenant_id AS UUID), :object_type, :name,
+                  SELECT CAST(:tenant_id AS UUID), CAST(:object_type AS TEXT),
+                         CAST(:name AS TEXT),
                          CAST(:entity_id AS UUID),
-                         CAST(:metadata AS JSONB), :importance
+                         CAST(:metadata AS JSONB), CAST(:importance AS TEXT)
                   WHERE NOT EXISTS (
                     SELECT 1 FROM context.company_objects
                     WHERE tenant_id=:tenant_id AND object_type=:object_type
