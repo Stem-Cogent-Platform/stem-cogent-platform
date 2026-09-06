@@ -105,6 +105,7 @@ async def test_context_api_happy_paths_use_tenant_scoped_bound_queries(monkeypat
         FakeResult(all_rows=[row]),
         FakeResult(one=row),
         FakeResult(),
+        FakeResult(),  # company-object advisory lock is a separate statement
         FakeResult(one=row),
         FakeResult(),
         FakeResult(one_or_none=row),
@@ -151,7 +152,9 @@ async def test_context_api_happy_paths_use_tenant_scoped_bound_queries(monkeypat
         context.CompanyObjectPatch(name="Collections", metadata={"tier": 1}),
         request_context,
     )
-    assert "SET name = :name, metadata = CAST(:metadata AS JSONB)" in session.statements[6]
+    assert "pg_advisory_xact_lock" in session.statements[4]
+    assert "WITH inserted AS" in session.statements[5]
+    assert "SET name = :name, metadata = CAST(:metadata AS JSONB)" in session.statements[7]
 
     assert await context.get_decision_lens(request_context) is not None
     await context.put_decision_lens(
@@ -168,7 +171,7 @@ async def test_context_api_happy_paths_use_tenant_scoped_bound_queries(monkeypat
         context.FocusAreaPatch(label="Settlement", weight=0.8),
         request_context,
     )
-    assert "SET label = :label, weight = :weight" in session.statements[14]
+    assert "SET label = :label, weight = :weight" in session.statements[15]
     response = await context.delete_focus_area(row_id, request_context)
     assert response.status_code == 204
     assert session.commits == 7
