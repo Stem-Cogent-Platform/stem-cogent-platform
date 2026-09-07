@@ -273,7 +273,7 @@ async def _load_package(
                 GROUP BY output.id, signal.id, signal.created_at, profile.id
                 ORDER BY signal.created_at DESC
                 LIMIT 1
-                """
+                """  # nosec B608 # Fixed application SQL fragments; request values are bound
                 ),
                 {
                     "output_id": output_id,

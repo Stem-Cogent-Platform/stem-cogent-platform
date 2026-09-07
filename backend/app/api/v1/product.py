@@ -172,7 +172,7 @@ async def list_briefs(
            OR brief_status=CAST(:status_filter AS TEXT)
         ORDER BY personal_priority_score DESC NULLS LAST,relevance_score DESC,published_at DESC,id
         LIMIT :limit
-    """),
+    """),  # nosec B608 # Fixed application SQL fragments; request values are bound
                 {
                     **_value_params(context),
                     "status_filter": status_filter,
@@ -470,7 +470,7 @@ async def company_lens(
         WITH visible AS ({visible_briefs_sql()})
         SELECT * FROM visible WHERE brief_status IN ('OPEN','WATCHING','ESCALATED')
         ORDER BY relevance_score DESC,published_at DESC LIMIT 100
-    """),
+    """),  # nosec B608 # Fixed application SQL fragments; request values are bound
                 {**_value_params(context), "user_id": None},
             )
         )
@@ -619,7 +619,7 @@ async def wider_intelligence(
             AND (:q='' OR signal.title ILIKE :pattern OR output.summary ILIKE :pattern)
           ORDER BY {identity_sql()},output.synthesized_at DESC,output.id
         ) feed ORDER BY published_at DESC NULLS LAST,id LIMIT :limit
-    """),
+    """),  # nosec B608 # Fixed application SQL fragments; request values are bound
                 {
                     **_value_params(context, 60),
                     "q": q[:200],
@@ -738,7 +738,7 @@ async def signal_detail(
           AND profile.version=assessment.company_context_version
         WHERE assessment.tenant_id=:tenant_id AND assessment.global_output_id=:output_id
           AND assessment.relevance_score>=0.450 AND {matched_sql()}
-    """),
+    """),  # nosec B608 # Fixed application SQL fragments; request values are bound
                 {**parameters, "output_id": signal["global_output_id"]},
             )
         )
@@ -757,7 +757,7 @@ async def signal_detail(
           AND signal.id<>:signal_id AND (signal.tenant_id IS NULL OR signal.tenant_id=:tenant_id)
           AND signal.dedup_status NOT IN ('EXACT_DUPLICATE','SEMANTIC_DUPLICATE')
         ORDER BY {identity_sql()},signal.published_at DESC NULLS LAST LIMIT 12
-    """),
+    """),  # nosec B608 # Fixed application SQL fragments; request values are bound
                 {
                     **parameters,
                     "history_ids": list(signal.get("historical_signal_ids") or []),
@@ -929,7 +929,7 @@ async def watchlist(
           LOWER(COALESCE(signal.title,'')||' '||COALESCE(signal.body_text,'')) match_text
         FROM activity JOIN pipeline.signals signal ON signal.id=activity.signal_id
         WHERE activity.published_at>=NOW()-INTERVAL '30 days'
-    """),
+    """),  # nosec B608 # Fixed application SQL fragments; request values are bound
                 params,
             )
         )
@@ -1424,7 +1424,7 @@ async def relevant_monitoring(
                 text(f"""
         WITH visible AS ({visible_monitoring_sql()}) SELECT * FROM visible
         ORDER BY relevance_score DESC,published_at DESC,id LIMIT :limit
-    """),
+    """),  # nosec B608 # Fixed application SQL fragments; request values are bound
                 {**_value_params(context), "limit": limit},
             )
         )
@@ -1491,7 +1491,7 @@ async def briefing_changes(
              AND COALESCE(last_material_change_at,detected_at)<=:as_of) new_relevant_monitoring,
           (SELECT COUNT(*) FROM open_briefs WHERE relevance_band='CRITICAL'
              AND last_material_change_at>:since AND last_material_change_at<=:as_of) critical_count
-    """),
+    """),  # nosec B608 # Fixed application SQL fragments; request values are bound
                 {**_value_params(context), "since": since, "as_of": window["as_of"]},
             )
         )

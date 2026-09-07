@@ -1,5 +1,5 @@
 from datetime import UTC, datetime, timedelta
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 from uuid import uuid4
 
 import pytest
@@ -112,3 +112,57 @@ async def test_ineligible_source_does_not_reach_paid_embedding(
     monkeypatch.setattr(embedding, "_embedding_client", forbidden)
     result = await embedding.run_embedding({"payload": {"signal_id": str(uuid4())}})
     assert result.startswith("SKIPPED:")
+
+
+@pytest.mark.asyncio
+async def test_private_undated_upload_keeps_existing_embedding_workflow(monkeypatch):
+    tenant_id, signal_id = uuid4(), uuid4()
+    session = AsyncMock()
+
+    async def sessions():
+        yield session
+
+    monkeypatch.setattr(embedding, "get_session", sessions)
+    scope = AsyncMock()
+    monkeypatch.setattr(embedding, "tenant_scope", scope)
+    monkeypatch.setattr(
+        embedding,
+        "_load_scored_signal",
+        AsyncMock(
+            return_value={
+                "published_at": None,
+                "processing_flags": [],
+                "title": "Private upload",
+                "body_text": "Company evidence",
+                "primary_domain": "REGULATORY",
+                "entity_labels": [],
+                "entity_ids": [],
+            }
+        ),
+    )
+    monkeypatch.setattr(embedding, "_cached_embedding", AsyncMock(return_value=None))
+    client = AsyncMock()
+    client.embed.return_value = [(0.1, 0.2)]
+    monkeypatch.setattr(embedding, "_embedding_client", Mock(return_value=client))
+    persist = AsyncMock()
+    monkeypatch.setattr(embedding, "_persist_embedding", persist)
+    monkeypatch.setattr(embedding, "find_similar_signals", AsyncMock(return_value=()))
+    monkeypatch.setattr(embedding, "_assign_cluster", AsyncMock(return_value=None))
+    publish = AsyncMock()
+    monkeypatch.setattr(embedding, "_publish_context_ready", publish)
+
+    result = await embedding.run_embedding(
+        {
+            "payload": {
+                "signal_id": str(signal_id),
+                "tenant_id": str(tenant_id),
+            }
+        }
+    )
+
+    assert result == "CONTEXT_READY"
+    scope.assert_awaited_once_with(session, tenant_id)
+    client.embed.assert_awaited_once()
+    client.aclose.assert_awaited_once()
+    assert persist.await_args.args[1:3] == (signal_id, tenant_id)
+    publish.assert_awaited_once()

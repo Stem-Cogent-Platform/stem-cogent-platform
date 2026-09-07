@@ -38,7 +38,7 @@ def visible_briefs_sql() -> str:
           ORDER BY {identity_sql()},(brief.user_id IS NOT NULL) DESC,
             brief.lens_version DESC NULLS LAST,brief.updated_at DESC,brief.id
         ) canonical_briefs
-    """
+    """  # nosec B608 # Fixed application SQL fragments; request values are bound
 
 
 def visible_monitoring_sql() -> str:
@@ -81,7 +81,7 @@ def visible_monitoring_sql() -> str:
           ORDER BY {identity_sql()},(monitoring.user_id IS NOT NULL) DESC,
             monitoring.relevance_score DESC,monitoring.id
         ) canonical_monitoring
-    """
+    """  # nosec B608 # Fixed application SQL fragments; request values are bound
 
 
 def visible_ctes() -> str:

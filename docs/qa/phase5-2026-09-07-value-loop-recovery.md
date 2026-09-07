@@ -50,9 +50,17 @@ reads, invitation rejection/acceptance thresholds, freshness exclusions,
 explicit visit acknowledgement, 60-day configuration, and final onboarding
 persistence and legacy-counter/focus-version regressions.
 Migration `0029` has been applied and rolled back/reapplied locally.
-Ruff passes. Frontend production build and TypeScript pass. Browser/unit runs
-hit local memory-related worker/startup timeouts and must be rerun serially.
-Full backend unit/type checks are not yet certified for the final change.
+Ruff and mypy pass (114 application files). Bandit passes after review of
+fixed SQL-fragment composition with bound request values; scoped B608 comments
+document those cases. No scanner-wide rule or severity threshold changed.
+Frontend CI passes type checking, lint, 33 unit tests, production build and
+Playwright. The serial local rerun also passes all 16 browser tests, including
+preparation/acknowledgement and WebSocket update counts. Earlier resource
+timeouts are superseded by these completed runs. Full backend unit/coverage
+and CI validation are still in progress.
+
+Draft recovery PR: https://github.com/Stem-Cogent-Platform/stem-cogent-platform/pull/93
+targets staging; it has not been merged or deployed.
 
 ## C. Continuous intelligence
 

@@ -46,7 +46,7 @@ async def value_counts(
              AND m.company_context_version=:version AND m.relevance_score>=0.450
              AND NOT q.decision_required)
              AS meaningful_monitoring_count
-    """),
+    """),  # nosec B608 # Fixed application SQL fragments; request values are bound
                 {
                     "tenant_id": tenant_id,
                     "version": version,
@@ -70,7 +70,7 @@ async def invitation_readiness(
             await session.execute(
                 text(
                     "SELECT * FROM context.company_profiles WHERE tenant_id=:tenant_id"
-                    + (" FOR UPDATE" if lock else "")
+                    + (" FOR UPDATE" if lock else "")  # nosec B608 # Fixed application SQL fragments; request values are bound
                 ),
                 {"tenant_id": tenant_id},
             )

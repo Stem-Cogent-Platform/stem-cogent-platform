@@ -138,7 +138,7 @@ async def run_activation(payload: dict[str, Any]) -> str:
                   COUNT(*) FILTER (WHERE NOT {matched_sql()}) no_context_match
                 FROM decision.assessments assessment
                 WHERE tenant_id=:tenant_id AND company_context_version=:version AND updated_at>=:started
-            """),
+            """),  # nosec B608 # Fixed application SQL fragments; request values are bound
                         {
                             "tenant_id": tenant_id,
                             "version": version,

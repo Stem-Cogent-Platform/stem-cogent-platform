@@ -89,7 +89,7 @@ def meaningful_sql(signal: str = "signal", output: str = "output") -> str:
               AND evidence.source_url ~ '^https?://[^/]+'
               AND (evidence.tenant_id IS NULL OR evidence.tenant_id=:tenant_id)
           )
-        )"""
+        )"""  # nosec B608 # Fixed application SQL fragments; request values are bound
 
 
 def matched_sql(assessment: str = "assessment") -> str:
@@ -114,4 +114,4 @@ def candidates_sql() -> str:
             AND signal.dedup_status NOT IN ('EXACT_DUPLICATE','SEMANTIC_DUPLICATE')
           ORDER BY {identity_sql()}, output.created_at,output.id
         ) canonical_outputs ORDER BY published_at DESC NULLS LAST,global_output_id
-    """
+    """  # nosec B608 # Fixed application SQL fragments; request values are bound
