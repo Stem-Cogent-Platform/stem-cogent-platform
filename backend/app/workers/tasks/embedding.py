@@ -11,6 +11,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import get_settings
 from app.core.database import get_session
 from app.core.secrets import get_scalar_secret
+from app.context.session_scope import tenant_scope
+from app.intelligence.freshness import classify_freshness
 from app.intelligence.embeddings import (
     OpenAIEmbeddingClient,
     SimilarityMatch,
@@ -27,7 +29,21 @@ async def run_embedding(event: dict[str, Any]) -> str:
     signal_id = UUID(event["payload"]["signal_id"])
     tenant_id = UUID(value) if (value := event["payload"].get("tenant_id")) else None
     async for session in get_session():
+        if tenant_id is not None:
+            await tenant_scope(session, tenant_id)
         signal = await _load_scored_signal(session, signal_id, tenant_id)
+        # Scheduled current-intelligence processing must not turn a historical
+        # archive replay into paid embedding/synthesis work. Retain source rows.
+        freshness = classify_freshness(
+            signal["published_at"],
+            lookback_days=60,
+            processing_flags=signal["processing_flags"],
+        )
+        if tenant_id is None and (
+            freshness in {"HISTORICAL", "DATE_UNCERTAIN"}
+            or "INDEX_PAGE" in signal["processing_flags"]
+        ):
+            return f"SKIPPED:{freshness}"
         embedding_input = build_embedding_input(
             signal["title"],
             signal["body_text"],
@@ -86,7 +102,9 @@ async def run_embedding(event: dict[str, Any]) -> str:
             None,
         )
         if dedup_match is not None:
-            await _mark_semantic_duplicate(session, signal_id, tenant_id, dedup_match.signal_id)
+            await _mark_semantic_duplicate(
+                session, signal_id, tenant_id, dedup_match.signal_id
+            )
         cluster_id = await _assign_cluster(
             session,
             signal_id,
@@ -105,7 +123,9 @@ async def run_embedding(event: dict[str, Any]) -> str:
 def _embedding_client() -> OpenAIEmbeddingClient:
     settings = get_settings()
     if settings.EMBEDDING_PROVIDER != "openai" or not settings.OPENAI_API_KEY_ARN:
-        raise RuntimeError("Configured OpenAI embedding provider is missing its secret ARN")
+        raise RuntimeError(
+            "Configured OpenAI embedding provider is missing its secret ARN"
+        )
     return OpenAIEmbeddingClient(
         api_key=get_scalar_secret(settings.OPENAI_API_KEY_ARN),
         model=settings.EMBEDDING_MODEL,
@@ -155,10 +175,12 @@ async def _load_scored_signal(
     tenant_id: UUID | None,
 ) -> Any:
     return (
-        await session.execute(
-            text(
-                """
+        (
+            await session.execute(
+                text(
+                    """
                 SELECT signal.title, signal.body_text, signal.primary_domain,
+                       signal.published_at,signal.processing_flags,
                        coalesce(array_agg(entity.id) FILTER (
                          WHERE entity.id IS NOT NULL
                        ), ARRAY[]::UUID[]) AS entity_ids,
@@ -177,10 +199,13 @@ async def _load_scored_signal(
                 ORDER BY signal.created_at DESC
                 LIMIT 1
                 """
-            ),
-            {"signal_id": signal_id, "tenant_id": tenant_id},
+                ),
+                {"signal_id": signal_id, "tenant_id": tenant_id},
+            )
         )
-    ).mappings().one()
+        .mappings()
+        .one()
+    )
 
 
 async def _persist_embedding(

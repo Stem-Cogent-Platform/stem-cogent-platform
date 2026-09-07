@@ -83,11 +83,64 @@ def context(session: Session) -> RequestContext:
 
 
 @pytest.mark.asyncio
+async def test_signal_dossier_reads_evidence_without_generation():
+    signal_id, entity_id = uuid4(), uuid4()
+    row = {"id": signal_id, "global_output_id": uuid4(), "historical_signal_ids": [], "cluster_id": None, "title": "Source event", "citations": [
+        {"source_signal_id": str(signal_id), "source_name": "Source"}
+    ]}
+    session = Session(Result(row=row), Result(rows=[{"id": entity_id}]),
+                      Result(rows=[{"id": signal_id}]), Result(row=None), Result(rows=[]))
+    result = await product.signal_detail(signal_id, context(session))
+    assert result["signal"]["id"] == str(signal_id)
+    assert result["entities"] == [{"id": str(entity_id)}]
+    assert result["evidence"][0]["id"] == str(signal_id)
+    assert session.commits == 0
+    assert all(":tenant_id" in query for query in session.statements)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status,current,overdue,outputs,state", [
+    (None,False,False,0,"PREPARE_REQUIRED"),
+    ("QUEUED",True,False,0,"PREPARING"),
+    ("RUNNING",True,True,0,"PREPARATION_DELAYED"),
+    ("FAILED",True,False,0,"PREPARATION_DELAYED"),
+    ("COMPLETED",True,False,0,"NO_RECENT_MATCH"),
+    ("COMPLETED",True,False,1,"ASSESSED"),
+    ("COMPLETED",False,False,1,"PREPARE_REQUIRED"),
+])
+async def test_briefing_readiness_distinguishes_empty_from_unprocessed(status,current,overdue,outputs,state):
+    row={"context_version":6,"lens_version":1,"evaluated_context_version":6 if current else 1,
+         "evaluated_lens_version":1,"personalisation_status":status,"overdue":overdue,
+         "outputs_evaluated":outputs,"last_checked_at":None,"completed_at":None}
+    result = await product.briefing_readiness(context(Session(Result(row=row))))
+    assert result["state"] == state
+
+
+@pytest.mark.asyncio
+async def test_signal_dossier_unknown_returns_404():
+    with pytest.raises(HTTPException) as error:
+        await product.signal_detail(uuid4(), context(Session(Result())))
+    assert error.value.status_code == 404
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("malformed", [True, False])
+async def test_signal_dossier_fails_closed_on_invalid_or_inaccessible_evidence(malformed):
+    signal_id = uuid4()
+    row = {"id": signal_id, "citations": [{"source_signal_id": "invalid" if malformed else str(uuid4())}]}
+    session = Session(Result(row=row), Result(rows=[]), Result(rows=[{"id": signal_id}]))
+    with pytest.raises(HTTPException) as error:
+        await product.signal_detail(signal_id, context(session))
+    assert error.value.status_code == 503
+
+
+@pytest.mark.asyncio
 async def test_brief_listing_detail_and_action_paths(monkeypatch) -> None:
     monkeypatch.setattr(
         product,
         "get_settings",
         lambda: SimpleNamespace(
+            PILOT_ACTIVATION_LOOKBACK_DAYS=45,
             PHASE5_BRIEF_LIFECYCLE_ENABLED=True,
             PHASE5_NEW_UI_ENABLED=True,
             PHASE5_PRODUCT_ANALYTICS_ENABLED=False,
@@ -99,7 +152,7 @@ async def test_brief_listing_detail_and_action_paths(monkeypatch) -> None:
     listing_session = Session(Result(rows=[row]))
     listing = context(listing_session)
     assert (await product.list_briefs(None, 20, listing))[0]["id"] == str(brief_id)
-    assert "CAST(:status_filter AS VARCHAR) IS NULL" in listing_session.statements[0]
+    assert "CAST(:status_filter AS TEXT) IS NULL" in listing_session.statements[0]
 
     detail_session = Session(
         Result(row=row),
@@ -143,6 +196,7 @@ async def test_brief_lifecycle_flag_is_an_effective_rollback_gate(monkeypatch) -
         product,
         "get_settings",
         lambda: SimpleNamespace(
+            PILOT_ACTIVATION_LOOKBACK_DAYS=45,
             PHASE5_BRIEF_LIFECYCLE_ENABLED=False,
             PHASE5_NEW_UI_ENABLED=False,
             PHASE5_PRODUCT_ANALYTICS_ENABLED=False,
@@ -181,7 +235,7 @@ async def test_company_intelligence_entity_and_alert_paths() -> None:
     intelligence_session = Session(Result(rows=[{"id": uuid4(), "summary": "Change", "citations": [{"source_signal_id": str(uuid4())}]}]))
     intelligence = context(intelligence_session)
     assert (await product.wider_intelligence(12, intelligence))[0]["summary"] == "Change"
-    assert "source.source_name AS source_name" in intelligence_session.statements[0]
+    assert "source.source_name" in intelligence_session.statements[0]
 
     entity_id = uuid4()
     entity = context(
@@ -203,12 +257,13 @@ async def test_company_intelligence_entity_and_alert_paths() -> None:
     watchlist = await product.watchlist(
         context(
             Session(
-                Result(rows=[{"id": uuid4(), "name": "NIBSS", "recent_activity_count": 2}]),
-                Result(rows=[{"id": uuid4(), "label": "Settlement", "recent_activity_count": None}]),
+                Result(rows=[{"id": uuid4(), "name": "NIBSS", "object_type": "DEPENDENCY", "recent_activity_count": 2}]),
+                Result(rows=[{"id": uuid4(), "label": "Settlement", "focus_type": "TOPIC", "query_text": None, "entity_id": None, "recent_activity_count": None}]),
+                Result(rows=[]),
             )
         )
     )
-    assert watchlist["company"][0]["recent_activity_count"] == 2
+    assert watchlist["company"][0]["recent_activity_count"] == 0
     assert watchlist["focus"][0]["label"] == "Settlement"
 
     alert_id = uuid4()

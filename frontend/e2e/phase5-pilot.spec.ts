@@ -7,11 +7,92 @@ const brief = {
 };
 
 async function authenticatedApi(page: Page, permissionRole = "ADMIN", phase5Ui = true) {
+  await page.route("**/api/v1/briefing/readiness", (route) => route.fulfill({ json: { state: "ASSESSED", message: null } }));
   await page.route("**/api/v1/auth/refresh", (route) => route.fulfill({ json: { access_token: "test-token", expires_in: 900, user: { ...user, permission_role: permissionRole } } }));
   await page.route("**/api/v1/alerts", (route) => route.fulfill({ json: [] }));
   await page.route("**/api/v1/events", (route) => route.fulfill({ status: 202, json: { accepted: true } }));
   await page.route("**/api/v1/capabilities", (route) => route.fulfill({ json: { phase5_brief_lifecycle_enabled: phase5Ui, phase5_new_ui_enabled: phase5Ui } }));
 }
+
+test("waits for durable personalisation before showing counts or recording a visit", async ({ page }) => {
+  await authenticatedApi(page);
+  let prepared = false;
+  let acknowledged = false;
+  await page.route("**/api/v1/briefing/readiness", (route) => route.fulfill({ json: { state: prepared ? "ASSESSED" : "PREPARING" } }));
+  await page.route("**/api/v1/briefs", (route) => route.fulfill({ json: prepared ? [brief] : [] }));
+  await page.route("**/api/v1/relevant-monitoring**", (route) => route.fulfill({ json: [] }));
+  await page.route("**/api/v1/briefing/changes", (route) => route.fulfill({ json: {
+    new_briefs: 0, updated_briefs: 0, new_evidence_items: 0, new_relevant_monitoring: 0,
+    since_known: false, as_of: new Date().toISOString(),
+  } }));
+  await page.route("**/api/v1/briefing/viewed", async (route) => {
+    expect(prepared).toBe(true);
+    expect(route.request().postDataJSON().viewed_through).toBeTruthy();
+    acknowledged = true;
+    await route.fulfill({ json: { acknowledged: true } });
+  });
+  await page.goto("/briefing");
+  await expect(page.getByText("Preparing your briefing")).toBeVisible();
+  await expect(page.getByText(/decisions require your attention/)).not.toBeVisible();
+  expect(acknowledged).toBe(false);
+  prepared = true;
+  await expect(page.getByText(brief.what_changed).first()).toBeVisible({ timeout: 20_000 });
+  await expect.poll(() => acknowledged).toBe(true);
+});
+
+test("monitoring WebSocket events use server change counts and clear after review", async ({ page }) => {
+  await pilotProductApi(page);
+  let changes = 0;
+  let notify: ((value: string) => void) | undefined;
+  await page.routeWebSocket(/.*/, (socket) => { notify = (value) => socket.send(value); });
+  await page.route("**/api/v1/briefing/changes", (route) => route.fulfill({ json: {
+    new_briefs: 0, updated_briefs: 0, new_evidence_items: 0, new_relevant_monitoring: changes,
+    since_known: true, since: new Date(Date.now()-60_000).toISOString(), as_of: new Date().toISOString(),
+  } }));
+  await page.route("**/api/v1/briefing/viewed", async (route) => {
+    changes = 0;
+    await route.fulfill({ json: { acknowledged: true } });
+  });
+  await page.goto("/briefing");
+  await expect(page.getByText(brief.what_changed).first()).toBeVisible();
+  await expect.poll(() => Boolean(notify)).toBe(true);
+  changes = 1;
+  notify?.(JSON.stringify({ type: "RELEVANT_MONITORING_ADDED" }));
+  const banner = page.getByRole("button", { name: "1 briefing update ready to review" });
+  await expect(banner).toBeVisible();
+  await banner.click();
+  await expect(banner).not.toBeVisible();
+  await expect.poll(() => changes).toBe(0);
+});
+
+test("opens a signal dossier, preserves it on refresh, and only asks AI on request", async ({ page }) => {
+  await authenticatedApi(page);
+  const signalId = "40000000-0000-4000-8000-000000000009";
+  const evidence = { id: signalId, title: "Dated source development", source_name: "Public source", source_url: "https://example.invalid/circular", published_at: "2026-08-30T10:00:00Z", detected_at: "2026-08-31T10:00:00Z" };
+  const signal = { ...evidence, primary_domain: "REGULATORY_POLICY", summary: "Stored source summary", llm_synthesis_failed: true, confidence_band: "LOW_CONFIDENCE" };
+  await page.route("**/api/v1/signals?**", (route) => route.fulfill({ json: [{ ...signal, id: "output-id-not-signal-id", signal_id: signalId }] }));
+  await page.route(`**/api/v1/signals/${signalId}`, (route) => route.fulfill({ json: { signal, evidence: [evidence], entities: [] } }));
+  let aiCalls = 0;
+  await page.route("**/api/v1/cil/query", async (route) => {
+    aiCalls++;
+    expect(route.request().postDataJSON()).toMatchObject({ anchor_type: "SIGNAL", anchor_id: signalId });
+    await route.fulfill({ json: { answer_text: "The source supports this event.", citations: [{ source_signal_id: signalId, source_name: "Public source" }], confidence_indicator: "LOW", follow_up_suggestions: [] } });
+  });
+  await page.goto("/intelligence");
+  await expect(page.getByText("Analysis unavailable")).toBeVisible();
+  await expect(page.getByText("Evidence current")).toHaveCount(0);
+  await page.getByRole("link", { name: "Dated source development" }).click();
+  await expect(page).toHaveURL(new RegExp(`/signals/${signalId}$`));
+  await expect(page.getByRole("heading", { name: "Evidence and timing" })).toBeVisible();
+  await expect(page.getByText(/Automated analysis was unavailable/)).toBeVisible();
+  await page.reload();
+  await expect(page.getByRole("heading", { name: "Dated source development" })).toBeVisible();
+  expect(aiCalls).toBe(0);
+  await page.getByLabel("Question about this evidence").fill("What does the source establish?");
+  await page.getByRole("button", { name: "Ask Cogent", exact: true }).click();
+  await expect(page.getByText("The source supports this event.")).toBeVisible();
+  expect(aiCalls).toBe(1);
+});
 
 async function pilotProductApi(page: Page) {
   await authenticatedApi(page);
@@ -21,7 +102,7 @@ async function pilotProductApi(page: Page) {
   await page.route("**/api/v1/briefing/changes", (route) => route.fulfill({ json: { new_briefs: 1, updated_briefs: 0, new_evidence_items: 1, new_relevant_monitoring: 0 } }));
   await page.route("**/api/v1/company/briefs", (route) => route.fulfill({ json: { profile: { business_categories: ["Payments fintech"], strategic_priorities: ["Transaction reliability"], operating_markets: ["Nigeria"] }, context_status: { complete: true, completeness: 1, missing_fields: [], version: 1 }, briefs: [brief] } }));
   await page.route("**/api/v1/watchlist", (route) => route.fulfill({ json: { company: [{ id: "80000000-0000-4000-8000-000000000001", name: "NIBSS", object_type: "DEPENDENCY", importance: "HIGH", recent_activity_count: 1, open_brief_count: 1 }], focus: [{ id: "90000000-0000-4000-8000-000000000001", label: "Merchant profitability", focus_type: "TOPIC", recent_activity_count: 2, open_brief_count: 1 }] } }));
-  await page.route("**/api/v1/signals", (route) => route.fulfill({ json: [{ id: "a0000000-0000-4000-8000-000000000001", signal_id: "40000000-0000-4000-8000-000000000001", title: "Verified infrastructure update", global_implication: "Payment operators should review service dependencies.", primary_domain: "INFRASTRUCTURE", urgency_band: "MODERATE", confidence_band: "HIGH", source_name: "NIBSS" }] }));
+  await page.route("**/api/v1/signals?**", (route) => route.fulfill({ json: [{ id: "a0000000-0000-4000-8000-000000000001", signal_id: "40000000-0000-4000-8000-000000000001", title: "Verified infrastructure update", global_implication: "Payment operators should review service dependencies.", primary_domain: "INFRASTRUCTURE", urgency_band: "MODERATE", confidence_band: "HIGH", source_name: "NIBSS" }] }));
   await page.route("**/api/v1/alerts", (route) => route.fulfill({ json: [{ id: "b0000000-0000-4000-8000-000000000001", brief_id: briefId, priority: "HIGH", subject: "Settlement implementation review", status: "DELIVERED", created_at: "2026-08-31T10:00:00Z", payload: { why_delivered: "Matches your settlement Focus Area." } }] }));
   await page.route("**/api/v1/digests", (route) => route.fulfill({ json: [{ id: "c0000000-0000-4000-8000-000000000001", period_start: "2026-08-24T00:00:00Z", period_end: "2026-08-31T00:00:00Z", status: "SENT", brief_ids: [briefId], content: { latest_brief: { what_changed: brief.what_changed, priority: "HIGH" } } }] }));
 }

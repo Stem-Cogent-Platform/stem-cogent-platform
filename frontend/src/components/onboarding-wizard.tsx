@@ -1,5 +1,7 @@
 "use client";
 
+import { parseContextList } from "@/lib/context-labels";
+
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 
@@ -31,7 +33,7 @@ const digestCadences = [
 ] as const;
 
 function list(value: string) {
-  return value.split(",").map((item) => item.trim()).filter(Boolean);
+  return parseContextList(value);
 }
 
 export function OnboardingWizard() {

@@ -1,5 +1,25 @@
 # Build Status
 
+## 2026-09-07 — Phase 5 value-loop recovery
+
+The deployed Paystack user has completed onboarding, but context version 6
+has no assessments; deployed personalisation only reuses current-version
+assessments. Invitations bypass value readiness, undated index pages counted
+as first value, and the existing clustering worker remains paused. Recovery
+code, migration `0029`, and real PostgreSQL regressions are implemented locally.
+The fresh staging pilot and continuous update chain are not yet accepted.
+See [the recovery report](docs/qa/phase5-2026-09-07-value-loop-recovery.md).
+
+## 2026-09-06 — Fresh-pilot onboarding regression
+
+The founder accepted the Paystack invitation, then hit a reproduced PostgreSQL
+`uuid = text` error on final onboarding's company-object creation. The text
+advisory-lock parameter was reused as a UUID. Separate lock acquisition and
+typed UUID insertion are repaired locally; 25 targeted tests and Ruff pass.
+PR 91 adds real PostgreSQL/RLS persistence regression; CI and staging proof
+remain pending. No production release or forced completion. Details:
+`docs/qa/phase5-2026-09-06-onboarding-uuid-repair.md`.
+
 ## Phase 5 — Pilot Readiness & Product Experience Hardening
 
 | Task | Status | Evidence | Changes | Tests | Suggested commit |
@@ -223,3 +243,83 @@ local. The latest evidence is in `docs/qa/phase5-live-followup-2026-09-05.md`.
 | AWS reported cost | Staging: $122.59 September through September 4, $224.92 last 7 days, $834.95 last 30 days. September figures remain estimated by AWS. |
 | Existing payer controls | $100 monthly budget with actual 85/100% and forecast 100% alerts; service anomaly monitor and daily subscription exist outside current IaC. Requested full threshold matrix remains open. |
 | Production gate | NOT READY — BLOCKERS REMAIN: provider funding, deployment, historical cleanup, current-context activation, fresh-tenant journey, continuous flow and full isolation proof. |
+
+### 2026-09-05 — Funded recovery and staging release integration
+
+The funding blocker is cleared: one bounded live embedding request returned 200.
+The staging API's two provider-secret permissions were applied through a saved,
+reviewed Terraform plan (one in-place policy update; no additions or destroys).
+The dedicated pre-0028 RDS snapshot is available. Production remains untouched.
+
+PR #89 reconciles canonical repairs with deployed staging fixes. Its backend CI
+passed 358 unit tests (75.12% coverage), the PostgreSQL/Redis dependency test,
+migration upgrade/downgrade/re-upgrade, type checks and security scans. Frontend
+CI passed. The full Terraform plan now reports no changes after codifying the
+clustering pause; six ECS tests include staging pause and production rejection.
+Additional admin provisioning form repair and its browser test passed locally;
+subsequent backend, frontend and Terraform CI runs also passed.
+
+Synthesis now reads its completion cache after a separate lock statement and
+skips stored duplicates before paid generation. No bulk queue/DLQ replay or
+historical deletion occurred. See `docs/qa/phase5-funded-recovery-2026-09-05.md`.
+Live application rollout and the fresh-tenant production gate are still pending.
+
+Latest continuation: CIL strict-schema correction committed locally (`5a5311b`,
+integration `3584512`), with 12 targeted tests and Ruff passing. Pushes failed
+because local network/DNS access to GitHub and AWS became unavailable. The
+bounded provider-contract task `8f2fa50617634aed9a1a8496e08f9246` was launched,
+but its result/stopped state could not be retrieved after DNS failure. Resume
+by inspecting that existing task, not by creating another paid request. PR #89
+remains unmerged; no application rollout or production change is claimed.
+
+### 2026-09-05 — Staging deployed; CIL encoding follow-up
+
+The preceding connectivity blocker was resolved. PR #89 merged to staging at
+`16d3f0e`; Application CD `33991785563` succeeded. Database head 0028 was
+verified live. API revision 66 and frontend revision 54 are healthy at 2/2;
+clustering revision 27 remains paused at 0/0. Pre-merge CI passed 360 unit
+tests with 75.33% coverage and the separate dependency integration check.
+
+The interrupted OpenAI probe's existing log proved HTTP 200, exact title and
+valid citation (250 tokens). Post-deploy authenticated API checks passed,
+including denial of tenant ADMIN access to internal admin. Paystack returns
+29 activity items. Current-context relevant monitoring remains zero.
+
+CIL now responds 200 but used deterministic fallback: UUID/datetime/Decimal
+retrieval values failed plain JSON serialization before either provider call.
+PR #90 fixes encoding and adds primary/fallback regression coverage. It also
+serializes infrastructure and application workflows after observing Terraform
+restore the scheduler during Application CD's temporary migration pause.
+27 targeted tests and Ruff pass; follow-up release verification is pending.
+
+Fresh-pilot input is in `docs/qa/phase5-fresh-pilot-input.md`. The user's delegated
+company choice does not bypass SYSTEM_ADMIN MFA. Actual operator provisioning
+is required; no fresh tenant or production invitation has been created.
+Verdict remains NOT READY — BLOCKERS REMAIN.
+
+PR #90 is now merged at `21d5d61` after 363 unit tests (75.48% coverage),
+deployment validation and a no-change Terraform plan. Follow-up release runs:
+Infrastructure CD `33995462712`, Application CD `33995462721`. The shared
+queue is observed holding Application CD while infrastructure runs first.
+Corrected live CIL provider attribution still requires post-rollout testing.
+
+### 2026-09-06 — Bounded fresh-tenant acceptance results
+
+The post-rollout check now proves actual HTTPS CIL OpenAI attribution with
+`gpt-4.1-mini-2025-04-14`, a grounded answer and valid citation (3,027 ms).
+Isolated deployed-code primary fault injection reached actual Groq with valid
+citations; both-provider unavailability degraded safely. Targeted live RLS
+checks hid other-tenant users and exposed only the requested tenant profile.
+22 targeted backend tests and all four responsive browser widths passed.
+
+The new Paystack tenant `f0075fb0-3f6a-4d82-afbf-43932b425019` has complete
+version-1 context, resolved/not-applicable objects and two completed activations.
+However, final sampling still shows one pending invitation, no users, no saved
+onboarding/delivery preferences, zero briefs and only two structurally counted
+monitoring rows. Those rows are NDPC/SEC index-page titles, both without stored
+publication dates; the SEC title references 2023. First-value quality is not
+proven and the detected_at fallback can admit these undated pages.
+
+No production changes, readiness override, fake third item or queue replay.
+Full evidence and remaining blockers: `docs/qa/phase5-2026-09-06-15-minute-acceptance.md`.
+Verdict: NOT READY — BLOCKERS REMAIN.

@@ -1,6 +1,16 @@
 # Phase 5 Live Acceptance
 
-Status date: 2026-09-05
+Latest status: the [September 7 value-loop recovery report](phase5-2026-09-07-value-loop-recovery.md)
+supersedes the onboarding-only status below. Onboarding is now complete in
+staging; current-context intelligence and the paused clustering worker remain
+the live value-loop blockers. Recovery acceptance is still pending.
+
+Status date: 2026-09-06
+
+Latest founder retry: invitation acceptance succeeded, but final onboarding
+fails at company-object SQL (`uuid = text`). The repair and real-PostgreSQL
+regression evidence are tracked in
+[the onboarding follow-up](phase5-2026-09-06-onboarding-uuid-repair.md).
 
 The expired AWS-session blocker was cleared on 2026-09-05. The sections below
 retain the original repair baseline; current live findings and cost figures are

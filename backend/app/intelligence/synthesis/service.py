@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import logging
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
@@ -8,6 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from app.intelligence.synthesis.client import StructuredGenerationClient
 from app.intelligence.synthesis.context import GlobalContextPackage
 
+logger = logging.getLogger(__name__)
 
 GLOBAL_INTELLIGENCE_SYSTEM_PROMPT = (
     "You are a structured intelligence formatting service. Use only the provided "
@@ -64,7 +66,9 @@ class SynthesisService:
             output = GlobalSynthesis.model_validate(raw)
             validate_synthesis(output, context)
             return output, False
-        except (Exception, ValidationError):
+        except (Exception, ValidationError) as exc:
+            # Never log prompts, source bodies, provider responses or credentials.
+            logger.warning("Global synthesis used deterministic fallback: %s", type(exc).__name__)
             return deterministic_fallback(context), True
 
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 from datetime import UTC, datetime
 from typing import Any
 from uuid import NAMESPACE_URL, UUID, uuid5
@@ -32,16 +33,22 @@ async def run_normalization(event: dict[str, Any]) -> list[str]:
             raw["source_type"],
             body,
             event["payload"]["source_url"],
-            content_type=event["payload"].get("content_type", "application/octet-stream"),
+            content_type=event["payload"].get(
+                "content_type", "application/octet-stream"
+            ),
         )
         registry = await _load_registry(session)
         await session.execute(
-            text("SELECT pg_advisory_xact_lock(hashtextextended(CAST(:id AS TEXT), 0))"),
+            text(
+                "SELECT pg_advisory_xact_lock(hashtextextended(CAST(:id AS TEXT), 0))"
+            ),
             {"id": str(raw_signal_id)},
         )
         results: list[tuple[UUID, ResolutionResult]] = []
         for document in documents:
-            resolution = resolve_entities(f"{document.title or ''} {document.body_text}", registry)
+            resolution = resolve_entities(
+                f"{document.title or ''} {document.body_text}", registry
+            )
             signal_id = await _persist_document(
                 session,
                 raw,
@@ -60,9 +67,10 @@ async def run_normalization(event: dict[str, Any]) -> list[str]:
 
 async def _load_validated_raw_signal(session: AsyncSession, raw_signal_id: UUID) -> Any:
     return (
-        await session.execute(
-            text(
-                """
+        (
+            await session.execute(
+                text(
+                    """
                 SELECT r.id, r.collection_job_id, r.source_id, r.raw_storage_path,
                        r.collected_at, s.source_type
                 FROM pipeline.raw_signals AS r
@@ -72,10 +80,13 @@ async def _load_validated_raw_signal(session: AsyncSession, raw_signal_id: UUID)
                 ORDER BY r.created_at DESC
                 LIMIT 1
                 """
-            ),
-            {"raw_signal_id": raw_signal_id},
+                ),
+                {"raw_signal_id": raw_signal_id},
+            )
         )
-    ).mappings().one()
+        .mappings()
+        .one()
+    )
 
 
 async def _read_archive(storage_path: str) -> bytes:
@@ -190,14 +201,14 @@ async def _persist_document(
                     original_language, source_url, published_at, detected_at,
                     normalized_region_tags, body_text_hash, processing_flags,
                     pipeline_stage, review_flag, tenant_id, is_proprietary,
-                    normalized_at, canonical_url, content_fingerprint
+                    normalized_at, canonical_url, content_fingerprint, date_metadata
                 ) VALUES (
                     :collection_job_id, :source_id, :raw_signal_id, :raw_storage_path,
                     :signal_type, :title, :body_text, :original_body_text,
                     :original_language, :source_url, :published_at, :detected_at,
                     :region_tags, :body_text_hash, :processing_flags,
                     'NORMALIZED', :review_flag, :tenant_id, :is_proprietary,
-                    NOW(), :canonical_url, :content_fingerprint
+                    NOW(), :canonical_url, :content_fingerprint, CAST(:date_metadata AS JSONB)
                 )
                 RETURNING id
                 """
@@ -223,6 +234,7 @@ async def _persist_document(
                 "is_proprietary": bool(tenant_id),
                 "canonical_url": canonical_url,
                 "content_fingerprint": content_fingerprint,
+                "date_metadata": json.dumps(document.date_metadata),
             },
         )
     ).scalar_one()
