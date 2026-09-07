@@ -258,7 +258,7 @@ async def test_company_intelligence_entity_and_alert_paths() -> None:
         context(
             Session(
                 Result(rows=[{"id": uuid4(), "name": "NIBSS", "object_type": "DEPENDENCY", "recent_activity_count": 2}]),
-                Result(rows=[{"id": uuid4(), "label": "Settlement", "focus_type": "TOPIC", "recent_activity_count": None}]),
+                Result(rows=[{"id": uuid4(), "label": "Settlement", "focus_type": "TOPIC", "query_text": None, "entity_id": None, "recent_activity_count": None}]),
                 Result(rows=[]),
             )
         )
