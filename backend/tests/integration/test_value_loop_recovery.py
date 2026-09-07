@@ -231,6 +231,21 @@ async def test_nonqualifying_items_cannot_supply_first_value(pilot, options):
     assert await product.list_briefs(None, 30, ctx) == []
 
 
+@pytest.mark.parametrize("citation_id", ["invalid-uuid", str(uuid4())])
+async def test_missing_or_malformed_citation_fails_closed(pilot, citation_id):
+    ctx, params = pilot
+    value = await add_value(pilot, brief=True)
+    await ctx.session.execute(
+        text(
+            "UPDATE intelligence.global_outputs SET citations=CAST(:citations AS JSONB) WHERE id=:output_id"
+        ),
+        {**value, "citations": json.dumps([{"source_signal_id": citation_id}])},
+    )
+    gate = await invitation_readiness(ctx.session, params["tenant_id"])
+    assert not gate["ready"] and gate["company_briefs"] == 0
+    assert await product.list_briefs(None, 30, ctx) == []
+
+
 async def test_context_revision_invalidates_old_value_and_requests_current_preparation(
     pilot,
 ):

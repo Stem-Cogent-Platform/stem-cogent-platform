@@ -66,6 +66,11 @@ def current_sql(signal: str = "signal", window: str = ":lookback_days") -> str:
 
 
 def meaningful_sql(signal: str = "signal", output: str = "output") -> str:
+    # Validate external citation IDs before casting. Keeping evidence.id as UUID
+    # lets PostgreSQL use its index instead of scanning every signal as text.
+    evidence_id = """CASE WHEN citation->>'source_signal_id' ~*
+        '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+        THEN (citation->>'source_signal_id')::uuid END"""
     return f"""{signal}.dedup_status NOT IN ('EXACT_DUPLICATE','SEMANTIC_DUPLICATE')
         AND NOT ({signal}.processing_flags && ARRAY['INDEX_PAGE','DISCOVERY_LEAD'])
         AND NULLIF(BTRIM({signal}.title),'') IS NOT NULL
@@ -77,7 +82,7 @@ def meaningful_sql(signal: str = "signal", output: str = "output") -> str:
         AND {output}.synthesis_status='COMPLETED'
         AND EXISTS (
           SELECT 1 FROM jsonb_array_elements({output}.citations) citation
-          JOIN pipeline.signals evidence ON evidence.id::text=citation->>'source_signal_id'
+          JOIN pipeline.signals evidence ON evidence.id=({evidence_id})
           WHERE evidence.source_url ~ '^https?://[^/]+'
             AND (evidence.tenant_id IS NULL OR evidence.tenant_id=:tenant_id)
         )
@@ -85,7 +90,7 @@ def meaningful_sql(signal: str = "signal", output: str = "output") -> str:
           SELECT 1 FROM jsonb_array_elements({output}.citations) citation
           WHERE NOT EXISTS (
             SELECT 1 FROM pipeline.signals evidence
-            WHERE evidence.id::text=citation->>'source_signal_id'
+            WHERE evidence.id=({evidence_id})
               AND evidence.source_url ~ '^https?://[^/]+'
               AND (evidence.tenant_id IS NULL OR evidence.tenant_id=:tenant_id)
           )
