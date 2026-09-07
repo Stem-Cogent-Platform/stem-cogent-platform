@@ -1,12 +1,14 @@
 "use client";
 
+import { parseContextList } from "@/lib/context-labels";
+
 import { FormEvent, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { ApiError, apiRequest } from "@/lib/api";
 
 function values(value: FormDataEntryValue | null) {
-  return String(value ?? "").split(",").map((item) => item.trim()).filter(Boolean);
+  return parseContextList(value);
 }
 
 export function CompanyContextForm() {

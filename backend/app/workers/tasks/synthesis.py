@@ -18,7 +18,7 @@ from app.workers.events import CeleryEventPublisher
 from app.workers.runtime import run_async_worker
 
 
-async def run_synthesis(event: dict[str, Any]) -> str:
+async def run_synthesis(event: dict[str, Any], *, retry_failed: bool = False) -> str:
     signal_id = UUID(event["payload"]["signal_id"])
     tenant_id = UUID(value) if (value := event["payload"].get("tenant_id")) else None
     historical_ids = tuple(
@@ -67,7 +67,7 @@ async def run_synthesis(event: dict[str, Any]) -> str:
                 },
             )
         ).mappings().one_or_none()
-        if existing is not None:
+        if existing is not None and not (retry_failed and existing["llm_synthesis_failed"]):
             await _publish_synthesized(
                 event, signal_id, existing["id"], existing["llm_synthesis_failed"]
             )

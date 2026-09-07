@@ -25,6 +25,9 @@ class Result:
     def mappings(self) -> "Result":
         return self
 
+    def one_or_none(self):
+        return self.row
+
     def one(self):
         return self.row
 
@@ -62,9 +65,10 @@ def session_source(session: Session):
 async def test_ready_user_starts_exact_21_day_trial(monkeypatch) -> None:
     tenant_id, user_id, engagement_id = uuid4(), uuid4(), uuid4()
     session = Session(
-        Result(),
+        Result(), Result(row={"version": 3}), Result(scalar=45),
+        Result(row={"company_briefs": 1, "meaningful_monitoring_count": 0}),
         Result(
-            row={"accepted": True, "lens": True, "focus": True, "first_value": True}
+            row={"accepted": True, "onboarded": True, "personalised": True, "exception": False}
         ),
         Result(scalar=engagement_id),
         Result(),
@@ -110,9 +114,10 @@ async def test_ready_user_starts_exact_21_day_trial(monkeypatch) -> None:
 async def test_incomplete_or_started_pilot_is_not_restarted(monkeypatch) -> None:
     tenant_id, user_id = uuid4(), uuid4()
     incomplete = Session(
-        Result(),
+        Result(), Result(row={"version": 3}), Result(scalar=45),
+        Result(row={"company_briefs": 1, "meaningful_monitoring_count": 0}),
         Result(
-            row={"accepted": True, "lens": False, "focus": True, "first_value": True}
+            row={"accepted": True, "onboarded": False, "personalised": True, "exception": False}
         ),
     )
     monkeypatch.setattr(pilot_activation, "get_session", session_source(incomplete))
@@ -120,9 +125,10 @@ async def test_incomplete_or_started_pilot_is_not_restarted(monkeypatch) -> None
     assert incomplete.commits == 0
 
     started = Session(
-        Result(),
+        Result(), Result(row={"version": 3}), Result(scalar=45),
+        Result(row={"company_briefs": 1, "meaningful_monitoring_count": 0}),
         Result(
-            row={"accepted": True, "lens": True, "focus": True, "first_value": True}
+            row={"accepted": True, "onboarded": True, "personalised": True, "exception": False}
         ),
         Result(scalar=None),
     )
@@ -137,21 +143,28 @@ async def test_personalisation_rebuilds_each_output_then_checks_readiness(
 ) -> None:
     tenant_id, user_id = uuid4(), uuid4()
     outputs = [
-        {"global_output_id": uuid4(), "signal_id": uuid4()},
-        {"global_output_id": uuid4(), "signal_id": uuid4()},
+        {"global_output_id": uuid4(), "signal_id": uuid4(), "freshness_eligible": True, "meaningful": True},
+        {"global_output_id": uuid4(), "signal_id": uuid4(), "freshness_eligible": True, "meaningful": True},
     ]
-    session = Session(Result(), Result(rows=outputs))
+    session = Session(Result(), Result(row={"context_version": 6, "lens_version": 1}), Result(scalar=45), Result(rows=outputs), Result(), Result(scalar=user_id))
     decide = AsyncMock(return_value="created")
     readiness = AsyncMock()
     monkeypatch.setattr(pilot_activation, "get_session", session_source(session))
     monkeypatch.setattr(pilot_activation, "run_decision_briefs", decide)
     monkeypatch.setattr(pilot_activation, "_maybe_start_trial", readiness)
 
+    monkeypatch.setattr("app.workers.tasks.decision._publish_monitoring", AsyncMock())
     result = await pilot_activation.personalise_user(
-        {"tenant_id": str(tenant_id), "user_id": str(user_id)}
+        {"tenant_id": str(tenant_id), "user_id": str(user_id), "request_id": str(uuid4())}
     )
 
     assert result == "PERSONALISED:2"
+    candidates = session.statements[3]
+    assert "FROM intelligence.global_outputs output" in candidates
+    assert "FROM decision.assessments" not in candidates
+    assert "signal.published_at BETWEEN NOW()" in candidates
+    assert "signal.dedup_status NOT IN" in candidates
+    assert session.parameters[3]["lookback_days"] == 45
     assert decide.await_count == 2
     for call in decide.await_args_list:
         payload = call.args[0]["payload"]

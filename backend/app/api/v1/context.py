@@ -7,7 +7,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from fastapi.encoders import jsonable_encoder
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy import text
 
 from app.api.auth import RequestContext, get_request_context, require_permission
@@ -18,9 +18,10 @@ from app.context.cache import (
     invalidate_user,
 )
 from app.context.completeness import company_context_status
+from app.context.normalization import context_label
+from app.context.personalisation import queue_company_users, queue_personalisation
 from app.compliance import require_current_legal_acceptance
 from app.core.config import get_settings
-from app.workers.celery_app import celery_app
 
 
 router = APIRouter(tags=["context"])
@@ -29,7 +30,9 @@ router = APIRouter(tags=["context"])
 class CompanyProfileInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
     business_categories: list[str] = Field(default_factory=list, max_length=50)
-    operating_markets: list[str] = Field(default_factory=lambda: ["NG"], min_length=1, max_length=50)
+    operating_markets: list[str] = Field(
+        default_factory=lambda: ["NG"], min_length=1, max_length=50
+    )
     customer_segments: list[str] = Field(default_factory=list, max_length=50)
     regulatory_categories: list[str] = Field(default_factory=list, max_length=50)
     strategic_priorities: list[str] = Field(default_factory=list, max_length=50)
@@ -51,6 +54,14 @@ class CompanyObjectInput(BaseModel):
     importance: Literal["STANDARD", "HIGH", "CRITICAL"] = "STANDARD"
     metadata: dict[str, Any] = Field(default_factory=dict)
 
+    @field_validator("name")
+    @classmethod
+    def normalize_name(cls, value: str) -> str:
+        value = context_label(value)
+        if not value:
+            raise ValueError("A context name is required")
+        return value
+
 
 class CompanyObjectPatch(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -60,15 +71,30 @@ class CompanyObjectPatch(BaseModel):
     metadata: dict[str, Any] | None = None
     active: bool | None = None
 
+    @field_validator("name")
+    @classmethod
+    def normalize_name(cls, value: str | None) -> str | None:
+        return CompanyObjectInput.normalize_name(value) if value is not None else None
+
 
 class DecisionLensInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
     role_code: Literal[
-        "CEO", "CSO", "COO", "CFO", "PRODUCT", "GROWTH", "COMPLIANCE_RISK", "RESEARCH", "OTHER"
+        "CEO",
+        "CSO",
+        "COO",
+        "CFO",
+        "PRODUCT",
+        "GROWTH",
+        "COMPLIANCE_RISK",
+        "RESEARCH",
+        "OTHER",
     ]
     responsibility_tags: list[str] = Field(default_factory=list, max_length=50)
     priority_domains: list[str] = Field(default_factory=list, max_length=20)
-    delivery_preference: str = Field(default="IMPORTANT_AND_CRITICAL", min_length=1, max_length=30)
+    delivery_preference: str = Field(
+        default="IMPORTANT_AND_CRITICAL", min_length=1, max_length=30
+    )
 
 
 class OnboardingCompleteInput(BaseModel):
@@ -79,7 +105,9 @@ class OnboardingCompleteInput(BaseModel):
 
 class FocusAreaInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    focus_type: Literal["ENTITY", "MARKET", "PRODUCT_CATEGORY", "INITIATIVE", "REGULATOR", "TOPIC"]
+    focus_type: Literal[
+        "ENTITY", "MARKET", "PRODUCT_CATEGORY", "INITIATIVE", "REGULATOR", "TOPIC"
+    ]
     entity_id: UUID | None = None
     label: str = Field(min_length=1, max_length=255)
     query_text: str | None = Field(default=None, max_length=1000)
@@ -121,23 +149,33 @@ async def get_company_context(
     if isinstance(cached, dict):
         return cached
     profile = (
-        await context.session.execute(
-            text("SELECT * FROM context.company_profiles WHERE tenant_id = :tenant_id"),
-            {"tenant_id": context.principal.tenant_id},
+        (
+            await context.session.execute(
+                text(
+                    "SELECT * FROM context.company_profiles WHERE tenant_id = :tenant_id"
+                ),
+                {"tenant_id": context.principal.tenant_id},
+            )
         )
-    ).mappings().one_or_none()
+        .mappings()
+        .one_or_none()
+    )
     objects = (
-        await context.session.execute(
-            text(
-                """
+        (
+            await context.session.execute(
+                text(
+                    """
                 SELECT * FROM context.company_objects
                 WHERE tenant_id = :tenant_id AND active
                 ORDER BY object_type, name
                 """
-            ),
-            {"tenant_id": context.principal.tenant_id},
+                ),
+                {"tenant_id": context.principal.tenant_id},
+            )
         )
-    ).mappings().all()
+        .mappings()
+        .all()
+    )
     profile_value = dict(profile) if profile else None
     object_values = [dict(row) for row in objects]
     payload = jsonable_encoder(
@@ -162,9 +200,10 @@ async def put_company_context(
     required = ("business_categories", "operating_markets", "strategic_priorities")
     completeness = sum(bool(values[key]) for key in required) / len(required)
     row = (
-        await context.session.execute(
-            text(
-                """
+        (
+            await context.session.execute(
+                text(
+                    """
                 INSERT INTO context.company_profiles (
                   tenant_id, business_categories, operating_markets,
                   customer_segments, regulatory_categories, strategic_priorities,
@@ -181,23 +220,37 @@ async def put_company_context(
                     regulatory_categories = EXCLUDED.regulatory_categories,
                     strategic_priorities = EXCLUDED.strategic_priorities,
                     profile_completeness = EXCLUDED.profile_completeness,
-                    version = context.company_profiles.version + 1,
+                    version = context.company_profiles.version + CASE WHEN (
+                      context.company_profiles.business_categories,
+                      context.company_profiles.operating_markets,
+                      context.company_profiles.customer_segments,
+                      context.company_profiles.regulatory_categories,
+                      context.company_profiles.strategic_priorities
+                    ) IS DISTINCT FROM (
+                      EXCLUDED.business_categories, EXCLUDED.operating_markets,
+                      EXCLUDED.customer_segments, EXCLUDED.regulatory_categories,
+                      EXCLUDED.strategic_priorities
+                    ) THEN 1 ELSE 0 END,
                     updated_by = EXCLUDED.updated_by,
                     updated_at = NOW()
                 RETURNING *
                 """
-            ),
-            {
-                **values,
-                "tenant_id": context.principal.tenant_id,
-                "user_id": context.principal.user_id,
-                "completeness": completeness,
-            },
+                ),
+                {
+                    **values,
+                    "tenant_id": context.principal.tenant_id,
+                    "user_id": context.principal.user_id,
+                    "completeness": completeness,
+                },
+            )
         )
-    ).mappings().one()
+        .mappings()
+        .one()
+    )
     await _audit(context, "COMPANY_CONTEXT_UPDATED", "COMPANY_PROFILE", row["id"])
     await context.session.commit()
     await invalidate_company(context.principal.tenant_id)
+    await queue_company_users(context.session, context.principal.tenant_id)
     return jsonable_encoder(dict(row))
 
 
@@ -223,9 +276,10 @@ async def create_company_object(
         },
     )
     row = (
-        await context.session.execute(
-            text(
-                """
+        (
+            await context.session.execute(
+                text(
+                    """
                 WITH inserted AS (
                   INSERT INTO context.company_objects (
                     tenant_id, object_type, name, entity_id, metadata, importance
@@ -256,18 +310,22 @@ async def create_company_object(
                   AND NOT EXISTS (SELECT 1 FROM inserted)
                 LIMIT 1
                 """
-            ),
-            {
-                **body.model_dump(exclude={"metadata"}),
-                "metadata": json.dumps(body.metadata),
-                "tenant_id": context.principal.tenant_id,
-            },
+                ),
+                {
+                    **body.model_dump(exclude={"metadata"}),
+                    "metadata": json.dumps(body.metadata),
+                    "tenant_id": context.principal.tenant_id,
+                },
+            )
         )
-    ).mappings().one()
+        .mappings()
+        .one()
+    )
     if row.get("created", True):
         await _audit(context, "COMPANY_OBJECT_CREATED", "COMPANY_OBJECT", row["id"])
     await context.session.commit()
     await invalidate_company(context.principal.tenant_id)
+    await queue_company_users(context.session, context.principal.tenant_id)
     return jsonable_encoder(dict(row))
 
 
@@ -299,11 +357,15 @@ async def patch_company_object(
     # every request value remains a bound parameter.
     update_sql = f"UPDATE context.company_objects SET {', '.join(assignments)}, updated_at = NOW() WHERE id = :object_id AND tenant_id = :tenant_id RETURNING *"  # nosec B608  # noqa: E501
     row = (
-        await context.session.execute(
-            text(update_sql),
-            parameters,
+        (
+            await context.session.execute(
+                text(update_sql),
+                parameters,
+            )
         )
-    ).mappings().one_or_none()
+        .mappings()
+        .one_or_none()
+    )
     if row is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Company object not found")
     await _audit(
@@ -315,6 +377,7 @@ async def patch_company_object(
     )
     await context.session.commit()
     await invalidate_company(context.principal.tenant_id)
+    await queue_company_users(context.session, context.principal.tenant_id)
     return jsonable_encoder(dict(row))
 
 
@@ -327,16 +390,23 @@ async def get_decision_lens(
     if isinstance(cached, dict):
         return cached
     row = (
-        await context.session.execute(
-            text(
-                """
+        (
+            await context.session.execute(
+                text(
+                    """
                 SELECT * FROM context.user_decision_lenses
                 WHERE tenant_id = :tenant_id AND user_id = :user_id AND active
                 """
-            ),
-            {"tenant_id": context.principal.tenant_id, "user_id": context.principal.user_id},
+                ),
+                {
+                    "tenant_id": context.principal.tenant_id,
+                    "user_id": context.principal.user_id,
+                },
+            )
         )
-    ).mappings().one_or_none()
+        .mappings()
+        .one_or_none()
+    )
     if row is None:
         return None
     payload = jsonable_encoder(dict(row))
@@ -351,9 +421,10 @@ async def put_decision_lens(
 ) -> dict[str, Any]:
     require_permission(context, "CONFIGURE_DECISION_LENS")
     row = (
-        await context.session.execute(
-            text(
-                """
+        (
+            await context.session.execute(
+                text(
+                    """
                 INSERT INTO context.user_decision_lenses (
                   tenant_id, user_id, role_code, responsibility_tags,
                   priority_domains, delivery_preference
@@ -371,18 +442,21 @@ async def put_decision_lens(
                 WHERE context.user_decision_lenses.tenant_id = EXCLUDED.tenant_id
                 RETURNING *
                 """
-            ),
-            {
-                **body.model_dump(),
-                "tenant_id": context.principal.tenant_id,
-                "user_id": context.principal.user_id,
-            },
+                ),
+                {
+                    **body.model_dump(),
+                    "tenant_id": context.principal.tenant_id,
+                    "user_id": context.principal.user_id,
+                },
+            )
         )
-    ).mappings().one()
+        .mappings()
+        .one()
+    )
     await _audit(context, "DECISION_LENS_UPDATED", "DECISION_LENS", row["id"])
     await context.session.commit()
     await invalidate_user(context.principal.tenant_id, context.principal.user_id)
-    _queue_personalisation(context)
+    await _queue_personalisation(context)
     return jsonable_encoder(dict(row))
 
 
@@ -395,18 +469,25 @@ async def get_focus_areas(
     if isinstance(cached, list):
         return cached
     rows = (
-        await context.session.execute(
-            text(
-                """
+        (
+            await context.session.execute(
+                text(
+                    """
                 SELECT * FROM context.focus_areas
                 WHERE tenant_id = :tenant_id AND user_id = :user_id AND active
                   AND (expires_at IS NULL OR expires_at > NOW())
                 ORDER BY weight DESC, created_at DESC
                 """
-            ),
-            {"tenant_id": context.principal.tenant_id, "user_id": context.principal.user_id},
+                ),
+                {
+                    "tenant_id": context.principal.tenant_id,
+                    "user_id": context.principal.user_id,
+                },
+            )
         )
-    ).mappings().all()
+        .mappings()
+        .all()
+    )
     payload = jsonable_encoder([dict(row) for row in rows])
     await cache_set(key, payload)
     return payload
@@ -419,11 +500,14 @@ async def create_focus_area(
 ) -> dict[str, Any]:
     require_permission(context, "CONFIGURE_FOCUS_AREAS")
     if body.focus_type == "ENTITY" and body.entity_id is None:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "ENTITY focus requires entity_id")
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY, "ENTITY focus requires entity_id"
+        )
     row = (
-        await context.session.execute(
-            text(
-                """
+        (
+            await context.session.execute(
+                text(
+                    """
                 INSERT INTO context.focus_areas (
                   tenant_id, user_id, focus_type, entity_id, label,
                   query_text, weight, expires_at
@@ -432,18 +516,21 @@ async def create_focus_area(
                   :query_text, :weight, :expires_at
                 ) RETURNING *
                 """
-            ),
-            {
-                **body.model_dump(),
-                "tenant_id": context.principal.tenant_id,
-                "user_id": context.principal.user_id,
-            },
+                ),
+                {
+                    **body.model_dump(),
+                    "tenant_id": context.principal.tenant_id,
+                    "user_id": context.principal.user_id,
+                },
+            )
         )
-    ).mappings().one()
+        .mappings()
+        .one()
+    )
     await _audit(context, "FOCUS_AREA_CREATED", "FOCUS_AREA", row["id"])
     await context.session.commit()
     await invalidate_user(context.principal.tenant_id, context.principal.user_id)
-    _queue_personalisation(context)
+    await _queue_personalisation(context)
     return jsonable_encoder(dict(row))
 
 
@@ -462,22 +549,26 @@ async def patch_focus_area(
     # every request value remains a bound parameter.
     update_sql = f"UPDATE context.focus_areas SET {', '.join(assignments)} WHERE id = :focus_id AND tenant_id = :tenant_id AND user_id = :user_id RETURNING *"  # nosec B608  # noqa: E501
     row = (
-        await context.session.execute(
-            text(update_sql),
-            {
-                **changes,
-                "focus_id": focus_id,
-                "tenant_id": context.principal.tenant_id,
-                "user_id": context.principal.user_id,
-            },
+        (
+            await context.session.execute(
+                text(update_sql),
+                {
+                    **changes,
+                    "focus_id": focus_id,
+                    "tenant_id": context.principal.tenant_id,
+                    "user_id": context.principal.user_id,
+                },
+            )
         )
-    ).mappings().one_or_none()
+        .mappings()
+        .one_or_none()
+    )
     if row is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Focus Area not found")
     await _audit(context, "FOCUS_AREA_UPDATED", "FOCUS_AREA", focus_id)
     await context.session.commit()
     await invalidate_user(context.principal.tenant_id, context.principal.user_id)
-    _queue_personalisation(context)
+    await _queue_personalisation(context)
     return jsonable_encoder(dict(row))
 
 
@@ -506,7 +597,7 @@ async def delete_focus_area(
     await _audit(context, "FOCUS_AREA_DELETED", "FOCUS_AREA", focus_id)
     await context.session.commit()
     await invalidate_user(context.principal.tenant_id, context.principal.user_id)
-    _queue_personalisation(context)
+    await _queue_personalisation(context)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
@@ -522,20 +613,30 @@ async def complete_onboarding(
     require_permission(context, "CONFIGURE_ALERTS")
     require_current_legal_acceptance(context)
     profile = (
-        await context.session.execute(
-            text("SELECT * FROM context.company_profiles WHERE tenant_id=:tenant_id"),
-            {"tenant_id": context.principal.tenant_id},
+        (
+            await context.session.execute(
+                text(
+                    "SELECT * FROM context.company_profiles WHERE tenant_id=:tenant_id"
+                ),
+                {"tenant_id": context.principal.tenant_id},
+            )
         )
-    ).mappings().one_or_none()
+        .mappings()
+        .one_or_none()
+    )
     objects = (
-        await context.session.execute(
-            text(
-                "SELECT * FROM context.company_objects "
-                "WHERE tenant_id=:tenant_id AND active"
-            ),
-            {"tenant_id": context.principal.tenant_id},
+        (
+            await context.session.execute(
+                text(
+                    "SELECT * FROM context.company_objects "
+                    "WHERE tenant_id=:tenant_id AND active"
+                ),
+                {"tenant_id": context.principal.tenant_id},
+            )
         )
-    ).mappings().all()
+        .mappings()
+        .all()
+    )
     context_state = company_context_status(
         dict(profile) if profile else None,
         [dict(item) for item in objects],
@@ -550,22 +651,26 @@ async def complete_onboarding(
             },
         )
     prerequisites = (
-        await context.session.execute(
-            text(
-                """
+        (
+            await context.session.execute(
+                text(
+                    """
                 SELECT
                   EXISTS(SELECT 1 FROM context.user_decision_lenses
                     WHERE tenant_id=:tenant_id AND user_id=:user_id AND active) AS lens,
                   EXISTS(SELECT 1 FROM context.focus_areas
                     WHERE tenant_id=:tenant_id AND user_id=:user_id AND active) AS focus
                 """
-            ),
-            {
-                "tenant_id": context.principal.tenant_id,
-                "user_id": context.principal.user_id,
-            },
+                ),
+                {
+                    "tenant_id": context.principal.tenant_id,
+                    "user_id": context.principal.user_id,
+                },
+            )
         )
-    ).mappings().one()
+        .mappings()
+        .one()
+    )
     if not prerequisites["lens"] or not prerequisites["focus"]:
         raise HTTPException(
             status.HTTP_409_CONFLICT,
@@ -639,7 +744,7 @@ async def complete_onboarding(
     await _audit(context, "ONBOARDING_COMPLETED", "USER", context.principal.user_id)
     await context.session.commit()
     await invalidate_user(context.principal.tenant_id, context.principal.user_id)
-    queued = _queue_personalisation(context)
+    queued = await _queue_personalisation(context)
     return {
         "status": "COMPLETE",
         "completed_at": completed_at,
@@ -647,27 +752,12 @@ async def complete_onboarding(
     }
 
 
-def _queue_personalisation(context: RequestContext) -> bool:
-    settings = get_settings()
-    if not settings.PHASE5_FIRST_VALUE_ACTIVATION_ENABLED:
+async def _queue_personalisation(context: RequestContext) -> bool:
+    if not get_settings().PHASE5_FIRST_VALUE_ACTIVATION_ENABLED:
         return False
-    queue_url = settings.SQS_PIPELINE_SYNTHESIZED_URL
-    if not queue_url:
-        return False
-    try:
-        celery_app.send_task(
-            "app.workers.tasks.pilot_activation.personalise_user",
-            args=[
-                {
-                    "tenant_id": str(context.principal.tenant_id),
-                    "user_id": str(context.principal.user_id),
-                }
-            ],
-            queue=queue_url.rstrip("/").rsplit("/", 1)[-1],
-        )
-    except Exception:
-        return False
-    return True
+    return await queue_personalisation(
+        context.session, context.principal.tenant_id, context.principal.user_id
+    )
 
 
 async def _audit(
@@ -681,7 +771,11 @@ async def _audit(
     await context.session.execute(
         text(
             """
-            WITH profile_updated AS (
+            WITH lens_updated AS (
+              UPDATE context.user_decision_lenses SET version=version+1,updated_at=NOW()
+              WHERE tenant_id=:tenant_id AND user_id=:user_id AND active
+                AND :event_type IN ('FOCUS_AREA_CREATED','FOCUS_AREA_UPDATED','FOCUS_AREA_DELETED')
+            ), profile_updated AS (
               UPDATE context.company_profiles
               SET version=version+1, updated_at=NOW()
               WHERE tenant_id=:tenant_id AND :increment_context_version

@@ -13,6 +13,20 @@ from sqlalchemy import text
 from app.api.auth import RequestContext, get_request_context, require_permission
 from app.billing import require_feature
 from app.context.completeness import company_context_status
+from app.context.normalization import context_label
+from app.context.personalisation import queue_personalisation
+from app.context.projections import (
+    visible_briefs_sql,
+    visible_monitoring_sql,
+    visible_ctes,
+)
+from app.intelligence.freshness import (
+    current_sql,
+    identity_sql,
+    meaningful_sql,
+    matched_sql,
+    with_freshness,
+)
 from app.core.config import get_settings
 
 router = APIRouter(prefix="/api/v1", tags=["product"])
@@ -24,7 +38,9 @@ def _default_delivery_channels() -> list[Literal["IN_APP", "EMAIL"]]:
 
 class DecisionActionInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    action_type: Literal["ACKNOWLEDGED", "WATCHING", "ESCALATED", "ACTED_ON", "DISMISSED"]
+    action_type: Literal[
+        "ACKNOWLEDGED", "WATCHING", "ESCALATED", "ACTED_ON", "DISMISSED"
+    ]
     reason_code: str | None = Field(default=None, max_length=50)
     note: str | None = Field(default=None, max_length=2000)
 
@@ -32,7 +48,9 @@ class DecisionActionInput(BaseModel):
 class AlertPreferencesInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
     domain_codes: list[str] = Field(default_factory=list, max_length=20)
-    urgency_bands: list[Literal["LOW", "MEDIUM", "HIGH", "CRITICAL"]] = Field(default_factory=list)
+    urgency_bands: list[Literal["LOW", "MEDIUM", "HIGH", "CRITICAL"]] = Field(
+        default_factory=list
+    )
     delivery_channels: list[Literal["IN_APP", "EMAIL"]] = Field(
         default_factory=_default_delivery_channels
     )
@@ -49,8 +67,14 @@ class PilotStartInput(BaseModel):
 class PilotEventInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
     event_type: Literal[
-        "BRIEF_OPENED", "DECISION_ACTION", "CIL_QUERY", "ALERT_OPENED",
-        "CHECKPOINT_NOTE", "VALUE_EXAMPLE", "OBJECTION", "PRICING_SIGNAL",
+        "BRIEF_OPENED",
+        "DECISION_ACTION",
+        "CIL_QUERY",
+        "ALERT_OPENED",
+        "CHECKPOINT_NOTE",
+        "VALUE_EXAMPLE",
+        "OBJECTION",
+        "PRICING_SIGNAL",
     ]
     idempotency_key: UUID
     properties: dict[str, Any] = Field(default_factory=dict)
@@ -62,12 +86,26 @@ class CheckpointInput(BaseModel):
 
 
 _PRODUCT_EVENTS = Literal[
-    "SESSION_STARTED", "BRIEFING_VIEWED", "BRIEF_OPENED", "BRIEF_UPDATED_VIEWED",
-    "EVIDENCE_PANEL_OPENED", "CIL_OPENED", "CIL_QUERY_SUBMITTED",
-    "BRIEF_ACKNOWLEDGED", "BRIEF_WATCHED", "BRIEF_ESCALATED", "BRIEF_ACTED_ON",
-    "BRIEF_DISMISSED", "WIDER_INTELLIGENCE_VIEWED", "WATCHLIST_ITEM_VIEWED",
-    "FOCUS_AREA_ADDED", "FOCUS_AREA_UPDATED", "SEARCH_PERFORMED", "ALERT_OPENED",
-    "DIGEST_OPENED", "DECISION_PATHS_VIEWED",
+    "SESSION_STARTED",
+    "BRIEFING_VIEWED",
+    "BRIEF_OPENED",
+    "BRIEF_UPDATED_VIEWED",
+    "EVIDENCE_PANEL_OPENED",
+    "CIL_OPENED",
+    "CIL_QUERY_SUBMITTED",
+    "BRIEF_ACKNOWLEDGED",
+    "BRIEF_WATCHED",
+    "BRIEF_ESCALATED",
+    "BRIEF_ACTED_ON",
+    "BRIEF_DISMISSED",
+    "WIDER_INTELLIGENCE_VIEWED",
+    "WATCHLIST_ITEM_VIEWED",
+    "FOCUS_AREA_ADDED",
+    "FOCUS_AREA_UPDATED",
+    "SEARCH_PERFORMED",
+    "ALERT_OPENED",
+    "DIGEST_OPENED",
+    "DECISION_PATHS_VIEWED",
 ]
 
 
@@ -84,7 +122,9 @@ class ProductEventInput(BaseModel):
     def minimise_metadata(cls, value: dict[str, Any]) -> dict[str, Any]:
         forbidden = {"query", "query_text", "email", "token", "password", "note"}
         if forbidden & {key.casefold() for key in value}:
-            raise ValueError("Sensitive or free-text product-event metadata is not allowed")
+            raise ValueError(
+                "Sensitive or free-text product-event metadata is not allowed"
+            )
         if len(json.dumps(value, separators=(",", ":"))) > 4000:
             raise ValueError("Product-event metadata is too large")
         return value
@@ -104,6 +144,17 @@ async def product_capabilities(
     }
 
 
+def _value_params(
+    context: RequestContext, lookback_days: int | None = None
+) -> dict[str, Any]:
+    return {
+        "tenant_id": context.principal.tenant_id,
+        "user_id": context.principal.user_id,
+        "lookback_days": lookback_days or get_settings().PILOT_ACTIVATION_LOOKBACK_DAYS,
+        "use_activation_window": lookback_days is None,
+    }
+
+
 @router.get("/briefs")
 async def list_briefs(
     status_filter: str | None = Query(default=None, alias="status", max_length=30),
@@ -112,47 +163,27 @@ async def list_briefs(
 ) -> list[dict[str, Any]]:
     require_permission(context, "READ_DECISION_BRIEFS")
     rows = (
-        await context.session.execute(
-            text(
-                """
-                SELECT brief.id, brief.user_id, brief.what_changed, brief.why_it_matters,
-                       brief.exposure_summary, brief.stakes_summary, brief.decision_prompt,
-                       brief.owner_roles, brief.decision_window, brief.uncertainties,
-                       brief.evidence_signal_ids, brief.brief_status,
-                       brief.personal_priority_score, brief.created_at,
-                       brief.first_published_at, brief.last_material_change_at,
-                       brief.material_change_count, brief.guidance_status,
-                       assessment.relevance_band, assessment.relevance_score,
-                       assessment.quantification_status, assessment.decision_required,
-                       signal.primary_domain, signal.urgency_band, signal.confidence_band,
-                       signal.published_at, signal.detected_at
-                FROM decision.briefs AS brief
-                JOIN decision.assessments AS assessment
-                  ON assessment.tenant_id = brief.tenant_id AND assessment.id = brief.assessment_id
-                JOIN pipeline.signals AS signal ON signal.id = brief.signal_id
-                WHERE brief.tenant_id = :tenant_id
-                  AND (brief.user_id = :user_id OR brief.user_id IS NULL)
-                  AND (CAST(:status_filter AS VARCHAR) IS NULL
-                       OR brief.brief_status = CAST(:status_filter AS VARCHAR))
-                ORDER BY (brief.user_id IS NOT NULL) DESC,
-                         brief.personal_priority_score DESC NULLS LAST,
-                         assessment.relevance_score DESC, brief.created_at DESC
-                LIMIT :limit
-                """
-            ),
-            {"tenant_id": context.principal.tenant_id, "user_id": context.principal.user_id,
-             "status_filter": status_filter, "limit": limit},
+        (
+            await context.session.execute(
+                text(f"""
+        WITH visible AS ({visible_briefs_sql()})
+        SELECT * FROM visible
+        WHERE (CAST(:status_filter AS TEXT) IS NULL AND brief_status IN ('OPEN','WATCHING','ESCALATED'))
+           OR brief_status=CAST(:status_filter AS TEXT)
+        ORDER BY personal_priority_score DESC NULLS LAST,relevance_score DESC,published_at DESC,id
+        LIMIT :limit
+    """),
+                {
+                    **_value_params(context),
+                    "status_filter": status_filter,
+                    "limit": limit,
+                },
+            )
         )
-    ).mappings().all()
-    if any(not row["evidence_signal_ids"] for row in rows):
-        raise HTTPException(
-            status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail={
-                "code": "BRIEF_EVIDENCE_INTEGRITY_FAILED",
-                "message": "One or more Decision Briefs do not have stored evidence. The briefing cannot be shown safely.",
-            },
-        )
-    return jsonable_encoder([dict(row) for row in rows])
+        .mappings()
+        .all()
+    )
+    return jsonable_encoder([with_freshness(row) for row in rows])
 
 
 @router.get("/briefs/{brief_id}")
@@ -161,9 +192,10 @@ async def get_brief(
 ) -> dict[str, Any]:
     require_permission(context, "READ_DECISION_BRIEFS")
     row = (
-        await context.session.execute(
-            text(
-                """
+        (
+            await context.session.execute(
+                text(
+                    """
                 SELECT brief.*, assessment.relevance_band, assessment.relevance_score,
                        assessment.exposure_types, assessment.stakes_types,
                        assessment.quantification_status, assessment.quantitative_context,
@@ -177,17 +209,24 @@ async def get_brief(
                 WHERE brief.id = :brief_id AND brief.tenant_id = :tenant_id
                   AND (brief.user_id = :user_id OR brief.user_id IS NULL)
                 """
-            ),
-            {"brief_id": brief_id, "tenant_id": context.principal.tenant_id,
-             "user_id": context.principal.user_id},
+                ),
+                {
+                    "brief_id": brief_id,
+                    "tenant_id": context.principal.tenant_id,
+                    "user_id": context.principal.user_id,
+                },
+            )
         )
-    ).mappings().one_or_none()
+        .mappings()
+        .one_or_none()
+    )
     if row is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Decision Brief not found")
     evidence = (
-        await context.session.execute(
-            text(
-                """
+        (
+            await context.session.execute(
+                text(
+                    """
                 SELECT signal.id, signal.title, signal.source_url, signal.published_at,
                        signal.detected_at, signal.confidence_band,
                        source.source_name AS source_name
@@ -197,10 +236,16 @@ async def get_brief(
                   AND (signal.tenant_id IS NULL OR signal.tenant_id = :tenant_id)
                 ORDER BY signal.published_at DESC NULLS LAST
                 """
-            ),
-            {"signal_ids": list(row["evidence_signal_ids"]), "tenant_id": context.principal.tenant_id},
+                ),
+                {
+                    "signal_ids": list(row["evidence_signal_ids"]),
+                    "tenant_id": context.principal.tenant_id,
+                },
+            )
         )
-    ).mappings().all()
+        .mappings()
+        .all()
+    )
     if not evidence or len(evidence) != len(set(row["evidence_signal_ids"])):
         raise HTTPException(
             status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -210,9 +255,10 @@ async def get_brief(
             },
         )
     actions = (
-        await context.session.execute(
-            text(
-                """
+        (
+            await context.session.execute(
+                text(
+                    """
                 SELECT action.id, action.action_type, action.reason_code, action.note,
                        action.created_at, users.display_name
                 FROM decision.actions AS action
@@ -221,23 +267,30 @@ async def get_brief(
                 WHERE action.tenant_id = :tenant_id AND action.brief_id = :brief_id
                 ORDER BY action.created_at DESC
                 """
-            ),
-            {"tenant_id": context.principal.tenant_id, "brief_id": brief_id},
+                ),
+                {"tenant_id": context.principal.tenant_id, "brief_id": brief_id},
+            )
         )
-    ).mappings().all()
+        .mappings()
+        .all()
+    )
     timeline = (
-        await context.session.execute(
-            text(
-                """
+        (
+            await context.session.execute(
+                text(
+                    """
                 SELECT event_type,event_metadata,created_at
                 FROM decision.brief_events
                 WHERE tenant_id=:tenant_id AND brief_id=:brief_id
                 ORDER BY created_at
                 """
-            ),
-            {"tenant_id": context.principal.tenant_id, "brief_id": brief_id},
+                ),
+                {"tenant_id": context.principal.tenant_id, "brief_id": brief_id},
+            )
         )
-    ).mappings().all()
+        .mappings()
+        .all()
+    )
     await _audit(context, "DECISION_BRIEF_VIEWED", "DECISION_BRIEF", brief_id, {})
     if get_settings().PHASE5_PRODUCT_ANALYTICS_ENABLED:
         await _record_product_event(
@@ -254,10 +307,14 @@ async def get_brief(
         )
     await context.session.commit()
     lifecycle_enabled = get_settings().PHASE5_BRIEF_LIFECYCLE_ENABLED
-    return jsonable_encoder({**dict(row), "evidence": [dict(item) for item in evidence],
-                             "actions": [dict(item) for item in actions],
-                             "timeline": [dict(item) for item in timeline]
-                             if lifecycle_enabled else []})
+    return jsonable_encoder(
+        {
+            **dict(row),
+            "evidence": [dict(item) for item in evidence],
+            "actions": [dict(item) for item in actions],
+            "timeline": [dict(item) for item in timeline] if lifecycle_enabled else [],
+        }
+    )
 
 
 @router.post("/briefs/{brief_id}/actions", status_code=status.HTTP_201_CREATED)
@@ -268,9 +325,10 @@ async def record_decision_action(
 ) -> dict[str, Any]:
     require_permission(context, "ACT_ON_DECISION_BRIEF")
     row = (
-        await context.session.execute(
-            text(
-                """
+        (
+            await context.session.execute(
+                text(
+                    """
                 INSERT INTO decision.actions (
                     tenant_id, brief_id, user_id, action_type, reason_code, note
                 )
@@ -280,11 +338,18 @@ async def record_decision_action(
                   AND (brief.user_id = :user_id OR brief.user_id IS NULL)
                 RETURNING *
                 """
-            ),
-            {"tenant_id": context.principal.tenant_id, "user_id": context.principal.user_id,
-             "brief_id": brief_id, **body.model_dump()},
+                ),
+                {
+                    "tenant_id": context.principal.tenant_id,
+                    "user_id": context.principal.user_id,
+                    "brief_id": brief_id,
+                    **body.model_dump(),
+                },
+            )
         )
-    ).mappings().one_or_none()
+        .mappings()
+        .one_or_none()
+    )
     if row is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Decision Brief not found")
     next_status = "WATCHING" if body.action_type == "ACKNOWLEDGED" else body.action_type
@@ -331,11 +396,21 @@ async def record_decision_action(
             ),
             update_parameters,
         )
-    await _audit(context, "DECISION_ACTION_RECORDED", "DECISION_BRIEF", brief_id,
-                 {"action_type": body.action_type, "action_id": str(row["id"])})
+    await _audit(
+        context,
+        "DECISION_ACTION_RECORDED",
+        "DECISION_BRIEF",
+        brief_id,
+        {"action_type": body.action_type, "action_id": str(row["id"])},
+    )
     if body.action_type in {"ESCALATED", "ACTED_ON"}:
-        await _audit(context, f"BRIEF_{body.action_type}", "DECISION_BRIEF", brief_id,
-                     {"action_id": str(row["id"])})
+        await _audit(
+            context,
+            f"BRIEF_{body.action_type}",
+            "DECISION_BRIEF",
+            brief_id,
+            {"action_id": str(row["id"])},
+        )
     if get_settings().PHASE5_PRODUCT_ANALYTICS_ENABLED:
         event_names: dict[str, _PRODUCT_EVENTS] = {
             "ACKNOWLEDGED": "BRIEF_ACKNOWLEDGED",
@@ -358,46 +433,50 @@ async def record_decision_action(
 
 @router.get("/company/briefs")
 @router.get("/company", include_in_schema=False)
-async def company_lens(context: RequestContext = Depends(get_request_context)) -> dict[str, Any]:
+async def company_lens(
+    context: RequestContext = Depends(get_request_context),
+) -> dict[str, Any]:
     require_permission(context, "READ_DECISION_BRIEFS")
     require_feature(context, "company_intelligence_matrix")
     profile = (
-        await context.session.execute(
-            text("SELECT * FROM context.company_profiles WHERE tenant_id = :tenant_id"),
-            {"tenant_id": context.principal.tenant_id},
+        (
+            await context.session.execute(
+                text(
+                    "SELECT * FROM context.company_profiles WHERE tenant_id = :tenant_id"
+                ),
+                {"tenant_id": context.principal.tenant_id},
+            )
         )
-    ).mappings().one_or_none()
+        .mappings()
+        .one_or_none()
+    )
     context_objects = (
-        await context.session.execute(
-            text(
-                "SELECT * FROM context.company_objects "
-                "WHERE tenant_id=:tenant_id AND active ORDER BY object_type,name"
-            ),
-            {"tenant_id": context.principal.tenant_id},
+        (
+            await context.session.execute(
+                text(
+                    "SELECT * FROM context.company_objects "
+                    "WHERE tenant_id=:tenant_id AND active ORDER BY object_type,name"
+                ),
+                {"tenant_id": context.principal.tenant_id},
+            )
         )
-    ).mappings().all()
+        .mappings()
+        .all()
+    )
     rows = (
-        await context.session.execute(
-            text(
-                """
-                SELECT brief.id, brief.what_changed, brief.why_it_matters, brief.brief_status,
-                       brief.owner_roles, brief.decision_window, brief.created_at,
-                       brief.evidence_signal_ids, brief.uncertainties,
-                       assessment.relevance_score, assessment.relevance_band,
-                       assessment.exposure_types, assessment.stakes_types,
-                       assessment.quantification_status,
-                       signal.primary_domain, signal.urgency_band, signal.confidence_band
-                FROM decision.briefs AS brief
-                JOIN decision.assessments AS assessment
-                  ON assessment.tenant_id = brief.tenant_id AND assessment.id = brief.assessment_id
-                JOIN pipeline.signals AS signal ON signal.id = brief.signal_id
-                WHERE brief.tenant_id = :tenant_id AND brief.user_id IS NULL
-                ORDER BY assessment.relevance_score DESC, brief.created_at DESC LIMIT 100
-                """
-            ),
-            {"tenant_id": context.principal.tenant_id},
+        (
+            await context.session.execute(
+                text(f"""
+        WITH visible AS ({visible_briefs_sql()})
+        SELECT * FROM visible WHERE brief_status IN ('OPEN','WATCHING','ESCALATED')
+        ORDER BY relevance_score DESC,published_at DESC LIMIT 100
+    """),
+                {**_value_params(context), "user_id": None},
+            )
         )
-    ).mappings().all()
+        .mappings()
+        .all()
+    )
     if any(not row["evidence_signal_ids"] for row in rows):
         raise HTTPException(
             status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -418,42 +497,293 @@ async def company_lens(context: RequestContext = Depends(get_request_context)) -
     )
 
 
+@router.get("/briefing/readiness")
+async def briefing_readiness(
+    context: RequestContext = Depends(get_request_context),
+) -> dict[str, Any]:
+    require_permission(context, "READ_INTELLIGENCE")
+    row = (
+        (
+            await context.session.execute(
+                text("""
+        SELECT profile.version context_version,lens.version lens_version,
+          state.status personalisation_status,state.context_version evaluated_context_version,
+          state.lens_version evaluated_lens_version,state.outputs_evaluated,state.requested_at,
+          state.completed_at,state.error_code,
+          state.requested_at<NOW()-INTERVAL '5 minutes' AS overdue,
+          (SELECT MAX(completed_at) FROM pipeline.collection_jobs WHERE status='COMPLETED') last_checked_at
+        FROM context.company_profiles profile
+        LEFT JOIN context.user_decision_lenses lens ON lens.tenant_id=profile.tenant_id
+          AND lens.user_id=:user_id AND lens.active
+        LEFT JOIN context.personalisation_state state ON state.tenant_id=profile.tenant_id AND state.user_id=:user_id
+        WHERE profile.tenant_id=:tenant_id
+    """),
+                _value_params(context),
+            )
+        )
+        .mappings()
+        .one_or_none()
+    )
+    if row is None or not row["lens_version"]:
+        return {
+            "state": "SETUP_REQUIRED",
+            "message": "Complete your Company Context and Decision Lens to prepare your briefing.",
+            "monitoring_state": "Monitoring",
+        }
+    current = (
+        row["context_version"] == row["evaluated_context_version"]
+        and row["lens_version"] == row["evaluated_lens_version"]
+    )
+    if not current or row["personalisation_status"] is None:
+        state, message = (
+            "PREPARE_REQUIRED",
+            "Preparing your briefing from your saved company and personal priorities.",
+        )
+    elif row["personalisation_status"] == "FAILED" or (
+        row["overdue"] and row["personalisation_status"] != "COMPLETED"
+    ):
+        state, message = (
+            "PREPARATION_DELAYED",
+            "Your setup is saved. Briefing preparation is taking longer than expected. You can retry.",
+        )
+    elif row["personalisation_status"] != "COMPLETED":
+        state, message = (
+            "PREPARING",
+            "Preparing your briefing from your saved company and personal priorities.",
+        )
+    elif row["outputs_evaluated"] == 0:
+        state, message = (
+            "NO_RECENT_MATCH",
+            "Stem is monitoring your configured scope. No verified recent development currently matches strongly enough to require action.",
+        )
+    else:
+        state, message = "ASSESSED", None
+    return jsonable_encoder(
+        {
+            "state": state,
+            "message": message,
+            "monitoring_state": "Monitoring",
+            "last_checked_at": row["last_checked_at"],
+            "prepared_at": row["completed_at"],
+        }
+    )
+
+
+@router.post("/briefing/prepare", status_code=status.HTTP_202_ACCEPTED)
+async def prepare_briefing(
+    context: RequestContext = Depends(get_request_context),
+) -> dict[str, Any]:
+    require_permission(context, "CONFIGURE_DECISION_LENS")
+    readiness = await briefing_readiness(context)
+    if readiness["state"] not in {"PREPARE_REQUIRED", "PREPARATION_DELAYED"}:
+        return readiness
+    queued = await queue_personalisation(
+        context.session, context.principal.tenant_id, context.principal.user_id
+    )
+    return {"state": "PREPARING" if queued else "PREPARATION_DELAYED"}
+
+
 @router.get("/signals")
 @router.get("/intelligence", include_in_schema=False)
 async def wider_intelligence(
     limit: int = Query(default=40, ge=1, le=100),
     context: RequestContext = Depends(get_request_context),
+    freshness: Literal["CURRENT", "HISTORICAL", "DATE_UNCERTAIN", "ALL"] = "CURRENT",
+    q: str = "",
 ) -> list[dict[str, Any]]:
     require_permission(context, "READ_INTELLIGENCE")
+    filters = {
+        "CURRENT": f"({current_sql()}) AND {meaningful_sql()}",
+        "HISTORICAL": "signal.published_at<NOW()-make_interval(days => :lookback_days)",
+        "DATE_UNCERTAIN": "(signal.published_at IS NULL OR signal.published_at>NOW() OR 'DISCOVERY_LEAD'=ANY(signal.processing_flags))",
+        "ALL": "TRUE",
+    }
     rows = (
-        await context.session.execute(
-            text(
-                """
-                SELECT output.id, output.signal_id, output.summary, output.key_developments,
-                       output.global_implication, output.confidence_note, output.citations,
-                       output.synthesized_at, signal.title, signal.primary_domain,
-                       signal.urgency_band, signal.confidence_band, signal.source_url,
-                       signal.published_at, source.source_name AS source_name
-                FROM intelligence.global_outputs AS output
-                JOIN pipeline.signals AS signal ON signal.id = output.signal_id
-                JOIN config.sources AS source ON source.id = signal.source_id
-                WHERE output.synthesis_status = 'COMPLETED'
-                  AND (signal.tenant_id IS NULL OR signal.tenant_id = :tenant_id)
-                ORDER BY output.synthesized_at DESC NULLS LAST LIMIT :limit
-                """
-            ),
-            {"tenant_id": context.principal.tenant_id, "limit": limit},
+        (
+            await context.session.execute(
+                text(f"""
+        SELECT * FROM (
+          SELECT DISTINCT ON ({identity_sql()}) output.id,output.signal_id,output.summary,
+            output.key_developments,output.global_implication,output.confidence_note,output.citations,
+            output.synthesized_at,output.llm_synthesis_failed,signal.title,signal.primary_domain,
+            signal.subcategory_tags[1] event_type,signal.urgency_band,signal.confidence_band,
+            signal.source_url,signal.published_at,signal.detected_at,signal.processing_flags,source.source_name
+          FROM intelligence.global_outputs output
+          JOIN pipeline.signals signal ON signal.id=output.signal_id
+          JOIN config.sources source ON source.id=signal.source_id
+          WHERE output.synthesis_status='COMPLETED'
+            AND (output.tenant_id IS NULL OR output.tenant_id=:tenant_id)
+            AND (signal.tenant_id IS NULL OR signal.tenant_id=:tenant_id)
+            AND signal.dedup_status NOT IN ('EXACT_DUPLICATE','SEMANTIC_DUPLICATE')
+            AND jsonb_array_length(output.citations)>0 AND {filters[freshness]}
+            AND (:q='' OR signal.title ILIKE :pattern OR output.summary ILIKE :pattern)
+          ORDER BY {identity_sql()},output.synthesized_at DESC,output.id
+        ) feed ORDER BY published_at DESC NULLS LAST,id LIMIT :limit
+    """),
+                {
+                    **_value_params(context, 60),
+                    "q": q[:200],
+                    "pattern": "%" + q[:200] + "%",
+                    "limit": limit,
+                },
+            )
         )
-    ).mappings().all()
-    if any(not row["citations"] for row in rows):
+        .mappings()
+        .all()
+    )
+    return jsonable_encoder([with_freshness(row) for row in rows])
+
+
+@router.get("/signals/{signal_id}")
+async def signal_detail(
+    signal_id: UUID, context: RequestContext = Depends(get_request_context)
+) -> dict[str, Any]:
+    """Read stored signal evidence; opening a dossier never invokes generation."""
+    require_permission(context, "READ_INTELLIGENCE")
+    parameters = {"signal_id": signal_id, "tenant_id": context.principal.tenant_id}
+    signal = (
+        (
+            await context.session.execute(
+                text("""
+            SELECT signal.id, signal.title, LEFT(signal.body_text,3000) AS evidence_excerpt,
+                   signal.source_url, signal.published_at, signal.detected_at,
+                   signal.primary_domain, signal.subcategory_tags, signal.confidence_band,
+                   signal.urgency_band, signal.review_flag, signal.processing_flags, signal.date_metadata, source.source_name,
+                   output.id AS global_output_id, output.summary, output.key_developments,
+                   output.global_implication, output.confidence_note, output.citations,
+                   output.llm_synthesis_failed, output.synthesized_at,output.historical_signal_ids,output.cluster_id
+            FROM pipeline.signals signal
+            JOIN config.sources source ON source.id=signal.source_id
+            LEFT JOIN intelligence.global_outputs output ON output.signal_id=signal.id
+              AND output.synthesis_status='COMPLETED'
+              AND (output.tenant_id IS NULL OR output.tenant_id=:tenant_id)
+            WHERE signal.id=:signal_id
+              AND (signal.tenant_id IS NULL OR signal.tenant_id=:tenant_id)
+            ORDER BY signal.created_at DESC LIMIT 1
+        """),
+                parameters,
+            )
+        )
+        .mappings()
+        .one_or_none()
+    )
+    if signal is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Signal not found")
+    entities = (
+        (
+            await context.session.execute(
+                text("""
+            SELECT DISTINCT entity.id, entity.canonical_name, entity.entity_type
+            FROM intelligence.signal_entities link
+            JOIN intelligence.entities entity ON entity.id=link.entity_id AND entity.active
+            WHERE link.signal_id=:signal_id
+              AND (link.tenant_id IS NULL OR link.tenant_id=:tenant_id)
+            ORDER BY entity.canonical_name LIMIT 30
+        """),
+                parameters,
+            )
+        )
+        .mappings()
+        .all()
+    )
+    evidence_ids = {signal_id}
+    for citation in signal["citations"] or []:
+        try:
+            evidence_ids.add(UUID(str(citation["source_signal_id"])))
+        except (ValueError, KeyError, TypeError) as exc:
+            raise HTTPException(
+                status.HTTP_503_SERVICE_UNAVAILABLE, "Stored evidence requires review"
+            ) from exc
+    evidence = (
+        (
+            await context.session.execute(
+                text("""
+            SELECT DISTINCT signal.id, signal.title, signal.source_url,
+                   signal.published_at, signal.detected_at, source.source_name
+            FROM pipeline.signals signal
+            JOIN config.sources source ON source.id=signal.source_id
+            WHERE signal.id=ANY(CAST(:ids AS UUID[]))
+              AND (signal.tenant_id IS NULL OR signal.tenant_id=:tenant_id)
+            ORDER BY signal.published_at DESC NULLS LAST, signal.id LIMIT 31
+        """),
+                {"ids": list(evidence_ids), "tenant_id": context.principal.tenant_id},
+            )
+        )
+        .mappings()
+        .all()
+    )
+    # Do not serialize unfiltered citation identifiers from another tenant.
+    allowed_ids = {str(item["id"]) for item in evidence}
+    if {str(item) for item in evidence_ids} - allowed_ids:
         raise HTTPException(
-            status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail={
-                "code": "INTELLIGENCE_EVIDENCE_INTEGRITY_FAILED",
-                "message": "Wider Intelligence cannot be shown because a synthesized output has no stored citations.",
-            },
+            status.HTTP_503_SERVICE_UNAVAILABLE, "Stored evidence requires review"
         )
-    return jsonable_encoder([dict(row) for row in rows])
+    payload = dict(signal)
+    payload["citations"] = [
+        citation
+        for citation in signal["citations"] or []
+        if str(citation.get("source_signal_id")) in allowed_ids
+    ]
+    interpretation = (
+        (
+            await context.session.execute(
+                text(f"""
+        SELECT assessment.relevance_band,assessment.relevance_score,assessment.decision_required,
+          assessment.rationale,assessment.exposure_types,
+          ARRAY(SELECT object.name FROM context.company_objects object
+                WHERE object.tenant_id=:tenant_id AND object.active AND object.id=ANY(assessment.matched_object_ids))
+            matched_company_objects
+        FROM decision.assessments assessment
+        JOIN context.company_profiles profile ON profile.tenant_id=assessment.tenant_id
+          AND profile.version=assessment.company_context_version
+        WHERE assessment.tenant_id=:tenant_id AND assessment.global_output_id=:output_id
+          AND assessment.relevance_score>=0.450 AND {matched_sql()}
+    """),
+                {**parameters, "output_id": signal["global_output_id"]},
+            )
+        )
+        .mappings()
+        .one_or_none()
+    )
+    related = (
+        (
+            await context.session.execute(
+                text(f"""
+        SELECT DISTINCT ON ({identity_sql()}) signal.id,signal.title,signal.published_at,
+          signal.detected_at,signal.processing_flags,signal.source_url,source.source_name
+        FROM pipeline.signals signal JOIN config.sources source ON source.id=signal.source_id
+        WHERE (signal.id=ANY(CAST(:history_ids AS UUID[]))
+               OR (CAST(:cluster_id AS UUID) IS NOT NULL AND signal.trend_cluster_id=:cluster_id))
+          AND signal.id<>:signal_id AND (signal.tenant_id IS NULL OR signal.tenant_id=:tenant_id)
+          AND signal.dedup_status NOT IN ('EXACT_DUPLICATE','SEMANTIC_DUPLICATE')
+        ORDER BY {identity_sql()},signal.published_at DESC NULLS LAST LIMIT 12
+    """),
+                {
+                    **parameters,
+                    "history_ids": list(signal.get("historical_signal_ids") or []),
+                    "cluster_id": signal.get("cluster_id"),
+                },
+            )
+        )
+        .mappings()
+        .all()
+    )
+    payload.pop("historical_signal_ids", None)
+    payload.pop("cluster_id", None)
+    return jsonable_encoder(
+        {
+            "signal": with_freshness(payload),
+            "entities": [dict(item) for item in entities],
+            "evidence": [with_freshness(item) for item in evidence],
+            "tenant_interpretation": dict(interpretation) if interpretation else None,
+            "related_intelligence": [with_freshness(item) for item in related],
+            "historical_context": [
+                with_freshness(item)
+                for item in related
+                if with_freshness(item)["freshness"] == "HISTORICAL"
+            ],
+        }
+    )
 
 
 @router.get("/entities/{entity_id}")
@@ -462,17 +792,24 @@ async def entity_profile(
 ) -> dict[str, Any]:
     require_permission(context, "READ_INTELLIGENCE")
     entity = (
-        await context.session.execute(
-            text("SELECT * FROM intelligence.entities WHERE id = :entity_id AND active"),
-            {"entity_id": entity_id},
+        (
+            await context.session.execute(
+                text(
+                    "SELECT * FROM intelligence.entities WHERE id = :entity_id AND active"
+                ),
+                {"entity_id": entity_id},
+            )
         )
-    ).mappings().one_or_none()
+        .mappings()
+        .one_or_none()
+    )
     if entity is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Entity not found")
     activity = (
-        await context.session.execute(
-            text(
-                """
+        (
+            await context.session.execute(
+                text(
+                    """
                 SELECT activity.id,activity.title,activity.primary_domain,
                        activity.event_type,activity.urgency_band,
                        activity.confidence_band,activity.published_at,
@@ -500,14 +837,18 @@ async def entity_profile(
                 ORDER BY activity.published_at DESC NULLS LAST,activity.id
                 LIMIT 30
                 """
-            ),
-            {"entity_id": entity_id, "tenant_id": context.principal.tenant_id},
+                ),
+                {"entity_id": entity_id, "tenant_id": context.principal.tenant_id},
+            )
         )
-    ).mappings().all()
+        .mappings()
+        .all()
+    )
     relationships = (
-        await context.session.execute(
-            text(
-                """
+        (
+            await context.session.execute(
+                text(
+                    """
                 SELECT relationship.relationship_type, relationship.confidence_score,
                        cardinality(relationship.evidence_signal_ids) > 0
                          AS evidence_available,
@@ -521,76 +862,141 @@ async def entity_profile(
                 WHERE relationship.source_entity_id = :entity_id OR relationship.target_entity_id = :entity_id
                 ORDER BY relationship.confidence_score DESC NULLS LAST LIMIT 30
                 """
-            ),
-            {"entity_id": entity_id},
+                ),
+                {"entity_id": entity_id},
+            )
         )
-    ).mappings().all()
-    return jsonable_encoder({"entity": dict(entity), "activity": [dict(row) for row in activity],
-                             "relationships": [dict(row) for row in relationships]})
+        .mappings()
+        .all()
+    )
+    return jsonable_encoder(
+        {
+            "entity": dict(entity),
+            "activity": [dict(row) for row in activity],
+            "relationships": [dict(row) for row in relationships],
+        }
+    )
 
 
 @router.get("/watchlist")
-async def watchlist(context: RequestContext = Depends(get_request_context)) -> dict[str, Any]:
+async def watchlist(
+    context: RequestContext = Depends(get_request_context),
+) -> dict[str, Any]:
     require_permission(context, "READ_INTELLIGENCE")
+    params = _value_params(context, 30)
     company = (
-        await context.session.execute(
-            text(
-                """
-                SELECT object.id, object.name, object.object_type, object.importance,
-                       object.entity_id,
-                       CASE WHEN object.entity_id IS NULL THEN NULL ELSE (
-                         SELECT COUNT(DISTINCT link.signal_id)
-                         FROM intelligence.signal_entities AS link
-                         JOIN pipeline.signals AS signal ON signal.id = link.signal_id
-                         WHERE link.entity_id = object.entity_id
-                           AND signal.detected_at >= NOW() - INTERVAL '30 days'
-                           AND (signal.tenant_id IS NULL OR signal.tenant_id = :tenant_id)
-                       ) END AS recent_activity_count,
-                       (
-                         SELECT COUNT(DISTINCT brief.id)
-                         FROM decision.assessments AS assessment
-                         JOIN decision.briefs AS brief
-                           ON brief.tenant_id = assessment.tenant_id
-                          AND brief.assessment_id = assessment.id
-                         WHERE assessment.tenant_id = object.tenant_id
-                           AND object.id = ANY(assessment.matched_object_ids)
-                           AND brief.brief_status IN ('OPEN', 'WATCHING', 'ESCALATED')
-                       ) AS open_brief_count
-                FROM context.company_objects AS object
-                WHERE object.tenant_id = :tenant_id AND object.active
-                ORDER BY object.importance DESC, object.object_type, object.name
-                """
-            ),
-            {"tenant_id": context.principal.tenant_id},
+        (
+            await context.session.execute(
+                text(
+                    "SELECT id,name,object_type,importance,entity_id FROM context.company_objects "
+                    "WHERE tenant_id=:tenant_id AND active ORDER BY object_type,name,id"
+                ),
+                params,
+            )
         )
-    ).mappings().all()
-    focus = (
-        await context.session.execute(
-            text(
-                """
-                SELECT focus.id, focus.label, focus.focus_type, focus.weight,
-                       focus.entity_id,
-                       CASE WHEN focus.entity_id IS NULL THEN NULL ELSE (
-                         SELECT COUNT(DISTINCT link.signal_id)
-                         FROM intelligence.signal_entities AS link
-                         JOIN pipeline.signals AS signal ON signal.id = link.signal_id
-                         WHERE link.entity_id = focus.entity_id
-                           AND signal.detected_at >= NOW() - INTERVAL '30 days'
-                           AND (signal.tenant_id IS NULL OR signal.tenant_id = :tenant_id)
-                       ) END AS recent_activity_count,
-                       NULL::BIGINT AS open_brief_count
-                FROM context.focus_areas AS focus
-                WHERE focus.tenant_id = :tenant_id AND focus.user_id = :user_id
-                  AND focus.active AND (focus.expires_at IS NULL OR focus.expires_at > NOW())
-                ORDER BY focus.weight DESC, focus.created_at DESC
-                """
-            ),
-            {"tenant_id": context.principal.tenant_id, "user_id": context.principal.user_id},
-        )
-    ).mappings().all()
-    return jsonable_encoder(
-        {"company": [dict(row) for row in company], "focus": [dict(row) for row in focus]}
+        .mappings()
+        .all()
     )
+    focus = (
+        (
+            await context.session.execute(
+                text(
+                    "SELECT id,label,focus_type,weight,entity_id,query_text FROM context.focus_areas "
+                    "WHERE tenant_id=:tenant_id AND user_id=:user_id AND active "
+                    "AND (expires_at IS NULL OR expires_at>NOW()) ORDER BY weight DESC,id"
+                ),
+                params,
+            )
+        )
+        .mappings()
+        .all()
+    )
+    activity = (
+        (
+            await context.session.execute(
+                text(f"""
+        WITH {visible_ctes()}, activity AS (
+          SELECT canonical_identity,signal_id,what_changed AS title,matched_object_ids,published_at,
+            COALESCE(last_material_change_at,first_published_at,created_at) changed_at,TRUE AS decision
+          FROM visible_briefs WHERE brief_status IN ('OPEN','WATCHING','ESCALATED')
+          UNION ALL
+          SELECT canonical_identity,signal_id,display_title,matched_object_ids,published_at,
+            COALESCE(last_material_change_at,detected_at),FALSE FROM visible_monitoring
+        )
+        SELECT activity.*,
+          ARRAY(SELECT link.entity_id FROM intelligence.signal_entities link
+                WHERE link.signal_id=activity.signal_id AND (link.tenant_id IS NULL OR link.tenant_id=:tenant_id)) entity_ids,
+          LOWER(COALESCE(signal.title,'')||' '||COALESCE(signal.body_text,'')) match_text
+        FROM activity JOIN pipeline.signals signal ON signal.id=activity.signal_id
+        WHERE activity.published_at>=NOW()-INTERVAL '30 days'
+    """),
+                params,
+            )
+        )
+        .mappings()
+        .all()
+    )
+    grouped = {}
+    for item in company:
+        key = (item["object_type"], context_label(item["name"]).casefold())
+        if key not in grouped:
+            grouped[key] = {
+                **dict(item),
+                "name": context_label(item["name"]),
+                "object_ids": [],
+            }
+        grouped[key]["object_ids"].append(item["id"])
+
+    def project(row, items):
+        unique = {}
+        for item in items:
+            previous = unique.get(item["canonical_identity"])
+            if previous is None or item["changed_at"] > previous["changed_at"]:
+                unique[item["canonical_identity"]] = item
+        values = list(unique.values())
+        latest = max(values, key=lambda item: item["changed_at"], default=None)
+        safe = {
+            key: value
+            for key, value in row.items()
+            if key not in {"object_ids", "query_text"}
+        }
+        return {
+            **safe,
+            "recent_activity_count": len(values),
+            "relevant_development_count": len(values),
+            "new_count": sum(
+                item["changed_at"] >= datetime.now(UTC) - timedelta(days=1)
+                for item in values
+            ),
+            "open_brief_count": sum(item["decision"] for item in values),
+            "latest_activity_at": latest["changed_at"] if latest else None,
+            "latest_title": latest["title"] if latest else None,
+            "latest_signal_id": latest["signal_id"] if latest else None,
+            "monitoring_state": "ACTIVE" if values else "MONITORING",
+        }
+
+    company_result = [
+        project(
+            row,
+            [
+                item
+                for item in activity
+                if set(row["object_ids"]) & set(item["matched_object_ids"])
+            ],
+        )
+        for row in grouped.values()
+    ]
+    focus_result = []
+    for row in focus:
+        label = (row["query_text"] or row["label"]).strip().casefold()
+        items = [
+            item
+            for item in activity
+            if (row["entity_id"] is not None and row["entity_id"] in item["entity_ids"])
+            or (row["entity_id"] is None and label and label in item["match_text"])
+        ]
+        focus_result.append(project(dict(row), items))
+    return jsonable_encoder({"company": company_result, "focus": focus_result})
 
 
 @router.get("/alerts")
@@ -599,9 +1005,10 @@ async def list_alerts(
 ) -> list[dict[str, Any]]:
     require_permission(context, "READ_DECISION_BRIEFS")
     rows = (
-        await context.session.execute(
-            text(
-                """
+        (
+            await context.session.execute(
+                text(
+                    """
                 SELECT alert.*, brief.what_changed
                 FROM delivery.alerts AS alert
                 JOIN decision.briefs AS brief
@@ -609,10 +1016,16 @@ async def list_alerts(
                 WHERE alert.tenant_id = :tenant_id AND alert.user_id = :user_id
                 ORDER BY alert.created_at DESC LIMIT 100
                 """
-            ),
-            {"tenant_id": context.principal.tenant_id, "user_id": context.principal.user_id},
+                ),
+                {
+                    "tenant_id": context.principal.tenant_id,
+                    "user_id": context.principal.user_id,
+                },
+            )
         )
-    ).mappings().all()
+        .mappings()
+        .all()
+    )
     return jsonable_encoder([dict(row) for row in rows])
 
 
@@ -621,20 +1034,27 @@ async def read_alert(
     alert_id: UUID, context: RequestContext = Depends(get_request_context)
 ) -> dict[str, Any]:
     row = (
-        await context.session.execute(
-            text(
-                """
+        (
+            await context.session.execute(
+                text(
+                    """
                 UPDATE delivery.alerts SET read_at = COALESCE(read_at, NOW()),
                     status = CASE WHEN status = 'PENDING' THEN 'READ' ELSE status END,
                     updated_at = NOW()
                 WHERE id = :alert_id AND tenant_id = :tenant_id AND user_id = :user_id
                 RETURNING *
                 """
-            ),
-            {"alert_id": alert_id, "tenant_id": context.principal.tenant_id,
-             "user_id": context.principal.user_id},
+                ),
+                {
+                    "alert_id": alert_id,
+                    "tenant_id": context.principal.tenant_id,
+                    "user_id": context.principal.user_id,
+                },
+            )
         )
-    ).mappings().one_or_none()
+        .mappings()
+        .one_or_none()
+    )
     if row is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Alert not found")
     await context.session.commit()
@@ -642,18 +1062,37 @@ async def read_alert(
 
 
 @router.get("/alert-preferences")
-async def get_alert_preferences(context: RequestContext = Depends(get_request_context)) -> dict[str, Any]:
+async def get_alert_preferences(
+    context: RequestContext = Depends(get_request_context),
+) -> dict[str, Any]:
     require_permission(context, "CONFIGURE_ALERTS")
     row = (
-        await context.session.execute(
-            text("SELECT * FROM delivery.user_alert_preferences WHERE tenant_id = :tenant_id AND user_id = :user_id"),
-            {"tenant_id": context.principal.tenant_id, "user_id": context.principal.user_id},
+        (
+            await context.session.execute(
+                text(
+                    "SELECT * FROM delivery.user_alert_preferences WHERE tenant_id = :tenant_id AND user_id = :user_id"
+                ),
+                {
+                    "tenant_id": context.principal.tenant_id,
+                    "user_id": context.principal.user_id,
+                },
+            )
         )
-    ).mappings().one_or_none()
-    return jsonable_encoder(dict(row)) if row else {
-        "domain_codes": [], "urgency_bands": [], "delivery_channels": ["IN_APP"],
-        "minimum_relevance_band": None, "digest_frequency": "DAILY", "enabled": True,
-    }
+        .mappings()
+        .one_or_none()
+    )
+    return (
+        jsonable_encoder(dict(row))
+        if row
+        else {
+            "domain_codes": [],
+            "urgency_bands": [],
+            "delivery_channels": ["IN_APP"],
+            "minimum_relevance_band": None,
+            "digest_frequency": "DAILY",
+            "enabled": True,
+        }
+    )
 
 
 @router.put("/alert-preferences")
@@ -663,9 +1102,10 @@ async def put_alert_preferences(
 ) -> dict[str, Any]:
     require_permission(context, "CONFIGURE_ALERTS")
     row = (
-        await context.session.execute(
-            text(
-                """
+        (
+            await context.session.execute(
+                text(
+                    """
                 INSERT INTO delivery.user_alert_preferences (
                     tenant_id, user_id, domain_codes, urgency_bands, delivery_channels,
                     minimum_relevance_band, digest_frequency, enabled
@@ -682,24 +1122,41 @@ async def put_alert_preferences(
                 WHERE delivery.user_alert_preferences.tenant_id = EXCLUDED.tenant_id
                 RETURNING *
                 """
-            ),
-            {"tenant_id": context.principal.tenant_id, "user_id": context.principal.user_id,
-             **body.model_dump()},
+                ),
+                {
+                    "tenant_id": context.principal.tenant_id,
+                    "user_id": context.principal.user_id,
+                    **body.model_dump(),
+                },
+            )
         )
-    ).mappings().one()
+        .mappings()
+        .one()
+    )
     await context.session.commit()
     return jsonable_encoder(dict(row))
 
 
 @router.get("/digests")
-async def list_digests(context: RequestContext = Depends(get_request_context)) -> list[dict[str, Any]]:
+async def list_digests(
+    context: RequestContext = Depends(get_request_context),
+) -> list[dict[str, Any]]:
     require_permission(context, "READ_DECISION_BRIEFS")
     rows = (
-        await context.session.execute(
-            text("SELECT * FROM delivery.digests WHERE tenant_id = :tenant_id AND user_id = :user_id ORDER BY period_end DESC LIMIT 30"),
-            {"tenant_id": context.principal.tenant_id, "user_id": context.principal.user_id},
+        (
+            await context.session.execute(
+                text(
+                    "SELECT * FROM delivery.digests WHERE tenant_id = :tenant_id AND user_id = :user_id ORDER BY period_end DESC LIMIT 30"
+                ),
+                {
+                    "tenant_id": context.principal.tenant_id,
+                    "user_id": context.principal.user_id,
+                },
+            )
         )
-    ).mappings().all()
+        .mappings()
+        .all()
+    )
     return jsonable_encoder([dict(row) for row in rows])
 
 
@@ -711,19 +1168,23 @@ async def list_team_members(
 
     require_permission(context, "MANAGE_USERS")
     rows = (
-        await context.session.execute(
-            text(
-                """
+        (
+            await context.session.execute(
+                text(
+                    """
                 SELECT id, email, display_name, permission_role, status,
                        mfa_enabled, last_login_at, created_at
                 FROM auth.users
                 WHERE tenant_id = :tenant_id
                 ORDER BY status = 'ACTIVE' DESC, display_name NULLS LAST, email
                 """
-            ),
-            {"tenant_id": context.principal.tenant_id},
+                ),
+                {"tenant_id": context.principal.tenant_id},
+            )
         )
-    ).mappings().all()
+        .mappings()
+        .all()
+    )
     return jsonable_encoder([dict(row) for row in rows])
 
 
@@ -749,43 +1210,81 @@ async def integration_status(
                     ),
                     {"tenant_id": context.principal.tenant_id},
                 )
-            ).mappings().all()
+            )
+            .mappings()
+            .all()
         )
     return jsonable_encoder(
         {
             "plan_code": context.principal.plan_code,
             "api_enabled": context.principal.entitlements.get("api") is True,
-            "private_uploads": context.principal.entitlements.get("private_uploads", False),
+            "private_uploads": context.principal.entitlements.get(
+                "private_uploads", False
+            ),
             "api_keys": [dict(row) for row in keys],
         }
     )
 
 
 @router.get("/pilot")
-async def pilot_status(context: RequestContext = Depends(get_request_context)) -> dict[str, Any]:
+async def pilot_status(
+    context: RequestContext = Depends(get_request_context),
+) -> dict[str, Any]:
     engagement = (
-        await context.session.execute(
-            text("SELECT * FROM pilot.engagements WHERE tenant_id = :tenant_id"),
-            {"tenant_id": context.principal.tenant_id},
+        (
+            await context.session.execute(
+                text("SELECT * FROM pilot.engagements WHERE tenant_id = :tenant_id"),
+                {"tenant_id": context.principal.tenant_id},
+            )
         )
-    ).mappings().one_or_none()
+        .mappings()
+        .one_or_none()
+    )
     if engagement is None:
-        return {"status": "NOT_STARTED", "engagement": None, "checkpoints": [], "metrics": {}}
+        return {
+            "status": "NOT_STARTED",
+            "engagement": None,
+            "checkpoints": [],
+            "metrics": {},
+        }
     checkpoints = (
-        await context.session.execute(
-            text("SELECT * FROM pilot.checkpoints WHERE tenant_id = :tenant_id AND engagement_id = :engagement_id ORDER BY day_number"),
-            {"tenant_id": context.principal.tenant_id, "engagement_id": engagement["id"]},
+        (
+            await context.session.execute(
+                text(
+                    "SELECT * FROM pilot.checkpoints WHERE tenant_id = :tenant_id AND engagement_id = :engagement_id ORDER BY day_number"
+                ),
+                {
+                    "tenant_id": context.principal.tenant_id,
+                    "engagement_id": engagement["id"],
+                },
+            )
         )
-    ).mappings().all()
+        .mappings()
+        .all()
+    )
     metrics = (
-        await context.session.execute(
-            text("SELECT event_type, COUNT(*) AS count FROM pilot.events WHERE tenant_id = :tenant_id AND engagement_id = :engagement_id GROUP BY event_type"),
-            {"tenant_id": context.principal.tenant_id, "engagement_id": engagement["id"]},
+        (
+            await context.session.execute(
+                text(
+                    "SELECT event_type, COUNT(*) AS count FROM pilot.events WHERE tenant_id = :tenant_id AND engagement_id = :engagement_id GROUP BY event_type"
+                ),
+                {
+                    "tenant_id": context.principal.tenant_id,
+                    "engagement_id": engagement["id"],
+                },
+            )
         )
-    ).mappings().all()
-    return jsonable_encoder({"status": engagement["status"], "engagement": dict(engagement),
-                             "checkpoints": [dict(row) for row in checkpoints],
-                             "metrics": {row["event_type"]: row["count"] for row in metrics}})
+        .mappings()
+        .all()
+    )
+    return jsonable_encoder(
+        {
+            "status": engagement["status"],
+            "engagement": dict(engagement),
+            "checkpoints": [dict(row) for row in checkpoints],
+            "metrics": {row["event_type"]: row["count"] for row in metrics},
+        }
+    )
 
 
 @router.post("/pilot/start", status_code=status.HTTP_201_CREATED)
@@ -800,9 +1299,10 @@ async def start_pilot(
     require_permission(context, "CONFIGURE_COMPANY_CONTEXT")
     started = datetime.now(UTC)
     engagement = (
-        await context.session.execute(
-            text(
-                """
+        (
+            await context.session.execute(
+                text(
+                    """
                 INSERT INTO pilot.engagements (
                     tenant_id, status, started_at, ends_at, owner_user_id, cohort_code
                 ) VALUES (:tenant_id, 'ACTIVE', :started_at, :ends_at, :user_id, :cohort_code)
@@ -815,12 +1315,19 @@ async def start_pilot(
                     updated_at = NOW()
                 RETURNING *
                 """
-            ),
-            {"tenant_id": context.principal.tenant_id, "user_id": context.principal.user_id,
-             "started_at": started, "ends_at": started + timedelta(days=21),
-             "cohort_code": body.cohort_code},
+                ),
+                {
+                    "tenant_id": context.principal.tenant_id,
+                    "user_id": context.principal.user_id,
+                    "started_at": started,
+                    "ends_at": started + timedelta(days=21),
+                    "cohort_code": body.cohort_code,
+                },
+            )
         )
-    ).mappings().one()
+        .mappings()
+        .one()
+    )
     for day in (7, 14, 21):
         await context.session.execute(
             text(
@@ -830,8 +1337,12 @@ async def start_pilot(
                 ON CONFLICT (engagement_id, day_number) DO NOTHING
                 """
             ),
-            {"tenant_id": context.principal.tenant_id, "engagement_id": engagement["id"],
-             "day_number": day, "due_at": started + timedelta(days=day)},
+            {
+                "tenant_id": context.principal.tenant_id,
+                "engagement_id": engagement["id"],
+                "day_number": day,
+                "due_at": started + timedelta(days=day),
+            },
         )
     await context.session.commit()
     return jsonable_encoder(dict(engagement))
@@ -853,9 +1364,13 @@ async def record_pilot_event(
             ON CONFLICT (tenant_id, idempotency_key) DO NOTHING RETURNING id
             """
         ),
-        {"tenant_id": context.principal.tenant_id, "user_id": context.principal.user_id,
-         "event_type": body.event_type, "idempotency_key": body.idempotency_key,
-         "properties": json.dumps(body.properties)},
+        {
+            "tenant_id": context.principal.tenant_id,
+            "user_id": context.principal.user_id,
+            "event_type": body.event_type,
+            "idempotency_key": body.idempotency_key,
+            "properties": json.dumps(body.properties),
+        },
     )
     inserted = result.scalar_one_or_none()
     await context.session.commit()
@@ -870,19 +1385,27 @@ async def complete_checkpoint(
 ) -> dict[str, Any]:
     require_permission(context, "CONFIGURE_COMPANY_CONTEXT")
     row = (
-        await context.session.execute(
-            text(
-                """
+        (
+            await context.session.execute(
+                text(
+                    """
                 UPDATE pilot.checkpoints SET status = 'COMPLETED', completed_at = NOW(),
                     completed_by = :user_id, evidence = CAST(:evidence AS JSONB), updated_at = NOW()
                 WHERE tenant_id = :tenant_id AND day_number = :day_number
                 RETURNING *
                 """
-            ),
-            {"tenant_id": context.principal.tenant_id, "user_id": context.principal.user_id,
-             "day_number": day_number, "evidence": json.dumps(body.evidence)},
+                ),
+                {
+                    "tenant_id": context.principal.tenant_id,
+                    "user_id": context.principal.user_id,
+                    "day_number": day_number,
+                    "evidence": json.dumps(body.evidence),
+                },
+            )
         )
-    ).mappings().one_or_none()
+        .mappings()
+        .one_or_none()
+    )
     if row is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Pilot checkpoint not found")
     await context.session.commit()
@@ -891,73 +1414,24 @@ async def complete_checkpoint(
 
 @router.get("/relevant-monitoring")
 async def relevant_monitoring(
-    limit: int = Query(default=50, ge=1, le=100),
+    limit: int = Query(default=20, ge=1, le=100),
     context: RequestContext = Depends(get_request_context),
 ) -> list[dict[str, Any]]:
+    require_permission(context, "READ_INTELLIGENCE")
     rows = (
-        await context.session.execute(
-            text(
-                """
-                SELECT * FROM (
-                SELECT DISTINCT ON (signal.source_id,signal.source_url,signal.body_text_hash)
-                       monitoring.id,monitoring.user_id,monitoring.global_output_id,
-                       monitoring.signal_id,monitoring.company_context_version,
-                       monitoring.relevance_score,monitoring.matched_object_ids,
-                       monitoring.detected_at,monitoring.last_verified_at,
-                       COALESCE(NULLIF(BTRIM(signal.title),''),
-                                NULLIF(BTRIM(output.summary),''),
-                                monitoring.summary) AS display_title,
-                       monitoring.summary AS what_changed,
-                       signal.primary_domain,signal.subcategory_tags[1] AS event_type,
-                       signal.urgency_band,signal.confidence_band,
-                       signal.published_at,signal.source_url,
-                       source.source_name,
-                       jsonb_array_length(output.citations)>0 AS evidence_available,
-                       assessment.rationale AS relevance_trace,
-                       ARRAY(
-                         SELECT object.name FROM context.company_objects object
-                         WHERE object.tenant_id=monitoring.tenant_id
-                           AND object.id=ANY(monitoring.matched_object_ids)
-                           AND object.active
-                         ORDER BY object.importance DESC,object.name
-                       ) AS matched_company_objects,
-                       (
-                         SELECT entity.canonical_name
-                         FROM intelligence.signal_entities link
-                         JOIN intelligence.entities entity ON entity.id=link.entity_id
-                         WHERE link.signal_id=monitoring.signal_id
-                         ORDER BY link.resolution_confidence DESC,entity.canonical_name
-                         LIMIT 1
-                       ) AS primary_entity
-                FROM context.relevant_monitoring monitoring
-                JOIN context.company_profiles profile
-                  ON profile.tenant_id=monitoring.tenant_id
-                 AND profile.version=monitoring.company_context_version
-                JOIN pipeline.signals signal ON signal.id=monitoring.signal_id
-                JOIN intelligence.global_outputs output
-                  ON output.id=monitoring.global_output_id
-                JOIN config.sources source ON source.id=signal.source_id
-                LEFT JOIN decision.assessments assessment
-                  ON assessment.tenant_id=monitoring.tenant_id
-                 AND assessment.global_output_id=monitoring.global_output_id
-                 AND assessment.company_context_version=monitoring.company_context_version
-                WHERE monitoring.tenant_id=:tenant_id
-                  AND (monitoring.user_id=:user_id OR monitoring.user_id IS NULL)
-                  AND signal.dedup_status NOT IN ('EXACT_DUPLICATE','SEMANTIC_DUPLICATE')
-                ORDER BY signal.source_id,signal.source_url,signal.body_text_hash,
-                         (monitoring.user_id IS NOT NULL) DESC,
-                         monitoring.relevance_score DESC,monitoring.detected_at DESC,
-                         monitoring.id
-                ) visible_monitoring
-                ORDER BY (user_id IS NOT NULL) DESC,relevance_score DESC,detected_at DESC,id
-                LIMIT :limit
-                """
-            ),
-            {"tenant_id": context.principal.tenant_id,
-             "user_id": context.principal.user_id, "limit": limit},
+        (
+            await context.session.execute(
+                text(f"""
+        WITH visible AS ({visible_monitoring_sql()}) SELECT * FROM visible
+        ORDER BY relevance_score DESC,published_at DESC,id LIMIT :limit
+    """),
+                {**_value_params(context), "limit": limit},
+            )
         )
-    ).mappings().all()
-    return jsonable_encoder([dict(row) for row in rows])
+        .mappings()
+        .all()
+    )
+    return jsonable_encoder([with_freshness(row) for row in rows])
 
 
 @router.get("/briefing/changes")
@@ -965,6 +1439,7 @@ async def briefing_changes(
     since: datetime | None = Query(default=None),
     context: RequestContext = Depends(get_request_context),
 ) -> dict[str, Any]:
+    require_permission(context, "READ_INTELLIGENCE")
     if not get_settings().PHASE5_BRIEF_LIFECYCLE_ENABLED:
         return {
             "new_briefs": 0,
@@ -972,70 +1447,99 @@ async def briefing_changes(
             "new_evidence_items": 0,
             "new_relevant_monitoring": 0,
             "critical_count": 0,
-            "since": since or datetime.now(UTC),
+            "since": since,
+            "since_known": False,
             "enabled": False,
         }
-    if since is None:
-        since = (
+    # This GET is read-only. A view is acknowledged only after successful rendering.
+    window = (
+        (
             await context.session.execute(
-                text(
-                    """
-                    SELECT MAX(occurred_at) FROM feedback.product_events
-                    WHERE tenant_id=:tenant_id AND user_id=:user_id
-                      AND event_name='BRIEFING_VIEWED'
-                    """
-                ),
-                {"tenant_id": context.principal.tenant_id,
-                 "user_id": context.principal.user_id},
+                text("""
+        SELECT briefing_viewed_through,NOW() AS as_of FROM auth.users
+        WHERE tenant_id=:tenant_id AND id=:user_id
+    """),
+                _value_params(context),
             )
-        ).scalar_one_or_none()
-    since = since or datetime.now(UTC)
-    values = (
-        await context.session.execute(
-            text(
-                """
-                SELECT
-                  (SELECT COUNT(*) FROM decision.briefs brief
-                   WHERE brief.tenant_id=:tenant_id
-                     AND (brief.user_id=:user_id OR brief.user_id IS NULL)
-                     AND brief.first_published_at>:since) new_briefs,
-                  (SELECT COUNT(*) FROM decision.briefs brief
-                   WHERE brief.tenant_id=:tenant_id
-                     AND (brief.user_id=:user_id OR brief.user_id IS NULL)
-                     AND brief.first_published_at<=:since
-                     AND brief.last_material_change_at>:since) updated_briefs,
-                  (SELECT COUNT(*) FROM decision.brief_events event
-                   WHERE event.tenant_id=:tenant_id AND event.event_type='EVIDENCE_ADDED'
-                     AND event.created_at>:since) new_evidence_items,
-                  (SELECT COUNT(DISTINCT (signal.source_id,signal.source_url,signal.body_text_hash))
-                   FROM context.relevant_monitoring monitoring
-                   JOIN pipeline.signals signal ON signal.id=monitoring.signal_id
-                   JOIN context.company_profiles profile
-                     ON profile.tenant_id=monitoring.tenant_id
-                    AND profile.version=monitoring.company_context_version
-                   WHERE monitoring.tenant_id=:tenant_id
-                     AND signal.dedup_status NOT IN ('EXACT_DUPLICATE','SEMANTIC_DUPLICATE')
-                     AND (monitoring.user_id=:user_id OR monitoring.user_id IS NULL)
-                     AND monitoring.detected_at>:since) new_relevant_monitoring,
-                  (SELECT COUNT(*) FROM decision.briefs brief
-                   JOIN decision.assessments assessment ON assessment.id=brief.assessment_id
-                   WHERE brief.tenant_id=:tenant_id
-                     AND (brief.user_id=:user_id OR brief.user_id IS NULL)
-                     AND assessment.relevance_band='CRITICAL'
-                     AND brief.last_material_change_at>:since) critical_count
-                """
-            ),
-            {"tenant_id": context.principal.tenant_id,
-             "user_id": context.principal.user_id, "since": since},
         )
-    ).mappings().one()
+        .mappings()
+        .one()
+    )
+    since = since or window["briefing_viewed_through"]
+    if since is not None and since.tzinfo is None:
+        since = since.replace(tzinfo=UTC)
+    since_known = since is not None
+    since = since or window["as_of"]
+    row = (
+        (
+            await context.session.execute(
+                text(f"""
+        WITH {visible_ctes()}, open_briefs AS (
+          SELECT * FROM visible_briefs WHERE brief_status IN ('OPEN','WATCHING','ESCALATED')
+        )
+        SELECT
+          (SELECT COUNT(*) FROM open_briefs WHERE COALESCE(first_published_at,created_at)>:since
+             AND COALESCE(first_published_at,created_at)<=:as_of) new_briefs,
+          (SELECT COUNT(*) FROM open_briefs WHERE COALESCE(first_published_at,created_at)<=:since
+             AND last_material_change_at>:since AND last_material_change_at<=:as_of) updated_briefs,
+          (SELECT COUNT(DISTINCT (event.brief_id,event.created_at)) FROM decision.brief_events event
+           JOIN open_briefs brief ON brief.id=event.brief_id
+           WHERE event.tenant_id=:tenant_id AND event.event_type='EVIDENCE_ADDED'
+             AND event.created_at>:since AND event.created_at<=:as_of) new_evidence_items,
+          (SELECT COUNT(*) FROM visible_monitoring
+           WHERE COALESCE(last_material_change_at,detected_at)>:since
+             AND COALESCE(last_material_change_at,detected_at)<=:as_of) new_relevant_monitoring,
+          (SELECT COUNT(*) FROM open_briefs WHERE relevance_band='CRITICAL'
+             AND last_material_change_at>:since AND last_material_change_at<=:as_of) critical_count
+    """),
+                {**_value_params(context), "since": since, "as_of": window["as_of"]},
+            )
+        )
+        .mappings()
+        .one()
+    )
+    return jsonable_encoder(
+        {
+            **dict(row),
+            "since": since,
+            "since_known": since_known,
+            "as_of": window["as_of"],
+            "enabled": True,
+        }
+    )
+
+
+class BriefingViewedInput(BaseModel):
+    viewed_through: datetime
+
+
+@router.post("/briefing/viewed")
+async def acknowledge_briefing(
+    body: BriefingViewedInput, context: RequestContext = Depends(get_request_context)
+) -> dict[str, bool]:
+    require_permission(context, "READ_INTELLIGENCE")
+    through = body.viewed_through
+    if through.tzinfo is None:
+        through = through.replace(tzinfo=UTC)
+    if through > datetime.now(UTC):
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            "A future visit cannot be acknowledged",
+        )
+    await context.session.execute(
+        text("""
+        UPDATE auth.users SET briefing_viewed_through=GREATEST(briefing_viewed_through,:through)
+        WHERE tenant_id=:tenant_id AND id=:user_id
+    """),
+        {**_value_params(context), "through": through},
+    )
     if get_settings().PHASE5_PRODUCT_ANALYTICS_ENABLED:
         await _record_product_event(
             context,
-            ProductEventInput(event_name="BRIEFING_VIEWED", occurred_at=datetime.now(UTC)),
+            ProductEventInput(event_name="BRIEFING_VIEWED", occurred_at=through),
         )
-        await context.session.commit()
-    return jsonable_encoder({**dict(values), "since": since, "enabled": True})
+    await context.session.commit()
+    return {"acknowledged": True}
 
 
 @router.post("/events", status_code=status.HTTP_202_ACCEPTED)
@@ -1064,18 +1568,23 @@ async def _record_product_event(
             )
             """
         ),
-        {"tenant_id": context.principal.tenant_id,
-         "user_id": context.principal.user_id,
-         "event_name": body.event_name,
-         "object_type": body.object_type,
-         "object_id": body.object_id,
-         "metadata": json.dumps(body.metadata, separators=(",", ":")),
-         "occurred_at": body.occurred_at or datetime.now(UTC)},
+        {
+            "tenant_id": context.principal.tenant_id,
+            "user_id": context.principal.user_id,
+            "event_name": body.event_name,
+            "object_type": body.object_type,
+            "object_id": body.object_id,
+            "metadata": json.dumps(body.metadata, separators=(",", ":")),
+            "occurred_at": body.occurred_at or datetime.now(UTC),
+        },
     )
 
 
 async def _audit(
-    context: RequestContext, event_type: str, entity_type: str, entity_id: UUID,
+    context: RequestContext,
+    event_type: str,
+    entity_type: str,
+    entity_id: UUID,
     event_data: dict[str, Any],
 ) -> None:
     await context.session.execute(
@@ -1090,7 +1599,12 @@ async def _audit(
             )
             """
         ),
-        {"tenant_id": context.principal.tenant_id, "user_id": context.principal.user_id,
-         "event_type": event_type, "entity_type": entity_type, "entity_id": entity_id,
-         "event_data": json.dumps(event_data)},
+        {
+            "tenant_id": context.principal.tenant_id,
+            "user_id": context.principal.user_id,
+            "event_type": event_type,
+            "entity_type": entity_type,
+            "entity_id": entity_id,
+            "event_data": json.dumps(event_data),
+        },
     )

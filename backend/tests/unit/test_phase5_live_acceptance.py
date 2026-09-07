@@ -127,8 +127,8 @@ def test_cil_records_provider_and_binds_analytics_boolean_explicitly() -> None:
 
 
 def test_monitoring_contract_requires_identity_evidence_and_relevance() -> None:
-    product = (ROOT / "backend/app/api/v1/product.py").read_text()
-    activation = (ROOT / "backend/app/workers/tasks/pilot_activation.py").read_text()
+    product = (ROOT / "backend/app/context/projections.py").read_text()
+    activation = (ROOT / "backend/app/intelligence/freshness.py").read_text()
 
     for required in (
         "display_title",
@@ -137,7 +137,7 @@ def test_monitoring_contract_requires_identity_evidence_and_relevance() -> None:
         "relevance_trace",
     ):
         assert required in product
-    assert "jsonb_array_length(output.citations)>0" in activation
+    assert "jsonb_array_elements({output}.citations)" in activation
     assert "matched_object_ids" in activation
 
 

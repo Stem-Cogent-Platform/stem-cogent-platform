@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime
 from typing import Any
 from uuid import NAMESPACE_URL, UUID, uuid5
@@ -11,6 +12,9 @@ from sqlalchemy import text
 from app.core.config import get_settings
 from app.core.database import get_session
 from app.context.completeness import company_context_status
+from app.context.personalisation import prepare_request
+from app.context.readiness import value_counts
+from app.intelligence.freshness import candidates_sql, matched_sql
 from app.workers.celery_app import celery_app
 from app.workers.events import CeleryEventPublisher
 from app.workers.runtime import run_async_worker
@@ -27,291 +31,381 @@ def _decision_payload(output: dict[str, Any], tenant_id: UUID) -> dict[str, str]
 
 
 async def run_activation(payload: dict[str, Any]) -> str:
-    tenant_id = UUID(payload["tenant_id"])
-    run_id = UUID(payload["activation_run_id"])
-    context_version = int(payload["company_context_version"])
-    lookback_days = int(payload["lookback_days"])
-    if not 30 <= lookback_days <= 60:
+    tenant_id, run_id = UUID(payload["tenant_id"]), UUID(payload["activation_run_id"])
+    version, lookback = (
+        int(payload["company_context_version"]),
+        int(payload["lookback_days"]),
+    )
+    if not 30 <= lookback <= 60:
         raise ValueError("Activation lookback must be between 30 and 60 days")
-    started_at = datetime.now(UTC)
-    outputs: list[dict[str, Any]] = []
+    started = datetime.now(UTC)
     async for session in get_session():
         await _tenant(session, tenant_id)
-        updated = await session.execute(
-            text(
-                """
-                UPDATE context.activation_runs SET status='RUNNING',started_at=:started_at,
-                    error_summary=NULL
-                WHERE id=:run_id AND tenant_id=:tenant_id AND status IN ('QUEUED','FAILED')
-                RETURNING id
-                """
-            ),
-            {"run_id": run_id, "tenant_id": tenant_id, "started_at": started_at},
+        claimed = await session.execute(
+            text("""
+            UPDATE context.activation_runs SET status='RUNNING',started_at=:started,error_summary=NULL
+            WHERE id=:run_id AND tenant_id=:tenant_id
+              AND (status IN ('QUEUED','FAILED') OR
+                   (status='RUNNING' AND started_at<NOW()-INTERVAL '5 minutes'))
+            RETURNING id
+        """),
+            {"started": started, "run_id": run_id, "tenant_id": tenant_id},
         )
-        if updated.scalar_one_or_none() is None:
-            existing = (
-                await session.execute(
-                    text("SELECT status FROM context.activation_runs WHERE id=:run_id"),
-                    {"run_id": run_id},
-                )
-            ).scalar_one_or_none()
-            return f"UNCHANGED:{existing or 'MISSING'}"
+        if claimed.scalar_one_or_none() is None:
+            return "UNCHANGED"
         profile = (
-            await session.execute(
-                text("SELECT * FROM context.company_profiles WHERE tenant_id=:tenant_id"),
-                {"tenant_id": tenant_id},
-            )
-        ).mappings().one_or_none()
-        if profile is None or profile["version"] != context_version:
-            await _finish_failed(session, run_id, tenant_id, "Company Context version changed")
-            return "FAILED:CONTEXT_VERSION_CHANGED"
-        context_objects = (
-            await session.execute(
-                text(
-                    "SELECT * FROM context.company_objects "
-                    "WHERE tenant_id=:tenant_id AND active"
-                ),
-                {"tenant_id": tenant_id},
-            )
-        ).mappings().all()
-        if not company_context_status(
-            dict(profile), [dict(item) for item in context_objects]
-        )["complete"]:
-            await _finish_failed(session, run_id, tenant_id, "Company Context is incomplete")
-            return "FAILED:CONTEXT_INCOMPLETE"
-        outputs = [
-            dict(row)
-            for row in (
-                await session.execute(
-                    text(
-                        """
-                        SELECT DISTINCT ON (
-                            signal.source_id,signal.source_url,signal.body_text_hash
-                        ) output.id AS global_output_id,output.signal_id
-                        FROM intelligence.global_outputs output
-                        JOIN pipeline.signals signal ON signal.id=output.signal_id
-                        WHERE output.tenant_id IS NULL AND output.synthesis_status='COMPLETED'
-                          AND signal.tenant_id IS NULL
-                          AND signal.dedup_status NOT IN ('EXACT_DUPLICATE','SEMANTIC_DUPLICATE')
-                          AND COALESCE(signal.published_at,signal.detected_at)
-                              >= NOW() - make_interval(days => :lookback_days)
-                          AND COALESCE(signal.published_at,signal.detected_at) <= NOW()
-                        ORDER BY signal.source_id,signal.source_url,signal.body_text_hash,
-                                 output.created_at,output.id
-                        """
-                    ),
-                    {"lookback_days": lookback_days},
-                )
-            )
-            .mappings()
-            .all()
-        ]
-        await session.commit()
-        break
-    try:
-        for output in outputs:
-            await run_decision_briefs(
-                {
-                    "event_id": str(
-                        uuid5(
-                            NAMESPACE_URL,
-                            f"ACTIVATION:{run_id}:{output['global_output_id']}",
-                        )
-                    ),
-                    "event_type": "INTELLIGENCE_SYNTHESIZED",
-                    "event_version": "2.0",
-                    "origin_service": "pilot-activation-worker",
-                    "origin_timestamp": datetime.now(UTC).isoformat(),
-                    "routing_key": "pipeline.synthesized",
-                    "payload": _decision_payload(output, tenant_id),
-                }
-            )
-    except Exception as exc:
-        async for session in get_session():
-            await _tenant(session, tenant_id)
-            await _finish_failed(session, run_id, tenant_id, type(exc).__name__)
-            break
-        raise
-    async for session in get_session():
-        await _tenant(session, tenant_id)
-        counts = (
             (
                 await session.execute(
                     text(
-                        """
-                    SELECT
-                      (SELECT COUNT(*) FROM decision.assessments
-                       WHERE tenant_id=:tenant_id AND company_context_version=:version
-                         AND updated_at>=:started_at) assessments,
-                      (SELECT COUNT(*) FROM decision.briefs brief
-                       JOIN decision.assessments assessment ON assessment.id=brief.assessment_id
-                       WHERE brief.tenant_id=:tenant_id AND brief.user_id IS NULL
-                         AND assessment.company_context_version=:version
-                         AND brief.updated_at>=:started_at) company_briefs,
-                      (SELECT COUNT(*) FROM context.relevant_monitoring
-                       WHERE tenant_id=:tenant_id AND user_id IS NULL
-                         AND company_context_version=:version
-                         AND last_verified_at>=:started_at) monitoring
-                    """
+                        "SELECT * FROM context.company_profiles WHERE tenant_id=:tenant_id"
                     ),
-                    {
-                        "tenant_id": tenant_id,
-                        "version": context_version,
-                        "started_at": started_at,
-                    },
+                    {"tenant_id": tenant_id},
                 )
             )
             .mappings()
-            .one()
+            .one_or_none()
         )
-        final_status = "COMPLETED"
-        await session.execute(
-            text(
-                """
-                UPDATE context.activation_runs SET status=:status,
-                    global_outputs_scanned=:scanned,assessments_created=:assessments,
-                    company_briefs_created=:briefs,relevant_monitoring_count=:monitoring,
-                    completed_at=NOW()
-                WHERE id=:run_id AND tenant_id=:tenant_id
-                """
-            ),
-            {
-                "status": final_status,
-                "scanned": len(outputs),
-                "assessments": counts["assessments"],
-                "briefs": counts["company_briefs"],
-                "monitoring": counts["monitoring"],
-                "run_id": run_id,
-                "tenant_id": tenant_id,
-            },
-        )
-        await session.execute(
-            text(
-                """
-                INSERT INTO audit.events (
-                    tenant_id,event_type,entity_type,entity_id,event_data,occurred_at
-                ) VALUES (
-                    :tenant_id,'ACTIVATION_RUN_COMPLETED','ACTIVATION_RUN',:run_id,
-                    jsonb_build_object(
-                        'global_outputs_scanned',CAST(:scanned AS INTEGER)
-                    ),NOW()
-                )
-                """
-            ),
-            {"tenant_id": tenant_id, "run_id": run_id, "scanned": len(outputs)},
-        )
-        await session.commit()
-        await _publish_completed(run_id, tenant_id, counts)
-        return f"COMPLETED:{len(outputs)}"
-    raise RuntimeError("Database session was not available")
-
-
-async def personalise_user(payload: dict[str, Any]) -> str:
-    tenant_id = UUID(payload["tenant_id"])
-    user_id = UUID(payload["user_id"])
-    outputs: list[dict[str, Any]] = []
-    async for session in get_session():
-        await _tenant(session, tenant_id)
-        outputs = [
-            dict(row)
-            for row in (
+        objects = (
+            (
                 await session.execute(
                     text(
-                        """
-                        SELECT DISTINCT assessment.global_output_id,assessment.signal_id
-                        FROM decision.assessments assessment
-                        JOIN context.company_profiles profile
-                          ON profile.tenant_id=assessment.tenant_id
-                         AND profile.version=assessment.company_context_version
-                        WHERE assessment.tenant_id=:tenant_id
-                        ORDER BY assessment.global_output_id
-                        """
+                        "SELECT * FROM context.company_objects WHERE tenant_id=:tenant_id AND active"
                     ),
                     {"tenant_id": tenant_id},
                 )
             )
             .mappings()
             .all()
-        ]
-        break
-    for output in outputs:
-        await run_decision_briefs(
-            {
-                "event_id": str(
-                    uuid5(
-                        NAMESPACE_URL,
-                        f"PERSONALISE:{user_id}:{output['global_output_id']}",
-                    )
-                ),
-                "event_type": "INTELLIGENCE_SYNTHESIZED",
-                "event_version": "2.0",
-                "origin_service": "pilot-personalisation-worker",
-                "origin_timestamp": datetime.now(UTC).isoformat(),
-                "routing_key": "pipeline.synthesized",
-                "payload": _decision_payload(output, tenant_id),
-            }
         )
-    await _maybe_start_trial(tenant_id, user_id)
-    return f"PERSONALISED:{len(outputs)}"
+        if not profile or profile["version"] != version:
+            await _finish_failed(session, run_id, tenant_id, "CONTEXT_VERSION_CHANGED")
+            return "FAILED:CONTEXT_VERSION_CHANGED"
+        if not company_context_status(dict(profile), [dict(o) for o in objects])[
+            "complete"
+        ]:
+            await _finish_failed(session, run_id, tenant_id, "CONTEXT_INCOMPLETE")
+            return "FAILED:CONTEXT_INCOMPLETE"
+        candidates = (
+            (
+                await session.execute(
+                    text(candidates_sql()),
+                    {"tenant_id": tenant_id, "lookback_days": lookback},
+                )
+            )
+            .mappings()
+            .all()
+        )
+        await session.commit()
+        break
+    else:
+        raise RuntimeError("Database session was not available")
+    eligible = [
+        dict(o) for o in candidates if o["freshness_eligible"] and o["meaningful"]
+    ]
+    fresh = [o for o in candidates if o["freshness_eligible"]]
+    diagnostics = {
+        "scanned": len(candidates),
+        "freshness_eligible": len(fresh),
+        "stale_excluded": sum(bool(o["stale"]) for o in candidates),
+        "date_uncertain": sum(
+            not o["stale"] and not o["freshness_eligible"] for o in candidates
+        ),
+        "quality_excluded": sum(not o["meaningful"] for o in fresh),
+        "newest_eligible_intelligence": max(
+            (o["published_at"] for o in eligible), default=None
+        ),
+        "oldest_eligible_intelligence": min(
+            (o["published_at"] for o in eligible), default=None
+        ),
+    }
+    try:
+        for output in eligible:
+            result = await run_decision_briefs(
+                _evaluation_event(
+                    output, tenant_id, f"ACTIVATION:{run_id}", version, lookback
+                )
+            )
+            if result == "SKIPPED:CONTEXT_CHANGED":
+                raise RuntimeError("CONTEXT_VERSION_CHANGED")
+        async for session in get_session():
+            await _tenant(session, tenant_id)
+            counts = await value_counts(session, tenant_id, version, lookback)
+            measured = (
+                (
+                    await session.execute(
+                        text(f"""
+                SELECT COUNT(*) assessments,
+                  COUNT(*) FILTER (WHERE NOT {matched_sql()}) no_context_match
+                FROM decision.assessments assessment
+                WHERE tenant_id=:tenant_id AND company_context_version=:version AND updated_at>=:started
+            """),
+                        {
+                            "tenant_id": tenant_id,
+                            "version": version,
+                            "started": started,
+                        },
+                    )
+                )
+                .mappings()
+                .one()
+            )
+            diagnostics.update(
+                dict(measured),
+                meaningful_monitoring=counts["meaningful_monitoring_count"],
+                briefs=counts["company_briefs"],
+            )
+            completed = (
+                await session.execute(
+                    text("""
+                UPDATE context.activation_runs SET status='COMPLETED',completed_at=NOW(),
+                  global_outputs_scanned=:scanned,assessments_created=:assessments,
+                  company_briefs_created=:briefs,relevant_monitoring_count=:monitoring,
+                  diagnostics=CAST(:diagnostics AS JSONB)
+                WHERE id=:run_id AND tenant_id=:tenant_id AND context_version=(
+                  SELECT version FROM context.company_profiles WHERE tenant_id=:tenant_id)
+                RETURNING id
+            """),
+                    {
+                        "run_id": run_id,
+                        "tenant_id": tenant_id,
+                        "scanned": len(candidates),
+                        "assessments": measured["assessments"],
+                        "briefs": counts["company_briefs"],
+                        "monitoring": counts["meaningful_monitoring_count"],
+                        "diagnostics": json.dumps(diagnostics, default=str),
+                    },
+                )
+            ).scalar_one_or_none()
+            if completed is None:
+                await _finish_failed(
+                    session, run_id, tenant_id, "CONTEXT_VERSION_CHANGED"
+                )
+                return "FAILED:CONTEXT_VERSION_CHANGED"
+            await session.execute(
+                text("""
+                INSERT INTO audit.events(tenant_id,event_type,entity_type,entity_id,event_data,occurred_at)
+                VALUES (:tenant_id,'ACTIVATION_RUN_COMPLETED','ACTIVATION_RUN',:run_id,
+                  jsonb_build_object('global_outputs_scanned',CAST(:scanned AS INTEGER)),NOW())
+            """),
+                {"tenant_id": tenant_id, "run_id": run_id, "scanned": len(candidates)},
+            )
+            await session.commit()
+            await _publish_completed(
+                run_id,
+                tenant_id,
+                {
+                    "assessments": measured["assessments"],
+                    "company_briefs": counts["company_briefs"],
+                    "monitoring": counts["meaningful_monitoring_count"],
+                },
+            )
+            return f"COMPLETED:{len(eligible)}"
+    except Exception as exc:
+        async for session in get_session():
+            await _tenant(session, tenant_id)
+            await _finish_failed(session, run_id, tenant_id, type(exc).__name__)
+            break
+        raise
+    raise RuntimeError("Database session was not available")
+
+
+def _evaluation_event(output, tenant_id, identity, version, lookback, user_id=None):
+    return {
+        "event_id": str(
+            uuid5(NAMESPACE_URL, f"{identity}:{output['global_output_id']}")
+        ),
+        "event_type": "INTELLIGENCE_SYNTHESIZED",
+        "event_version": "2.0",
+        "origin_service": "pilot-activation-worker",
+        "origin_timestamp": datetime.now(UTC).isoformat(),
+        "routing_key": "pipeline.synthesized",
+        "payload": {
+            **_decision_payload(output, tenant_id),
+            "company_context_version": version,
+            "lookback_days": lookback,
+            **({"user_id": str(user_id)} if user_id else {}),
+        },
+    }
+
+
+async def personalise_user(payload: dict[str, Any]) -> str:
+    tenant_id, user_id = UUID(payload["tenant_id"]), UUID(payload["user_id"])
+    async for session in get_session():
+        await _tenant(session, tenant_id)
+        if not payload.get("request_id"):
+            # Compatibility with already queued Phase 5 events.
+            prepared_payload = await prepare_request(session, tenant_id, user_id)
+            if prepared_payload is None:
+                return "SKIPPED:ONBOARDING_INCOMPLETE"
+            payload = prepared_payload
+        request_id = UUID(payload["request_id"])
+        row = (
+            (
+                await session.execute(
+                    text("""
+            UPDATE context.personalisation_state state SET status='RUNNING',started_at=NOW(),error_code=NULL
+            WHERE state.tenant_id=:tenant_id AND state.user_id=:user_id AND state.request_id=:request_id
+              AND (state.status IN ('QUEUED','FAILED') OR
+                   (state.status='RUNNING' AND state.started_at<NOW()-INTERVAL '5 minutes'))
+              AND state.context_version=(SELECT version FROM context.company_profiles WHERE tenant_id=:tenant_id)
+              AND state.lens_version=(SELECT version FROM context.user_decision_lenses WHERE user_id=:user_id AND active)
+            RETURNING state.context_version,state.lens_version
+        """),
+                    {
+                        "tenant_id": tenant_id,
+                        "user_id": user_id,
+                        "request_id": request_id,
+                    },
+                )
+            )
+            .mappings()
+            .one_or_none()
+        )
+        if row is None:
+            return "SKIPPED:SUPERSEDED"
+        version = row["context_version"]
+        lookback = (
+            await session.execute(
+                text("""
+            SELECT lookback_days FROM context.activation_runs WHERE tenant_id=:tenant_id
+            ORDER BY created_at DESC LIMIT 1
+        """),
+                {"tenant_id": tenant_id},
+            )
+        ).scalar_one_or_none() or get_settings().PILOT_ACTIVATION_LOOKBACK_DAYS
+        candidates = (
+            (
+                await session.execute(
+                    text(candidates_sql()),
+                    {"tenant_id": tenant_id, "lookback_days": lookback},
+                )
+            )
+            .mappings()
+            .all()
+        )
+        outputs = [
+            dict(o) for o in candidates if o["freshness_eligible"] and o["meaningful"]
+        ]
+        await session.commit()
+        break
+    else:
+        raise RuntimeError("Database session was not available")
+    try:
+        for output in outputs:
+            result = await run_decision_briefs(
+                _evaluation_event(
+                    output,
+                    tenant_id,
+                    f"PERSONALISE:{request_id}",
+                    version,
+                    lookback,
+                    user_id,
+                )
+            )
+            if result == "SKIPPED:CONTEXT_CHANGED":
+                raise RuntimeError("CONTEXT_VERSION_CHANGED")
+        async for session in get_session():
+            await _tenant(session, tenant_id)
+            completed = (
+                await session.execute(
+                    text("""
+                UPDATE context.personalisation_state state SET status='COMPLETED',completed_at=NOW(),
+                    outputs_evaluated=:evaluated
+                WHERE state.tenant_id=:tenant_id AND state.user_id=:user_id AND state.request_id=:request_id
+                  AND state.context_version=(SELECT version FROM context.company_profiles WHERE tenant_id=:tenant_id)
+                  AND state.lens_version=(SELECT version FROM context.user_decision_lenses WHERE user_id=:user_id AND active)
+                RETURNING user_id
+            """),
+                    {
+                        "tenant_id": tenant_id,
+                        "user_id": user_id,
+                        "request_id": request_id,
+                        "evaluated": len(outputs),
+                    },
+                )
+            ).scalar_one_or_none()
+            await session.commit()
+            if completed is None:
+                return "SKIPPED:SUPERSEDED"
+            break
+        await _maybe_start_trial(tenant_id, user_id)
+        from app.workers.tasks.decision import _publish_monitoring
+
+        await _publish_monitoring(tenant_id)
+        return f"PERSONALISED:{len(outputs)}"
+    except Exception as exc:
+        async for session in get_session():
+            await _tenant(session, tenant_id)
+            await session.execute(
+                text("""
+                UPDATE context.personalisation_state SET status='FAILED',error_code=:error
+                WHERE tenant_id=:tenant_id AND user_id=:user_id AND request_id=:request_id
+            """),
+                {
+                    "tenant_id": tenant_id,
+                    "user_id": user_id,
+                    "request_id": request_id,
+                    "error": type(exc).__name__,
+                },
+            )
+            await session.commit()
+            break
+        raise
 
 
 async def _maybe_start_trial(tenant_id: UUID, user_id: UUID) -> None:
     async for session in get_session():
         await _tenant(session, tenant_id)
-        ready = (
+        profile = (
             (
                 await session.execute(
                     text(
-                        """
-                    SELECT
-                      EXISTS(SELECT 1 FROM auth.tenant_invitations
-                             WHERE tenant_id=:tenant_id AND status='ACCEPTED') accepted,
-                      EXISTS(SELECT 1 FROM context.user_decision_lenses
-                             WHERE tenant_id=:tenant_id AND user_id=:user_id AND active) lens,
-                      EXISTS(SELECT 1 FROM context.focus_areas
-                             WHERE tenant_id=:tenant_id AND user_id=:user_id AND active) focus,
-                      ((SELECT COUNT(*) FROM decision.briefs brief
-                        JOIN decision.assessments a ON a.id=brief.assessment_id
-                        JOIN context.company_profiles profile ON profile.tenant_id=brief.tenant_id
-                         AND profile.version=a.company_context_version
-                        WHERE brief.tenant_id=:tenant_id AND brief.user_id IS NULL) > 0
-                       OR (SELECT COUNT(DISTINCT (signal.source_id,signal.source_url,signal.body_text_hash))
-                           FROM context.relevant_monitoring monitoring
-                           JOIN context.company_profiles profile
-                             ON profile.tenant_id=monitoring.tenant_id
-                            AND profile.version=monitoring.company_context_version
-                           JOIN pipeline.signals signal ON signal.id=monitoring.signal_id
-                           JOIN intelligence.global_outputs output
-                             ON output.id=monitoring.global_output_id
-                           JOIN decision.assessments assessment
-                             ON assessment.tenant_id=monitoring.tenant_id
-                            AND assessment.global_output_id=monitoring.global_output_id
-                            AND assessment.company_context_version=
-                                monitoring.company_context_version
-                           WHERE monitoring.tenant_id=:tenant_id
-                             AND monitoring.user_id IS NULL
-                             AND signal.dedup_status NOT IN ('EXACT_DUPLICATE','SEMANTIC_DUPLICATE')
-                             AND COALESCE(NULLIF(BTRIM(signal.title),''),
-                                          NULLIF(BTRIM(output.summary),'')) IS NOT NULL
-                             AND signal.primary_domain IS NOT NULL
-                             AND NULLIF(signal.subcategory_tags[1],'') IS NOT NULL
-                             AND jsonb_array_length(output.citations)>0
-                             AND (
-                               cardinality(monitoring.matched_object_ids)>0
-                               OR jsonb_array_length(COALESCE(
-                                    assessment.rationale->'matched_rule_codes','[]'::JSONB
-                                  ))>0
-                             )) >= 3
-                       OR EXISTS(SELECT 1 FROM pilot.engagements
-                                 WHERE tenant_id=:tenant_id
-                                   AND readiness_override_note IS NOT NULL)) first_value
-                    """
+                        "SELECT version FROM context.company_profiles WHERE tenant_id=:tenant_id"
                     ),
-                    {"tenant_id": tenant_id, "user_id": user_id},
+                    {"tenant_id": tenant_id},
+                )
+            )
+            .mappings()
+            .one_or_none()
+        )
+        if profile is None:
+            return
+        lookback = (
+            await session.execute(
+                text(
+                    "SELECT lookback_days FROM context.activation_runs WHERE tenant_id=:tenant_id ORDER BY created_at DESC LIMIT 1"
+                ),
+                {"tenant_id": tenant_id},
+            )
+        ).scalar_one_or_none() or get_settings().PILOT_ACTIVATION_LOOKBACK_DAYS
+        counts = await value_counts(session, tenant_id, profile["version"], lookback)
+        ready = dict(
+            (
+                await session.execute(
+                    text("""
+            SELECT
+              EXISTS(SELECT 1 FROM auth.tenant_invitations WHERE tenant_id=:tenant_id AND status='ACCEPTED') accepted,
+              EXISTS(SELECT 1 FROM auth.users WHERE tenant_id=:tenant_id AND id=:user_id AND onboarding_completed_at IS NOT NULL) onboarded,
+              EXISTS(SELECT 1 FROM context.personalisation_state WHERE tenant_id=:tenant_id AND user_id=:user_id
+                     AND context_version=:version AND status='COMPLETED') personalised,
+              EXISTS(SELECT 1 FROM pilot.engagements WHERE tenant_id=:tenant_id
+                     AND length(BTRIM(readiness_override_note))>=20) exception
+        """),
+                    {
+                        "tenant_id": tenant_id,
+                        "user_id": user_id,
+                        "version": profile["version"],
+                    },
                 )
             )
             .mappings()
             .one()
+        )
+        exception = ready.pop("exception")
+        ready["first_value"] = (
+            counts["company_briefs"] >= 1
+            or counts["meaningful_monitoring_count"] >= 3
+            or exception
         )
         if not all(ready.values()):
             return

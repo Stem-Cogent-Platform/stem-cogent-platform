@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import get_settings
 from app.core.database import get_session
 from app.core.redis import get_redis_client
+from app.context.session_scope import tenant_scope
 from app.decision import (
     AssessmentInput,
     ContextObject,
@@ -27,6 +28,7 @@ from app.decision import (
     grounded_format_brief,
 )
 from app.intelligence.decision_paths import generate_decision_paths
+from app.intelligence.freshness import current_sql, meaningful_sql
 from app.workers.celery_app import celery_app
 from app.workers.events import CeleryEventPublisher
 from app.workers.runtime import run_async_worker
@@ -54,10 +56,24 @@ async def run_decision_briefs(event: dict[str, Any]) -> str:
         tenant_ids = await _applicable_tenants(session, private_tenant)
         for tenant_id in tenant_ids:
             await _set_tenant(session, tenant_id)
-            package = await _load_package(session, output_id, signal_id, tenant_id)
+            package = await _load_package(
+                session,
+                output_id,
+                signal_id,
+                tenant_id,
+                event["payload"].get(
+                    "lookback_days", get_settings().PILOT_ACTIVATION_LOOKBACK_DAYS
+                ),
+            )
             if package is None:
                 await session.rollback()
                 continue
+            expected_version = event["payload"].get("company_context_version")
+            if (
+                expected_version
+                and package["company_context_version"] != expected_version
+            ):
+                return "SKIPPED:CONTEXT_CHANGED"
             assessment = assess_relevance(_assessment_input(package, rules))
             assessment_id = await _persist_assessment(
                 session, tenant_id, output_id, signal_id, package, assessment
@@ -66,7 +82,13 @@ async def run_decision_briefs(event: dict[str, Any]) -> str:
             if not assessment.decision_required:
                 if assessment.relevance_score >= _MONITORING_THRESHOLD:
                     await _persist_monitoring(
-                        session, tenant_id, output_id, signal_id, None, package, assessment
+                        session,
+                        tenant_id,
+                        output_id,
+                        signal_id,
+                        None,
+                        package,
+                        assessment,
                     )
                     lenses, focus_by_user = await _load_lenses(session, tenant_id)
                     for user_id, lens in lenses:
@@ -95,7 +117,9 @@ async def run_decision_briefs(event: dict[str, Any]) -> str:
                 else:
                     await session.commit()
                 continue
-            company_narrative = format_brief(package["summary"] or package["title"], assessment)
+            company_narrative = format_brief(
+                package["summary"] or package["title"], assessment
+            )
             company_write = await _persist_brief(
                 session,
                 tenant_id,
@@ -187,36 +211,45 @@ async def _applicable_tenants(
 ) -> tuple[UUID, ...]:
     if private_tenant:
         return (private_tenant,)
+    # Worker-only inventory read. Reset elevation before evaluating any tenant.
+    await session.execute(text("SELECT set_config('app.system_admin','true',true)"))
     rows = (
-        await session.execute(
-            text(
-                """
+        (
+            await session.execute(
+                text(
+                    """
                 SELECT tenant.id
                 FROM auth.tenants AS tenant
                 JOIN context.company_profiles AS profile ON profile.tenant_id = tenant.id
                 WHERE tenant.status IN ('TRIAL', 'ACTIVE')
                 ORDER BY tenant.id
                 """
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
+    await session.execute(text("SELECT set_config('app.system_admin','false',true)"))
     return tuple(rows)
 
 
 async def _set_tenant(session: AsyncSession, tenant_id: UUID) -> None:
-    await session.execute(
-        text("SELECT set_config('app.current_tenant_id', :tenant_id, true)"),
-        {"tenant_id": str(tenant_id)},
-    )
+    await tenant_scope(session, tenant_id)
 
 
 async def _load_package(
-    session: AsyncSession, output_id: UUID, signal_id: UUID, tenant_id: UUID
+    session: AsyncSession,
+    output_id: UUID,
+    signal_id: UUID,
+    tenant_id: UUID,
+    lookback_days: int = 45,
 ) -> dict[str, Any] | None:
     row = (
-        await session.execute(
-            text(
-                """
+        (
+            await session.execute(
+                text(
+                    f"""
                 SELECT output.summary, output.key_developments,
                        output.global_implication, output.citations,
                        signal.title, signal.body_text, signal.primary_domain,
@@ -236,29 +269,42 @@ async def _load_package(
                 WHERE output.id = :output_id AND output.signal_id = :signal_id
                   AND (output.tenant_id IS NULL OR output.tenant_id = :tenant_id)
                   AND (signal.tenant_id IS NULL OR signal.tenant_id = :tenant_id)
+                  AND {current_sql()} AND {meaningful_sql()}
                 GROUP BY output.id, signal.id, signal.created_at, profile.id
                 ORDER BY signal.created_at DESC
                 LIMIT 1
                 """
-            ),
-            {"output_id": output_id, "signal_id": signal_id, "tenant_id": tenant_id},
+                ),
+                {
+                    "output_id": output_id,
+                    "signal_id": signal_id,
+                    "tenant_id": tenant_id,
+                    "lookback_days": lookback_days,
+                },
+            )
         )
-    ).mappings().one_or_none()
+        .mappings()
+        .one_or_none()
+    )
     if row is None:
         return None
     objects = (
-        await session.execute(
-            text(
-                """
+        (
+            await session.execute(
+                text(
+                    """
                 SELECT id, object_type, name, entity_id, importance
                 FROM context.company_objects
                 WHERE tenant_id = :tenant_id AND active
                 ORDER BY importance DESC, id
                 """
-            ),
-            {"tenant_id": tenant_id},
+                ),
+                {"tenant_id": tenant_id},
+            )
         )
-    ).mappings().all()
+        .mappings()
+        .all()
+    )
     evidence_text = "\n".join(
         value
         for value in (
@@ -276,7 +322,11 @@ async def _load_package(
         "urgency_score": row["urgency_score"] or Decimal(0),
         "context_objects": tuple(
             ContextObject(
-                item["id"], item["object_type"], item["name"], item["entity_id"], item["importance"]
+                item["id"],
+                item["object_type"],
+                item["name"],
+                item["entity_id"],
+                item["importance"],
             )
             for item in objects
         ),
@@ -284,7 +334,9 @@ async def _load_package(
     }
 
 
-def _assessment_input(package: dict[str, Any], rules: tuple[Any, ...]) -> AssessmentInput:
+def _assessment_input(
+    package: dict[str, Any], rules: tuple[Any, ...]
+) -> AssessmentInput:
     return AssessmentInput(
         primary_domain=package["primary_domain"],
         event_type=package["event_type"],
@@ -365,39 +417,54 @@ async def _persist_assessment(
 
 async def _load_lenses(
     session: AsyncSession, tenant_id: UUID
-) -> tuple[tuple[tuple[UUID, DecisionLens], ...], defaultdict[UUID, tuple[FocusArea, ...]]]:
+) -> tuple[
+    tuple[tuple[UUID, DecisionLens], ...], defaultdict[UUID, tuple[FocusArea, ...]]
+]:
     rows = (
-        await session.execute(
-            text(
-                """
+        (
+            await session.execute(
+                text(
+                    """
                 SELECT user_id, role_code, responsibility_tags, priority_domains,
                        delivery_preference, version
                 FROM context.user_decision_lenses
                 WHERE tenant_id = :tenant_id AND active
                 ORDER BY user_id
                 """
-            ),
-            {"tenant_id": tenant_id},
+                ),
+                {"tenant_id": tenant_id},
+            )
         )
-    ).mappings().all()
+        .mappings()
+        .all()
+    )
     focus_rows = (
-        await session.execute(
-            text(
-                """
+        (
+            await session.execute(
+                text(
+                    """
                 SELECT user_id, label, focus_type, entity_id, weight
                 FROM context.focus_areas
                 WHERE tenant_id = :tenant_id AND active
                   AND (expires_at IS NULL OR expires_at > NOW())
                 ORDER BY user_id, weight DESC, id
                 """
-            ),
-            {"tenant_id": tenant_id},
+                ),
+                {"tenant_id": tenant_id},
+            )
         )
-    ).mappings().all()
+        .mappings()
+        .all()
+    )
     focus: defaultdict[UUID, list[FocusArea]] = defaultdict(list)
     for row in focus_rows:
         focus[row["user_id"]].append(
-            FocusArea(row["label"], row["focus_type"], row["entity_id"], Decimal(row["weight"]))
+            FocusArea(
+                row["label"],
+                row["focus_type"],
+                row["entity_id"],
+                Decimal(row["weight"]),
+            )
         )
     lenses = tuple(
         (
@@ -412,7 +479,9 @@ async def _load_lenses(
         )
         for row in rows
     )
-    return lenses, defaultdict(tuple, {key: tuple(value) for key, value in focus.items()})
+    return lenses, defaultdict(
+        tuple, {key: tuple(value) for key, value in focus.items()}
+    )
 
 
 async def _persist_brief(
@@ -440,9 +509,10 @@ async def _persist_brief(
         else None
     )
     existing = (
-        await session.execute(
-            text(
-                """
+        (
+            await session.execute(
+                text(
+                    """
                 SELECT id,personal_priority_score,what_changed,why_it_matters,
                        exposure_summary,stakes_summary,decision_prompt,owner_roles,
                        uncertainties,evidence_signal_ids,gaps_summary,response_options,
@@ -452,31 +522,38 @@ async def _persist_brief(
                   AND user_id IS NOT DISTINCT FROM :user_id
                   AND lens_version IS NOT DISTINCT FROM :lens_version
                 """
-            ),
-            {
-                "assessment_id": assessment_id,
-                "user_id": user_id,
-                "lens_version": lens_version,
-            },
+                ),
+                {
+                    "assessment_id": assessment_id,
+                    "user_id": user_id,
+                    "lens_version": lens_version,
+                },
+            )
         )
-    ).mappings().one_or_none()
-    material = lifecycle_enabled and existing is not None and any(
-        (
-            existing["personal_priority_score"] != priority_score,
-            existing["what_changed"] != narrative.what_changed,
-            existing["why_it_matters"] != narrative.why_it_matters,
-            existing["exposure_summary"] != narrative.exposure_summary,
-            existing["stakes_summary"] != narrative.stakes_summary,
-            existing["decision_prompt"] != narrative.decision_prompt,
-            tuple(existing["owner_roles"]) != tuple(assessment.owner_role_codes),
-            tuple(existing["uncertainties"]) != tuple(narrative.uncertainties),
-            tuple(existing["evidence_signal_ids"]) != evidence_ids,
-            existing["gaps_summary"] != (guidance.gaps_summary if guidance else None),
-            tuple(existing["next_validation_steps"]) != (
-                guidance.next_validation_steps if guidance else ()
-            ),
-            existing["guidance_status"]
-            != (guidance.status if guidance else "NOT_GENERATED"),
+        .mappings()
+        .one_or_none()
+    )
+    material = (
+        lifecycle_enabled
+        and existing is not None
+        and any(
+            (
+                existing["personal_priority_score"] != priority_score,
+                existing["what_changed"] != narrative.what_changed,
+                existing["why_it_matters"] != narrative.why_it_matters,
+                existing["exposure_summary"] != narrative.exposure_summary,
+                existing["stakes_summary"] != narrative.stakes_summary,
+                existing["decision_prompt"] != narrative.decision_prompt,
+                tuple(existing["owner_roles"]) != tuple(assessment.owner_role_codes),
+                tuple(existing["uncertainties"]) != tuple(narrative.uncertainties),
+                tuple(existing["evidence_signal_ids"]) != evidence_ids,
+                existing["gaps_summary"]
+                != (guidance.gaps_summary if guidance else None),
+                tuple(existing["next_validation_steps"])
+                != (guidance.next_validation_steps if guidance else ()),
+                existing["guidance_status"]
+                != (guidance.status if guidance else "NOT_GENERATED"),
+            )
         )
     )
     brief_id = (
@@ -560,7 +637,9 @@ async def _persist_brief(
             },
         )
     ).scalar_one()
-    event_type = "BRIEF_CREATED" if existing is None else "BRIEF_UPDATED" if material else None
+    event_type = (
+        "BRIEF_CREATED" if existing is None else "BRIEF_UPDATED" if material else None
+    )
     if event_type and lifecycle_enabled:
         await session.execute(
             text(
@@ -600,14 +679,21 @@ async def _persist_monitoring(
             """
             INSERT INTO context.relevant_monitoring (
                 tenant_id,user_id,global_output_id,signal_id,company_context_version,
-                relevance_score,matched_object_ids,summary
+                relevance_score,matched_object_ids,summary,lens_version
             ) VALUES (
                 :tenant_id,:user_id,:output_id,:signal_id,:context_version,
-                :score,:matched_ids,:summary
+                :score,:matched_ids,:summary,
+                (SELECT version FROM context.user_decision_lenses
+                 WHERE tenant_id=:tenant_id AND user_id=:user_id AND active)
             ) ON CONFLICT (tenant_id,user_id,global_output_id,company_context_version)
             DO UPDATE SET relevance_score=EXCLUDED.relevance_score,
                 matched_object_ids=EXCLUDED.matched_object_ids,
-                summary=EXCLUDED.summary,last_verified_at=NOW()
+                summary=EXCLUDED.summary,last_verified_at=NOW(),lens_version=EXCLUDED.lens_version,
+                last_material_change_at=CASE WHEN
+                  (context.relevant_monitoring.relevance_score,context.relevant_monitoring.matched_object_ids,
+                   context.relevant_monitoring.summary) IS DISTINCT FROM
+                  (EXCLUDED.relevance_score,EXCLUDED.matched_object_ids,EXCLUDED.summary)
+                  THEN NOW() ELSE context.relevant_monitoring.last_material_change_at END
             """
         ),
         {
@@ -675,7 +761,9 @@ async def _publish_ready(
     next_event = {
         **event,
         "event_id": str(uuid5(NAMESPACE_URL, f"{event_type}:{payload.brief_id}")),
-        "event_type": "DECISION_BRIEF_READY" if event_type == "BRIEF_CREATED" else "BRIEF_UPDATED",
+        "event_type": "DECISION_BRIEF_READY"
+        if event_type == "BRIEF_CREATED"
+        else "BRIEF_UPDATED",
         "origin_service": "decision-brief-worker",
         "origin_timestamp": datetime.now(UTC).isoformat(),
         "routing_key": "pipeline.recommended",

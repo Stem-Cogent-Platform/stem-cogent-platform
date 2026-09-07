@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from uuid import UUID, uuid4
+from unittest.mock import AsyncMock
 
 import pytest
 from fastapi import HTTPException
@@ -10,6 +11,17 @@ from pydantic import ValidationError
 
 from app.api.auth import Principal, RequestContext
 from app.api.v1 import admin
+
+
+@pytest.fixture(autouse=True)
+def ready_value_gate(monkeypatch):
+    # Invitation value eligibility is exercised against PostgreSQL in the
+    # integration suite; these unit tests cover admin payloads and auditing.
+    monkeypatch.setattr(admin, "invitation_readiness", AsyncMock(return_value={
+        "ready": True, "reason": "READY_DECISION_BRIEF", "company_briefs": 1,
+        "meaningful_monitoring_count": 3, "context_version": 3,
+        "activation_run_id": uuid4(), "lookback_days": 45,
+    }))
 
 
 class Result:
@@ -96,7 +108,7 @@ def detail_results(tenant_id, **overrides) -> list[Result]:
         "focus_count": 1,
         **overrides,
     }
-    return [Result(row=row), Result(rows=[product()]), *(Result(rows=[]) for _ in range(4))]
+    return [Result(row=row), Result(rows=[product()]), Result(rows=[]), Result(rows=[]), Result(rows=[{"status":"COMPLETED","context_version":3}]), Result(rows=[])]
 
 
 def product():

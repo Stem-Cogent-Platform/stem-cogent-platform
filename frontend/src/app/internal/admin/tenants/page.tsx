@@ -7,6 +7,7 @@ import { InternalAdminShell } from "@/components/internal-admin-shell";
 import { ModuleFailure, ModuleLoading } from "@/components/module-state";
 import { apiRequest } from "@/lib/api";
 import { friendlyError } from "@/lib/product-copy/stateMessages";
+import { parseContextList } from "@/lib/context-labels";
 import { LoadState } from "@/lib/types";
 
 type Tenant = { id: string; name: string; status: string; pilot_status: string; started_at?: string; ends_at?: string; pilot_owner?: string; pending_invites: number };
@@ -22,7 +23,7 @@ export default function AdminTenantsPage() {
     const form = event.currentTarget;
     const data = new FormData(form);
     const value = (key: string) => String(data.get(key) ?? "").trim();
-    const list = (key: string) => value(key).split(/[,\n]/).map((item) => item.trim()).filter(Boolean);
+    const list = (key: string) => parseContextList(value(key));
     setSaving(true);
     setError("");
     try {
