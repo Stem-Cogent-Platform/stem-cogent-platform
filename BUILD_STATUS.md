@@ -1,14 +1,22 @@
 # Build Status
 
-## 2026-09-07 — Phase 5 value-loop recovery
+## 2026-09-08 — Phase 5 value-loop recovery deployed; acceptance blocked
 
-The deployed Paystack user has completed onboarding, but context version 6
-has no assessments; deployed personalisation only reuses current-version
-assessments. Invitations bypass value readiness, undated index pages counted
-as first value, and the existing clustering worker remains paused. Recovery
-code, migration `0029`, and real PostgreSQL regressions are implemented locally.
-The fresh staging pilot and continuous update chain are not yet accepted.
-See [the recovery report](docs/qa/phase5-2026-09-07-value-loop-recovery.md).
+Recovery PRs #93, #94 and #95 are deployed to staging, latest application
+commit `27275beb`, migration `0029`. The normal MFA-provisioned fresh pilot's
+original activation completed: 122 canonical outputs scanned, one fresh
+candidate assessed, zero qualifying monitoring items or briefs. The live
+invitation endpoint correctly returns 409 `NOT_READY_NO_RECENT_INTELLIGENCE`.
+Synthesis is restored to 1/1; clustering remains at its original 0/0.
+
+Latest backend CI passes 395 unit tests, 24 integration tests, 75.51% coverage,
+type/lint, migration and security checks; frontend recovery checks pass 33
+unit and 16 browser tests. A recent-source audit identifies 431 URLs awaiting
+classification review and only one unique scored URL. The full pilot context,
+fresh-user onboarding/briefing and continuous delivery journey remain unproved.
+**Not ready for UI/UX redesign.** See
+[the complete A–F recovery report](docs/qa/phase5-2026-09-07-value-loop-recovery.md),
+including the earlier worker-probe overrun and restored baseline.
 
 ## 2026-09-06 — Fresh-pilot onboarding regression
 
