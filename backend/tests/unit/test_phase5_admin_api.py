@@ -6,7 +6,8 @@ from uuid import UUID, uuid4
 from unittest.mock import AsyncMock
 
 import pytest
-from fastapi import HTTPException
+from fastapi import FastAPI, HTTPException
+from httpx import ASGITransport, AsyncClient
 from pydantic import ValidationError
 
 from app.api.auth import Principal, RequestContext
@@ -83,6 +84,43 @@ def system_context(
         authentication_methods=frozenset(methods),
     )
     return RequestContext(principal=principal, session=session)  # type: ignore[arg-type]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("method", ["POST", "PATCH"])
+async def test_readiness_rejection_is_json_serializable(monkeypatch, method) -> None:
+    tenant_id, run_id = uuid4(), uuid4()
+    session = Session(Result(scalar=1))
+    ctx = system_context(session)
+    gate = {
+        "ready": False,
+        "reason": "NOT_READY_NO_RECENT_INTELLIGENCE",
+        "company_briefs": 0,
+        "meaningful_monitoring_count": 0,
+        "activation_run_id": run_id,
+    }
+    monkeypatch.setattr(admin, "invitation_readiness", AsyncMock(return_value=gate))
+    monkeypatch.setattr(
+        admin, "get_settings",
+        lambda: SimpleNamespace(PHASE5_PILOT_INVITES_ENABLED=True),
+    )
+    app = FastAPI()
+    app.include_router(admin.router)
+    app.dependency_overrides[admin.get_system_admin_context] = lambda: ctx
+    path = f"/api/v1/internal/admin/tenants/{tenant_id}"
+    body = {"pilot_status": "READY"}
+    if method == "POST":
+        path += "/invitations"
+        body = {"email": "acceptance@example.invalid"}
+    async with AsyncClient(
+        transport=ASGITransport(app=app, raise_app_exceptions=False),
+        base_url="http://test",
+    ) as client:
+        response = await client.request(method, path, json=body)
+    assert response.status_code == 409
+    assert response.json()["detail"] == {**gate, "activation_run_id": str(run_id)}
+    assert session.commits == 0
+    assert not any("auth.tenant_invitations" in sql for sql in session.statements)
 
 
 def detail_results(tenant_id, **overrides) -> list[Result]:
