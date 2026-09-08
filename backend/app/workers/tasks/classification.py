@@ -91,11 +91,19 @@ async def _persist_classification(
                     classifier_version = :classifier_version,
                     taxonomy_version = :taxonomy_version,
                     pipeline_stage = 'CLASSIFIED',
-                    review_flag = review_flag OR :review_required,
+                    review_flag = :review_required OR (
+                      review_flag AND (
+                        NOT ('CLASSIFICATION_REVIEW_REQUIRED' = ANY(processing_flags))
+                        OR cardinality(array_remove(processing_flags,
+                             'CLASSIFICATION_REVIEW_REQUIRED')) > 0
+                      )
+                    ),
                     processing_flags = CASE
                       WHEN :review_required
                            AND NOT ('CLASSIFICATION_REVIEW_REQUIRED' = ANY(processing_flags))
                         THEN array_append(processing_flags, 'CLASSIFICATION_REVIEW_REQUIRED')
+                      WHEN NOT :review_required
+                        THEN array_remove(processing_flags, 'CLASSIFICATION_REVIEW_REQUIRED')
                       ELSE processing_flags
                     END,
                     classified_at = NOW(),
