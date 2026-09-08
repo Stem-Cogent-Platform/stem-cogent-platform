@@ -146,7 +146,7 @@ async def test_personalisation_rebuilds_each_output_then_checks_readiness(
         {"global_output_id": uuid4(), "signal_id": uuid4(), "freshness_eligible": True, "meaningful": True},
         {"global_output_id": uuid4(), "signal_id": uuid4(), "freshness_eligible": True, "meaningful": True},
     ]
-    session = Session(Result(), Result(row={"context_version": 6, "lens_version": 1}), Result(scalar=45), Result(rows=outputs), Result(), Result(scalar=user_id))
+    session = Session(Result(), Result(row={"context_version": 6, "lens_version": 1}), Result(scalar=45), Result(), Result(), Result(), Result(rows=outputs), Result(), Result(scalar=user_id))
     decide = AsyncMock(return_value="created")
     readiness = AsyncMock()
     monkeypatch.setattr(pilot_activation, "get_session", session_source(session))
@@ -159,12 +159,13 @@ async def test_personalisation_rebuilds_each_output_then_checks_readiness(
     )
 
     assert result == "PERSONALISED:2"
-    candidates = session.statements[3]
+    candidate_index = next(i for i, sql in enumerate(session.statements) if "canonical_outputs" in sql)
+    candidates = session.statements[candidate_index]
     assert "FROM intelligence.global_outputs output" in candidates
     assert "FROM decision.assessments" not in candidates
     assert "signal.published_at BETWEEN NOW()" in candidates
     assert "signal.dedup_status NOT IN" in candidates
-    assert session.parameters[3]["lookback_days"] == 45
+    assert session.parameters[candidate_index]["lookback_days"] == 45
     assert decide.await_count == 2
     for call in decide.await_args_list:
         payload = call.args[0]["payload"]
@@ -172,6 +173,36 @@ async def test_personalisation_rebuilds_each_output_then_checks_readiness(
         assert isinstance(payload["signal_id"], str)
         assert payload["tenant_id"] == str(tenant_id)
     readiness.assert_awaited_once_with(tenant_id, user_id)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("personal", [False, True])
+async def test_candidate_timeout_commits_progress_then_records_failure(personal):
+    tenant_id, run_id, user_id, request_id = uuid4(), uuid4(), uuid4(), uuid4()
+    session = AsyncMock()
+    failure_writes = []
+
+    async def execute(statement, parameters=None):
+        sql = str(statement)
+        if "canonical_outputs" in sql:
+            assert session.commit.await_count == 1
+            raise TimeoutError("candidate inventory exceeded its time budget")
+        if "SET status='FAILED'" in sql:
+            failure_writes.append((sql, parameters))
+        return Result()
+
+    session.execute.side_effect = execute
+    kwargs = {"user_id": user_id, "request_id": request_id} if personal else {"run_id": run_id}
+    with pytest.raises(TimeoutError):
+        await pilot_activation._candidate_inventory(session, tenant_id, 45, **kwargs)
+
+    session.rollback.assert_awaited_once()
+    assert session.commit.await_count == 2
+    assert len(failure_writes) == 1
+    sql, parameters = failure_writes[0]
+    assert parameters["tenant_id"] == tenant_id
+    assert "CANDIDATE_QUERY_TIMEOUT" in parameters.values()
+    assert parameters["request_id" if personal else "run_id"] == (request_id if personal else run_id)
 
 
 @pytest.mark.asyncio

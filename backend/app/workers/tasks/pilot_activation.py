@@ -14,6 +14,7 @@ from app.core.database import get_session
 from app.context.completeness import company_context_status
 from app.context.personalisation import prepare_request
 from app.context.readiness import value_counts
+from app.context.session_scope import tenant_scope
 from app.intelligence.freshness import candidates_sql, matched_sql
 from app.workers.celery_app import celery_app
 from app.workers.events import CeleryEventPublisher
@@ -28,6 +29,61 @@ def _decision_payload(output: dict[str, Any], tenant_id: UUID) -> dict[str, str]
         "signal_id": str(output["signal_id"]),
         "tenant_id": str(tenant_id),
     }
+
+
+async def _candidate_inventory(
+    session: Any,
+    tenant_id: UUID,
+    lookback: int,
+    *,
+    run_id: UUID | None = None,
+    user_id: UUID | None = None,
+    request_id: UUID | None = None,
+) -> list[Any]:
+    # Make RUNNING observable before potentially expensive work. The commit
+    # clears SET LOCAL, so restore the runtime role and tenant before reading.
+    await session.commit()
+    try:
+        await tenant_scope(session, tenant_id)
+        await session.execute(text("SET LOCAL statement_timeout='30s'"))
+        return list(
+            (
+                await session.execute(
+                    text(candidates_sql()),
+                    {"tenant_id": tenant_id, "lookback_days": lookback},
+                )
+            )
+            .mappings()
+            .all()
+        )
+    except Exception as exc:
+        await session.rollback()
+        await tenant_scope(session, tenant_id)
+        code = (
+            "CANDIDATE_QUERY_TIMEOUT"
+            if (
+                isinstance(exc, TimeoutError)
+                or getattr(getattr(exc, "orig", None), "sqlstate", None) == "57014"
+            )
+            else type(exc).__name__
+        )
+        if run_id is not None:
+            await _finish_failed(session, run_id, tenant_id, code)
+        else:
+            await session.execute(
+                text("""
+                UPDATE context.personalisation_state SET status='FAILED',error_code=:error
+                WHERE tenant_id=:tenant_id AND user_id=:user_id AND request_id=:request_id
+            """),
+                {
+                    "tenant_id": tenant_id,
+                    "user_id": user_id,
+                    "request_id": request_id,
+                    "error": code,
+                },
+            )
+            await session.commit()
+        raise
 
 
 async def run_activation(payload: dict[str, Any]) -> str:
@@ -85,15 +141,8 @@ async def run_activation(payload: dict[str, Any]) -> str:
         ]:
             await _finish_failed(session, run_id, tenant_id, "CONTEXT_INCOMPLETE")
             return "FAILED:CONTEXT_INCOMPLETE"
-        candidates = (
-            (
-                await session.execute(
-                    text(candidates_sql()),
-                    {"tenant_id": tenant_id, "lookback_days": lookback},
-                )
-            )
-            .mappings()
-            .all()
+        candidates = await _candidate_inventory(
+            session, tenant_id, lookback, run_id=run_id
         )
         await session.commit()
         break
@@ -273,15 +322,8 @@ async def personalise_user(payload: dict[str, Any]) -> str:
                 {"tenant_id": tenant_id},
             )
         ).scalar_one_or_none() or get_settings().PILOT_ACTIVATION_LOOKBACK_DAYS
-        candidates = (
-            (
-                await session.execute(
-                    text(candidates_sql()),
-                    {"tenant_id": tenant_id, "lookback_days": lookback},
-                )
-            )
-            .mappings()
-            .all()
+        candidates = await _candidate_inventory(
+            session, tenant_id, lookback, user_id=user_id, request_id=request_id
         )
         outputs = [
             dict(o) for o in candidates if o["freshness_eligible"] and o["meaningful"]

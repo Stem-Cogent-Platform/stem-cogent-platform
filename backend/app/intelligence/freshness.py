@@ -68,6 +68,8 @@ def current_sql(signal: str = "signal", window: str = ":lookback_days") -> str:
 def meaningful_sql(signal: str = "signal", output: str = "output") -> str:
     # Validate external citation IDs before casting. Keeping evidence.id as UUID
     # lets PostgreSQL use its index instead of scanning every signal as text.
+    # OFFSET 0 retains a correlated lookup under RLS instead of allowing a
+    # repeated archive-wide hash join for each output's citations.
     evidence_id = """CASE WHEN citation->>'source_signal_id' ~*
         '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
         THEN (citation->>'source_signal_id')::uuid END"""
@@ -80,12 +82,7 @@ def meaningful_sql(signal: str = "signal", output: str = "output") -> str:
         AND COALESCE({signal}.confidence_band,'') <> 'UNVERIFIED'
         AND {signal}.source_url ~ '^https?://[^/]+'
         AND {output}.synthesis_status='COMPLETED'
-        AND EXISTS (
-          SELECT 1 FROM jsonb_array_elements({output}.citations) citation
-          JOIN pipeline.signals evidence ON evidence.id=({evidence_id})
-          WHERE evidence.source_url ~ '^https?://[^/]+'
-            AND (evidence.tenant_id IS NULL OR evidence.tenant_id=:tenant_id)
-        )
+        AND jsonb_array_length({output}.citations)>0
         AND NOT EXISTS (
           SELECT 1 FROM jsonb_array_elements({output}.citations) citation
           WHERE NOT EXISTS (
@@ -93,6 +90,7 @@ def meaningful_sql(signal: str = "signal", output: str = "output") -> str:
             WHERE evidence.id=({evidence_id})
               AND evidence.source_url ~ '^https?://[^/]+'
               AND (evidence.tenant_id IS NULL OR evidence.tenant_id=:tenant_id)
+            OFFSET 0
           )
         )"""  # nosec B608 # Fixed application SQL fragments; request values are bound
 
@@ -103,6 +101,9 @@ def matched_sql(assessment: str = "assessment") -> str:
 
 
 def candidates_sql() -> str:
+    # Drive from completed outputs, then look up their signals. The lateral
+    # boundary prevents RLS estimates from choosing the entire signal archive
+    # as the outer side of a nested loop. All tenant policies still apply.
     return f"""
         SELECT * FROM (
           SELECT DISTINCT ON ({identity_sql()})
@@ -112,7 +113,10 @@ def candidates_sql() -> str:
             signal.published_at < NOW()-make_interval(days => :lookback_days) AS stale,
             ({meaningful_sql()}) IS TRUE AS meaningful
           FROM intelligence.global_outputs output
-          JOIN pipeline.signals signal ON signal.id=output.signal_id
+          JOIN LATERAL (
+            SELECT source_signal.* FROM pipeline.signals source_signal
+            WHERE source_signal.id=output.signal_id OFFSET 0
+          ) signal ON TRUE
           WHERE output.synthesis_status='COMPLETED'
             AND (output.tenant_id IS NULL OR output.tenant_id=:tenant_id)
             AND (signal.tenant_id IS NULL OR signal.tenant_id=:tenant_id)
