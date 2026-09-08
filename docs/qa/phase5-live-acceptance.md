@@ -1,9 +1,14 @@
 # Phase 5 Live Acceptance
 
-Latest status: the [September 7 value-loop recovery report](phase5-2026-09-07-value-loop-recovery.md)
-supersedes the onboarding-only status below. Onboarding is now complete in
-staging; current-context intelligence and the paused clustering worker remain
-the live value-loop blockers. Recovery acceptance is still pending.
+Latest status (September 8): the
+[value-loop recovery report](phase5-2026-09-07-value-loop-recovery.md)
+supersedes the historical onboarding-only status below. PRs #93–#95 are
+deployed to staging. Fresh activation completes and empty-value invitations
+are rejected with an explicit 409 reason. The fresh pilot still has zero
+qualifying value; classification coverage, paused clustering and the complete
+fresh-user/continuous-update journey remain acceptance blockers. Synthesis
+is restored to its previous desired count of one. The verdict remains
+**PHASE 5 VALUE LOOP NOT READY — BLOCKERS REMAIN**.
 
 Status date: 2026-09-06
 
