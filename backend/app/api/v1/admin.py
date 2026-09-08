@@ -350,7 +350,9 @@ async def patch_tenant(
     if changes.get("pilot_status") == "READY":
         readiness = await invitation_readiness(context.session, tenant_id, lock=True)
         if not readiness["ready"]:
-            raise HTTPException(status.HTTP_409_CONFLICT, detail=readiness)
+            raise HTTPException(
+                status.HTTP_409_CONFLICT, detail=jsonable_encoder(readiness)
+            )
     await _audit(context, "TENANT_UPDATED", tenant_id, "TENANT", tenant_id)
     await context.session.commit()
     return await _tenant_detail(context, tenant_id)
@@ -541,7 +543,9 @@ async def create_invitation(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Pilot tenant not found")
     readiness = await invitation_readiness(context.session, tenant_id, lock=True)
     if not readiness["ready"]:
-        raise HTTPException(status.HTTP_409_CONFLICT, detail=readiness)
+        raise HTTPException(
+            status.HTTP_409_CONFLICT, detail=jsonable_encoder(readiness)
+        )
     raw_token = secrets.token_urlsafe(48)
     token_hash = hashlib.sha256(raw_token.encode()).hexdigest()
     invited_by = (
