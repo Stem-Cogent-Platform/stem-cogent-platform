@@ -49,6 +49,8 @@ def test_offline_sql_widens_every_algorithm_tagged_digest_column() -> None:
         "pipeline.signals ALTER COLUMN body_text_hash",
         "intelligence.signal_embeddings ALTER COLUMN input_hash",
         "billing.webhook_events ALTER COLUMN payload_hash",
+        "pipeline.signals ALTER COLUMN content_fingerprint",
     ):
         assert qualified_column in result.stdout
-    assert result.stdout.count("TYPE VARCHAR(100)") == 4
+    assert result.stdout.count("TYPE VARCHAR(100)") == 5
+
