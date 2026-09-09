@@ -12,6 +12,7 @@ from app.core.config import get_settings
 from app.core.database import get_session
 from app.intelligence.scoring import (
     ConfidenceInput,
+    ScoreResult,
     UrgencyInput,
     confidence_score,
     corroboration_score,
@@ -28,6 +29,30 @@ async def run_scoring(event: dict[str, Any]) -> str:
     signal_id = UUID(event["payload"]["signal_id"])
     tenant_id = event["payload"].get("tenant_id")
     async for session in get_session():
+        await session.execute(
+            text("SELECT pg_advisory_xact_lock(hashtextextended(:identity,0))"),
+            {"identity": f"pipeline-stage:{tenant_id or 'GLOBAL'}:{signal_id}"},
+        )
+        stored = (
+            await session.execute(
+                text("""
+                    SELECT confidence_score, confidence_band, urgency_score, urgency_band
+                    FROM pipeline.signals
+                    WHERE id=:signal_id AND tenant_id IS NOT DISTINCT FROM :tenant_id
+                      AND pipeline_stage='SCORED'
+                    ORDER BY created_at DESC LIMIT 1
+                """),
+                {"signal_id": signal_id, "tenant_id": UUID(tenant_id) if tenant_id else None},
+            )
+        ).mappings().one_or_none()
+        if stored is not None:
+            # Keep scores stable on redelivery, and recover a previously failed
+            # publish after the original scoring transaction committed.
+            confidence = ScoreResult(stored["confidence_score"], stored["confidence_band"])
+            urgency = ScoreResult(stored["urgency_score"], stored["urgency_band"])
+            await session.commit()
+            await _publish_scored(event, signal_id, confidence, urgency)
+            return "ALREADY_SCORED"
         row = await _load_classified_signal(session, signal_id, tenant_id)
         corroboration = corroboration_score(row["corroboration_count"])
         confidence = confidence_score(

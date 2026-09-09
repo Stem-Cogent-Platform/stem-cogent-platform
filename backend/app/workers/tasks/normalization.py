@@ -49,15 +49,16 @@ async def run_normalization(event: dict[str, Any]) -> list[str]:
             resolution = resolve_entities(
                 f"{document.title or ''} {document.body_text}", registry
             )
-            signal_id = await _persist_document(
+            signal_id, publish_required = await _persist_document(
                 session,
                 raw,
                 event,
                 document,
                 resolution,
             )
-            await _persist_entity_links(session, signal_id, resolution)
-            results.append((signal_id, resolution))
+            if publish_required:
+                await _persist_entity_links(session, signal_id, resolution)
+                results.append((signal_id, resolution))
         await session.commit()
         for signal_id, resolution in results:
             await _publish_results(event, signal_id, resolution)
@@ -128,7 +129,7 @@ async def _persist_document(
     event: dict[str, Any],
     document: NormalizedDocument,
     resolution: ResolutionResult,
-) -> UUID:
+) -> tuple[UUID, bool]:
     canonical_url = canonicalize_source_url(document.source_url)
     tenant_raw = event["payload"].get("tenant_id")
     tenant_id = UUID(tenant_raw) if tenant_raw else None
@@ -147,7 +148,7 @@ async def _persist_document(
         await session.execute(
             text(
                 """
-                SELECT id
+                SELECT id, raw_signal_id
                 FROM pipeline.signals
                 WHERE tenant_id IS NOT DISTINCT FROM :tenant_id
                   AND (
@@ -172,7 +173,7 @@ async def _persist_document(
                 "content_fingerprint": content_fingerprint,
             },
         )
-    ).scalar_one_or_none()
+    ).mappings().one_or_none()
     if existing:
         await session.execute(
             text(
@@ -183,15 +184,18 @@ async def _persist_document(
             {
                 "canonical_url": canonical_url,
                 "content_fingerprint": content_fingerprint,
-                "signal_id": existing,
+                "signal_id": existing["id"],
                 "tenant_id": tenant_id,
             },
         )
-        return existing
+        # A retry of the original archive must recover a commit-before-publish
+        # failure. A later collection of unchanged content must not enqueue the
+        # same signal again or repeatedly enqueue its entity review.
+        return existing["id"], existing["raw_signal_id"] == raw["id"]
     flags = list(document.processing_flags)
     if resolution.unknown_mentions:
         flags.append("ENTITY_REVIEW_REQUIRED")
-    return (
+    signal_id = (
         await session.execute(
             text(
                 """
@@ -238,6 +242,7 @@ async def _persist_document(
             },
         )
     ).scalar_one()
+    return signal_id, True
 
 
 async def _persist_entity_links(
