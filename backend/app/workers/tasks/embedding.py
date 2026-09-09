@@ -36,7 +36,7 @@ async def run_embedding(event: dict[str, Any]) -> str:
         # archive replay into paid embedding/synthesis work. Retain source rows.
         freshness = classify_freshness(
             signal["published_at"],
-            lookback_days=60,
+            lookback_days=settings.PIPELINE_RECENT_LOOKBACK_DAYS,
             processing_flags=signal["processing_flags"],
         )
         if tenant_id is None and (
