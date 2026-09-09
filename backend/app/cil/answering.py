@@ -5,7 +5,7 @@ from typing import Any
 from uuid import UUID
 
 from fastapi.encoders import jsonable_encoder
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.cil.retrieval import CILRetrievalResult
 from app.core.config import get_settings
@@ -24,6 +24,16 @@ class GroundedAnswer(BaseModel):
     answer_text: str = Field(min_length=1, max_length=3000)
     cited_signal_ids: list[UUID] = Field(min_length=1, max_length=20)
     follow_up_suggestions: list[str] = Field(max_length=4)
+
+    @field_validator("answer_text", "follow_up_suggestions")
+    @classmethod
+    def reject_nul_text(cls, value: str | list[str]) -> str | list[str]:
+        # PostgreSQL text cannot store NUL. Invalid provider output must use
+        # the existing grounded fallback before the query log is written.
+        values = [value] if isinstance(value, str) else value
+        if any("\x00" in item for item in values):
+            raise ValueError("Generated text contains an unsupported NUL character")
+        return value
 
 
 @dataclass(frozen=True, slots=True)
