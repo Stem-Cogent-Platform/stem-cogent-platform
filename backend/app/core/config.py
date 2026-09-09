@@ -1,5 +1,6 @@
 from functools import lru_cache
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -67,6 +68,7 @@ class Settings(BaseSettings):
     EMBEDDING_MAX_INPUT_CHARACTERS: int = 12_000
     EMBEDDING_TIMEOUT_SECONDS: float = 30.0
     EMBEDDING_MAX_RETRIES: int = 4
+    PIPELINE_RECENT_LOOKBACK_DAYS: int = Field(default=60, ge=1, le=60)
     SEMANTIC_DEDUP_DISTANCE_THRESHOLD: float = 0.08
     SEMANTIC_CLUSTER_DISTANCE_THRESHOLD: float = 0.18
     SEMANTIC_HISTORY_DAYS: int = 365
