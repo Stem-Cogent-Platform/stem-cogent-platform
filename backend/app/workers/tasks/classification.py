@@ -29,7 +29,15 @@ async def run_classification(event: dict[str, Any]) -> str:
     signal_id = UUID(event["payload"]["signal_id"])
     tenant_id = event["payload"].get("tenant_id")
     async for session in get_session():
+        # Serialize stage transitions with scoring. A late normalized event
+        # must never roll a scored signal back to CLASSIFIED.
+        await session.execute(
+            text("SELECT pg_advisory_xact_lock(hashtextextended(:identity,0))"),
+            {"identity": f"pipeline-stage:{tenant_id or 'GLOBAL'}:{signal_id}"},
+        )
         signal = await _load_signal(session, signal_id, tenant_id)
+        if signal["pipeline_stage"] == "SCORED":
+            return "ALREADY_SCORED"
         taxonomy = await _get_taxonomy_loader().load(session)
         result = classify_signal(
             ClassificationInput(
@@ -110,6 +118,7 @@ async def _persist_classification(
                     updated_at = NOW()
                 WHERE id = :signal_id
                   AND tenant_id IS NOT DISTINCT FROM :tenant_id
+                  AND pipeline_stage != 'SCORED'
                 """
             ),
             {
@@ -144,6 +153,7 @@ async def _persist_unmatched_review(
                 updated_at = NOW()
             WHERE id = :signal_id
               AND tenant_id IS NOT DISTINCT FROM :tenant_id
+              AND pipeline_stage != 'SCORED'
             """
         ),
         {
@@ -163,6 +173,7 @@ async def _load_signal(
             text(
                 """
                 SELECT signal.id, signal.title, signal.body_text, signal.source_url,
+                       signal.pipeline_stage,
                        signal.normalized_region_tags, source.source_type,
                        coalesce(array_agg(link.entity_id) FILTER (
                          WHERE link.entity_id IS NOT NULL
