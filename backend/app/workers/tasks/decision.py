@@ -118,7 +118,7 @@ async def run_decision_briefs(event: dict[str, Any]) -> str:
                     await session.commit()
                 continue
             company_narrative = format_brief(
-                package["summary"] or package["title"], assessment
+                package["title"] or package["summary"], assessment
             )
             company_write = await _persist_brief(
                 session,
@@ -159,14 +159,14 @@ async def run_decision_briefs(event: dict[str, Any]) -> str:
                     package["evidence_text"],
                 )
                 deterministic = format_brief(
-                    package["summary"] or package["title"],
+                    package["title"] or package["summary"],
                     assessment,
                     priority.focus_matches,
                     lens.role_code,
                 )
                 formatted = grounded_format_brief(
                     deterministic,
-                    summary=package["summary"] or package["title"],
+                    summary=package["title"] or package["summary"],
                     assessment=assessment,
                     authorised_evidence=package["evidence_text"],
                     matched_focus=priority.focus_matches,
