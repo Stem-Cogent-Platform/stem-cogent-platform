@@ -207,19 +207,34 @@ def format_brief(
     matched_focus: tuple[str, ...] = (),
     audience_role: str | None = None,
 ) -> BriefNarrative:
-    labels = tuple(obj.name for obj in assessment.matched_objects)
-    why = "Matched company context: " + ", ".join(labels) if labels else "No direct company object match was established."
+    context_templates = {
+        "COMPETITOR": "{name} is a competitor you track.",
+        "DEPENDENCY": "{name} is a dependency in your company context.",
+        "PRODUCT": "{name} is one of your configured products.",
+        "MARKET": "{name} is a market in your company context.",
+    }
+    why = " ".join(
+        context_templates.get(obj.object_type, "{name} matches your company context.").format(name=obj.name)
+        for obj in assessment.matched_objects
+    ) or "No direct company object match was established."
     if matched_focus:
-        why += " Active Focus Areas: " + ", ".join(matched_focus) + "."
+        why += " Your focus areas also include " + ", ".join(matched_focus) + "."
     if audience_role:
-        why += f" Framed for the {audience_role} Decision Lens."
+        why += f" Shown for your {audience_role} role."
     exposures = ", ".join(assessment.exposure_types) or "Not established"
     stakes = ", ".join(assessment.stakes_types) or "Not established"
-    prompt = (
-        f"Review the {assessment.decision_type} decision with the named owner roles."
-        if assessment.decision_required and assessment.decision_type
-        else "Monitor the evidence; no deterministic decision trigger is active."
-    )
+    prompt = "Monitor this development; no decision is currently required."
+    if assessment.decision_required and assessment.decision_type:
+        review_steps = {
+            "MARKET_ENTRY": "Assess whether this development changes your market-entry plans.",
+            "INFRASTRUCTURE_RESPONSE": "Check whether the affected dependency changes your continuity plans.",
+        }
+        prompt = review_steps.get(
+            assessment.decision_type,
+            f"Review your {assessment.decision_type.replace('_', ' ').lower()} options.",
+        )
+        owners = ", ".join(assessment.owner_role_codes) or "the responsible team"
+        prompt += f" Review the cited evidence with {owners} before deciding on a response."
     return BriefNarrative(summary, why, exposures, stakes, prompt, assessment.uncertainty_codes)
 
 
