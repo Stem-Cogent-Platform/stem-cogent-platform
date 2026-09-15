@@ -14,6 +14,40 @@ async function authenticatedApi(page: Page, permissionRole = "ADMIN", phase5Ui =
   await page.route("**/api/v1/capabilities", (route) => route.fulfill({ json: { phase5_brief_lifecycle_enabled: phase5Ui, phase5_new_ui_enabled: phase5Ui } }));
 }
 
+for (const ready of [false, true]) {
+  test(`ordinary business descriptions preserve the invitation value gate: ${ready}`, async ({ page }) => {
+    await authenticatedApi(page, "SYSTEM_ADMIN");
+    const tenantId = "20000000-0000-4000-8000-000000000009";
+    const base = `**/api/v1/internal/admin/tenants/${tenantId}`;
+    await page.route(base, route => route.fulfill({ json: {
+      tenant: { name: "Description acceptance tenant", status: "TRIAL" },
+      readiness: { ready, reason: ready ? "READY_RELEVANT_MONITORING" : "NOT_READY_NO_RECENT_INTELLIGENCE", company_briefs: 0, meaningful_monitoring_count: ready ? 3 : 2, pending_context_references: 2 },
+      checklist: {}, company_objects: [], users: [], invitations: [], activations: [], briefs: [],
+    } }));
+    await page.route(base + "/metrics", route => route.fulfill({ json: {} }));
+    let invited = false;
+    await page.route(base + "/invitations", async route => {
+      expect(route.request().postDataJSON()).toEqual({ email: "tester@example.invalid" });
+      invited = true;
+      await route.fulfill({ status: 201, json: { invitation_url: "https://example.invalid/invite/accept?token=local-test" } });
+    });
+    await page.goto(`/internal/admin/tenants/${tenantId}`);
+    await page.getByRole("tab", { name: "Users & Invites" }).click();
+    const button = page.getByRole("button", { name: "Create 48-hour invite" });
+    if (ready) {
+      await expect(button).toBeEnabled();
+      await page.getByRole("textbox", { name: "Invite email" }).fill("tester@example.invalid");
+      await button.click();
+      await expect(page.getByText(/Single-use invitation:/)).toBeVisible();
+      expect(invited).toBe(true);
+    } else {
+      await expect(button).toBeDisabled();
+      await expect(page.getByText(/at least one current Decision Brief or three meaningful monitoring/)).toBeVisible();
+      expect(invited).toBe(false);
+    }
+  });
+}
+
 test("waits for durable personalisation before showing counts or recording a visit", async ({ page }) => {
   await authenticatedApi(page);
   let prepared = false;
