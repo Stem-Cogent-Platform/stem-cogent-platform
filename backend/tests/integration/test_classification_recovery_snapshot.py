@@ -16,7 +16,7 @@ async def test_recovery_rules_preserve_categories_and_existing_patterns(onboardi
                sum(jsonb_array_length(keyword_patterns)) patterns
         FROM config.signal_taxonomy WHERE active AND version='2026.08-v2'
     """))).mappings().one()
-    assert inventory == {"categories": 157, "domains": 8, "patterns": 9}
+    assert inventory == {"categories": 157, "domains": 8, "patterns": 11}
     snapshot = await TaxonomyLoader().load(session)
     draft = classify_signal(ClassificationInput(
         "SEC proposes new regulations for online forex trading", "Proposed draft rules",
@@ -28,3 +28,18 @@ async def test_recovery_rules_preserve_categories_and_existing_patterns(onboardi
     ), snapshot)
     assert original.event_type == "CIRCULAR_ISSUED"
     assert original.classification_confidence == 0.86
+
+    disruption = classify_signal(ClassificationInput(
+        "Bamboo, Cowrywise explain app disruptions as Dangote IPO demand surges",
+        "The disruption showed a gap between expected demand and actual traffic.",
+        "https://example.invalid/disruption", "RSS",
+    ), snapshot)
+    assert disruption.event_type == "SERVICE_DEGRADATION"
+    assert not disruption.conflict
+    network = classify_signal(ClassificationInput(
+        "Lebara launches Nigeria second commercial mobile virtual network",
+        "The provider has begun commercial service.",
+        "https://example.invalid/network", "RSS",
+    ), snapshot)
+    assert network.event_type == "PRODUCT_LAUNCH"
+    assert not network.conflict

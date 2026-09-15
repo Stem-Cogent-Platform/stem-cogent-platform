@@ -7,7 +7,9 @@ from uuid import UUID
 
 from sqlalchemy import text
 
+from app.core.config import get_settings
 from app.core.database import get_session
+from app.intelligence.freshness import classify_freshness
 from app.core.redis import get_redis_client
 from app.workers.celery_app import celery_app
 from app.workers.runtime import run_async_worker
@@ -29,7 +31,12 @@ async def run_decision_brief_delivery(event: dict[str, Any]) -> str:
                     SELECT brief.id, brief.user_id, brief.what_changed,
                            brief.created_at, brief.last_material_change_at,
                            brief.personal_priority_score, assessment.relevance_band,
-                           signal.primary_domain, signal.urgency_band
+                           signal.primary_domain, signal.urgency_band, signal.published_at,
+                           signal.processing_flags, COALESCE((
+                               SELECT lookback_days FROM context.activation_runs
+                               WHERE tenant_id = brief.tenant_id
+                               ORDER BY created_at DESC LIMIT 1
+                           ), :lookback_days) AS lookback_days
                     FROM decision.briefs AS brief
                     JOIN decision.assessments AS assessment
                       ON assessment.tenant_id = brief.tenant_id AND assessment.id = brief.assessment_id
@@ -37,11 +44,17 @@ async def run_decision_brief_delivery(event: dict[str, Any]) -> str:
                     WHERE brief.tenant_id = :tenant_id AND brief.id = :brief_id
                     """
                 ),
-                {"tenant_id": tenant_id, "brief_id": brief_id},
+                {"tenant_id": tenant_id, "brief_id": brief_id,
+                 "lookback_days": get_settings().PILOT_ACTIVATION_LOOKBACK_DAYS},
             )
         ).mappings().one_or_none()
         if brief is None:
             return "MISSING_BRIEF"
+        if classify_freshness(
+            brief["published_at"], lookback_days=brief["lookback_days"],
+            processing_flags=brief["processing_flags"],
+        ) not in {"CURRENT", "RECENT"}:
+            return "SKIPPED:SOURCE_NOT_CURRENT"
         recipients = await _recipients(
             session, tenant_id, brief["user_id"], tuple(payload.get("owner_roles", ()))
         )
