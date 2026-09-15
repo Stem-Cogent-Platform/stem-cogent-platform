@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 
 import { ModuleFailure, ModuleLoading } from "@/components/module-state";
@@ -14,6 +15,7 @@ type Digest = {
   period_end: string;
   status: string;
   brief_ids: string[];
+  briefs?: { id: string; what_changed: string; status: string }[];
   content: { latest_brief?: { what_changed: string; priority: string } };
 };
 
@@ -43,17 +45,19 @@ export default function DigestsPage() {
           <div className="intelligence-list">
             {state.data.map((item) => (
               <article key={item.id}>
-                <div className="brief-meta"><span>{new Date(item.period_start).toLocaleDateString()}</span><span>{item.status}</span></div>
+                <div className="brief-meta"><span>{new Date(item.period_start).toLocaleDateString()} – {new Date(new Date(item.period_end).getTime() - 1).toLocaleDateString()}</span><span>{item.status === "READY" ? "Ready to read" : item.status}</span></div>
                 <h2>{item.content.latest_brief?.what_changed || "Decision Brief digest"}</h2>
                 <p>{item.brief_ids.length} brief{item.brief_ids.length === 1 ? "" : "s"} included.</p>
+                <ul>{item.briefs?.map((brief) => <li key={brief.id}><Link href={`/briefs/${brief.id}`} prefetch={false}>{brief.what_changed}</Link></li>)}</ul>
               </article>
             ))}
             {!state.data.length && (
               <section className="empty-brief">
-                <p className="eyebrow">Monday · 08:00</p>
+                <p className="eyebrow">Your briefing digest</p>
                 <h2>{stateMessages.digestEmpty.title}</h2>
                 <p>{stateMessages.digestEmpty.body}</p>
                 <ul><li>Decisions requiring attention</li><li>Unresolved watched briefs</li><li>Important Focus Area changes</li><li>Selected Wider Intelligence</li></ul>
+                <Link href="/settings">Digest settings</Link>
               </section>
             )}
           </div>

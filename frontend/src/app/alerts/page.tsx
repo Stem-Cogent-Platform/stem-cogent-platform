@@ -15,6 +15,7 @@ type Alert = {
   brief_id: string;
   priority: string;
   subject: string;
+  what_changed?: string;
   status: string;
   read_at?: string;
   created_at: string;
@@ -70,7 +71,7 @@ export default function AlertsPage() {
             {state.data.map((item) => (
               <article className={item.read_at ? "" : "unread"} key={item.id}>
                 <span className={`priority-chip priority-${item.priority.toLowerCase()}`}>{item.priority}</span>
-                <div><h2>{item.subject}</h2><p>{item.payload?.why_delivered || "Matched your configured Decision Lens."}</p></div>
+                <div><h2>{item.what_changed || item.subject}</h2><p>{item.payload?.why_delivered || "Matched your configured Decision Lens."}</p></div>
                 <button className="text-link" disabled={openingId === item.id} onClick={() => void open(item)} type="button">
                   {openingId === item.id ? "Opening…" : "Open brief"}
                 </button>
