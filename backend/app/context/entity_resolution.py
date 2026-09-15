@@ -57,6 +57,20 @@ def resolve_context_value(
         return _resolved(normalised_matches[0], "NORMALISED_EXACT", 0.98)
     if len(normalised_matches) > 1:
         return ContextResolution("AMBIGUOUS", suggestions=normalised_matches[:5])
+    # Business descriptions often name a provider followed by its service.
+    # Only a known name/acronym plus explicit service descriptors is eligible;
+    # generic words, negations and multiple providers must not invent a link.
+    descriptive_matches = tuple(
+        entity for entity in registry
+        if object_type == "DEPENDENCY" and any(
+            _describes_provider(value, name)
+            for name in (entity.canonical_name, *entity.aliases)
+        )
+    )
+    if len(descriptive_matches) == 1:
+        return _resolved(descriptive_matches[0], "DESCRIPTIVE_REFERENCE", 0.97)
+    if len(descriptive_matches) > 1:
+        return ContextResolution("AMBIGUOUS", suggestions=descriptive_matches[:5])
     suggestions = tuple(
         entity
         for entity in registry
@@ -79,3 +93,22 @@ def _resolved(entity: RegistryEntity, method: str, confidence: float) -> Context
 def _normalise(value: str) -> str:
     ascii_value = unicodedata.normalize("NFKD", value).encode("ascii", "ignore").decode()
     return re.sub(r"[^a-z0-9]+", " ", ascii_value.casefold()).strip()
+
+
+def _describes_provider(value: str, name: str) -> bool:
+    provider = _normalise(name)
+    # A single ordinary word (e.g. "Access") is not a reliable provider name.
+    if not provider or (" " not in provider and not (
+        name.isupper() and name.isalpha() and len(name) >= 3
+    )):
+        return False
+    description = _normalise(value)
+    if not description.startswith(provider + " "):
+        return False
+    suffix = description[len(provider) + 1:].split()
+    descriptors = {
+        "operational", "operating", "license", "licence", "instant",
+        "payment", "payments", "integration", "settlement", "services",
+        "service", "banking", "api", "processing", "gateway",
+    }
+    return bool(suffix) and all(word in descriptors for word in suffix)

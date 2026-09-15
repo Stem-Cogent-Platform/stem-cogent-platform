@@ -128,10 +128,6 @@ async def invitation_readiness(
         dict(profile) if profile else None, [dict(o) for o in objects]
     )["complete"]:
         reason = "NOT_READY_CONTEXT_INCOMPLETE"
-    elif any(
-        o["resolution_status"] not in {"RESOLVED", "NOT_APPLICABLE"} for o in objects
-    ):
-        reason = "NOT_READY_ENTITY_RESOLUTION"
     elif (
         not run
         or run["status"] != "COMPLETED"
@@ -149,6 +145,12 @@ async def invitation_readiness(
     return {
         "ready": reason.startswith("READY_"),
         "reason": reason,
+        # Uncertain references remain available for operator review. Readiness
+        # depends on verified matched value, not resolving every free-text entry.
+        "pending_context_references": sum(
+            o["resolution_status"] not in {"RESOLVED", "NOT_APPLICABLE"}
+            for o in objects
+        ),
         **counts,
         "context_version": profile["version"] if profile else None,
         "activation_run_id": run["id"] if run else None,

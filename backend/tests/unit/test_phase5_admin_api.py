@@ -315,6 +315,8 @@ async def test_invitation_create_and_revoke_are_audited(monkeypatch) -> None:
 
 @pytest.mark.asyncio
 async def test_activation_dispatch_and_status_views(monkeypatch) -> None:
+    resolution = AsyncMock(return_value={})
+    monkeypatch.setattr(admin, "audit_tenant_entities", resolution)
     tenant_id = uuid4()
     run_id = uuid4()
     sent: dict = {}
@@ -336,6 +338,7 @@ async def test_activation_dispatch_and_status_views(monkeypatch) -> None:
         system_context(session, tenant_id=operator_tenant_id),
     )
     assert queued == {"id": run_id, "status": "QUEUED"}
+    assert resolution.await_args.args[0] == tenant_id
     assert sent["kwargs"]["queue"] == "activation-queue"
     activation_parameters = next(
         parameters
@@ -355,6 +358,7 @@ async def test_activation_dispatch_and_status_views(monkeypatch) -> None:
 
 @pytest.mark.asyncio
 async def test_activation_dispatch_failure_is_persisted_safely(monkeypatch) -> None:
+    monkeypatch.setattr(admin, "audit_tenant_entities", AsyncMock(return_value={}))
     tenant_id = uuid4()
     run_id = uuid4()
     monkeypatch.setattr(

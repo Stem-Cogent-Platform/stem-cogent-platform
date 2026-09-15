@@ -667,6 +667,8 @@ async def start_activation(
         )["complete"]
     ):
         raise HTTPException(status.HTTP_409_CONFLICT, "Company Context is incomplete")
+    # Resolution is part of normal activation, not a customer setup task.
+    await audit_tenant_entities(tenant_id, context)
     initiated_by = (
         context.principal.user_id if context.principal.tenant_id == tenant_id else None
     )
@@ -902,7 +904,8 @@ async def audit_tenant_entities(
         (
             await context.session.execute(
                 text(
-                    "SELECT id,object_type,name FROM context.company_objects WHERE tenant_id=:tenant_id AND active"
+                    "SELECT id,object_type,name,resolution_status,resolution_method "
+                    "FROM context.company_objects WHERE tenant_id=:tenant_id AND active"
                 ),
                 {"tenant_id": tenant_id},
             )
@@ -912,6 +915,9 @@ async def audit_tenant_entities(
     )
     counts = {"RESOLVED": 0, "AMBIGUOUS": 0, "UNRESOLVED": 0, "NOT_APPLICABLE": 0}
     for item in objects:
+        if (item.get("resolution_method") or "").startswith("ADMIN_"):
+            counts[item["resolution_status"]] += 1
+            continue
         result = resolve_context_value(item["object_type"], item["name"], registry)
         counts[result.status] += 1
         await context.session.execute(
