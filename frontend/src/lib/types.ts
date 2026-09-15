@@ -7,6 +7,7 @@ export type Brief = {
   decision_prompt?: string;
   owner_roles: string[];
   uncertainties: string[];
+  matched_company_objects?: string[];
   evidence_signal_ids: string[];
   brief_status: string;
   personal_priority_score?: number;

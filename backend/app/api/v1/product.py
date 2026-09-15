@@ -200,6 +200,10 @@ async def get_brief(
                        assessment.exposure_types, assessment.stakes_types,
                        assessment.quantification_status, assessment.quantitative_context,
                        assessment.rationale, assessment.uncertainty_codes,
+                       ARRAY(SELECT object.name FROM context.company_objects AS object
+                             WHERE object.tenant_id = brief.tenant_id
+                               AND object.id = ANY(assessment.matched_object_ids)
+                             ORDER BY object.name) AS matched_company_objects,
                        signal.primary_domain, signal.urgency_band, signal.confidence_band,
                        signal.published_at, signal.detected_at
                 FROM decision.briefs AS brief
@@ -1146,7 +1150,21 @@ async def list_digests(
         (
             await context.session.execute(
                 text(
-                    "SELECT * FROM delivery.digests WHERE tenant_id = :tenant_id AND user_id = :user_id ORDER BY period_end DESC LIMIT 30"
+                    """
+                    SELECT digest.*, COALESCE((
+                        SELECT jsonb_agg(jsonb_build_object(
+                            'id', brief.id, 'what_changed', brief.what_changed,
+                            'status', brief.brief_status
+                        ) ORDER BY brief.created_at, brief.id)
+                        FROM decision.briefs AS brief
+                        WHERE brief.tenant_id = digest.tenant_id
+                          AND brief.id = ANY(digest.brief_ids)
+                          AND (brief.user_id IS NULL OR brief.user_id = :user_id)
+                    ), '[]'::JSONB) AS briefs
+                    FROM delivery.digests AS digest
+                    WHERE digest.tenant_id = :tenant_id AND digest.user_id = :user_id
+                    ORDER BY digest.period_end DESC LIMIT 30
+                    """
                 ),
                 {
                     "tenant_id": context.principal.tenant_id,

@@ -27,6 +27,7 @@ async def run_decision_brief_delivery(event: dict[str, Any]) -> str:
                 text(
                     """
                     SELECT brief.id, brief.user_id, brief.what_changed,
+                           brief.created_at, brief.last_material_change_at,
                            brief.personal_priority_score, assessment.relevance_band,
                            signal.primary_domain, signal.urgency_band
                     FROM decision.briefs AS brief
@@ -46,6 +47,12 @@ async def run_decision_brief_delivery(event: dict[str, Any]) -> str:
         )
         delivered = 0
         for recipient in recipients:
+            await _upsert_digest(
+                session, tenant_id, recipient["id"], brief_id, brief,
+                recipient["digest_frequency"],
+            )
+            if not _qualifies_alert(brief, recipient):
+                continue
             alert = (
                 await session.execute(
                     text(
@@ -57,7 +64,8 @@ async def run_decision_brief_delivery(event: dict[str, Any]) -> str:
                             :tenant_id, :user_id, :brief_id, 'IN_APP', :priority,
                             'SENT', :subject, CAST(:payload AS JSONB), NOW(), NOW()
                         ) ON CONFLICT (brief_id, user_id, channel) DO UPDATE
-                          SET payload = EXCLUDED.payload, updated_at = NOW()
+                          SET payload = EXCLUDED.payload, subject = EXCLUDED.subject,
+                              priority = EXCLUDED.priority, updated_at = NOW()
                         RETURNING id
                         """
                     ),
@@ -79,7 +87,6 @@ async def run_decision_brief_delivery(event: dict[str, Any]) -> str:
                 {"tenant_id": tenant_id, "alert_id": alert},
             )
             delivered += 1
-            await _upsert_digest(session, tenant_id, recipient["id"], brief_id, brief)
         await session.commit()
         await _publish(tenant_id, brief_id, brief, recipients, event["event_type"])
         return f"DELIVERED:{delivered}"
@@ -94,7 +101,12 @@ async def _recipients(
             text(
                 """
                 SELECT users.id, lens.role_code,
-                       COALESCE(preference.delivery_channels, ARRAY['IN_APP']::TEXT[]) AS delivery_channels
+                       COALESCE(preference.delivery_channels, ARRAY['IN_APP']::TEXT[]) AS delivery_channels,
+                       COALESCE(preference.digest_frequency, 'DAILY') AS digest_frequency,
+                       preference.minimum_relevance_band,
+                       COALESCE(preference.domain_codes, ARRAY[]::TEXT[]) AS domain_codes,
+                       COALESCE(preference.urgency_bands, ARRAY[]::TEXT[]) AS urgency_bands,
+                       preference.suppressed_until
                 FROM auth.users AS users
                 LEFT JOIN context.user_decision_lenses AS lens
                   ON lens.tenant_id = users.tenant_id AND lens.user_id = users.id AND lens.active
@@ -119,9 +131,16 @@ async def _recipients(
 
 
 async def _upsert_digest(
-    session: Any, tenant_id: UUID, user_id: UUID, brief_id: UUID, brief: Any
+    session: Any, tenant_id: UUID, user_id: UUID, brief_id: UUID, brief: Any,
+    frequency: str = "DAILY",
 ) -> None:
-    start = datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
+    if frequency == "NONE":
+        return
+    changed_at = brief["last_material_change_at"] or brief["created_at"]
+    start = changed_at.astimezone(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
+    if frequency == "WEEKLY":
+        start -= timedelta(days=start.weekday())
+    end = start + timedelta(days=7 if frequency == "WEEKLY" else 1)
     await session.execute(
         text(
             """
@@ -138,11 +157,27 @@ async def _upsert_digest(
             """
         ),
         {"tenant_id": tenant_id, "user_id": user_id, "period_start": start,
-         "period_end": start + timedelta(days=1), "brief_id": brief_id,
+         "period_end": end, "brief_id": brief_id,
          "content": json.dumps({"latest_brief": {"id": str(brief_id),
                                                    "what_changed": brief["what_changed"],
                                                    "priority": brief["relevance_band"]}})},
     )
+
+
+def _qualifies_alert(brief: Any, recipient: Any) -> bool:
+    """Alert filters do not suppress a user's separate digest subscription."""
+    if "IN_APP" not in recipient["delivery_channels"]:
+        return False
+    suppressed = recipient["suppressed_until"]
+    if suppressed is not None and suppressed > datetime.now(UTC):
+        return False
+    if recipient["domain_codes"] and brief["primary_domain"] not in recipient["domain_codes"]:
+        return False
+    if recipient["urgency_bands"] and brief["urgency_band"] not in recipient["urgency_bands"]:
+        return False
+    ranks = {"LOW": 0, "STANDARD": 1, "MEDIUM": 1, "HIGH": 2, "CRITICAL": 3}
+    minimum = recipient["minimum_relevance_band"]
+    return minimum is None or ranks.get(brief["relevance_band"], -1) >= ranks.get(minimum, 4)
 
 
 async def _publish(
