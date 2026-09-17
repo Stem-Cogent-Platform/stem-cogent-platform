@@ -447,7 +447,7 @@ async def _maybe_start_trial(tenant_id: UUID, user_id: UUID) -> None:
         ready["first_value"] = (
             counts["company_briefs"] >= 1
             or counts["meaningful_monitoring_count"] >= 3
-            or exception
+            or (exception and counts["meaningful_monitoring_count"] > 0)
         )
         if not all(ready.values()):
             return

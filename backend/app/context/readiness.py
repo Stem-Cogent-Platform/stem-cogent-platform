@@ -138,7 +138,7 @@ async def invitation_readiness(
         reason = "READY_DECISION_BRIEF"
     elif counts["meaningful_monitoring_count"] >= 3:
         reason = "READY_RELEVANT_MONITORING"
-    elif exception and len(exception.strip()) >= 20:
+    elif exception and len(exception.strip()) >= 20 and counts["meaningful_monitoring_count"] > 0:
         reason = "READY_NARROW_SCOPE_EXCEPTION"
     else:
         reason = "NOT_READY_NO_RECENT_INTELLIGENCE"
