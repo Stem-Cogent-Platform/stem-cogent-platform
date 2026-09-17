@@ -51,9 +51,9 @@ def visible_monitoring_sql() -> str:
             signal.confidence_band,signal.urgency_band,signal.published_at,signal.processing_flags,
             signal.source_url,source.source_name,output.citations,
             jsonb_array_length(output.citations)>0 AS evidence_available,
-            assessment.rationale AS relevance_trace,
+            COALESCE(NULLIF(monitoring.relevance_rationale,'{{}}'::jsonb),assessment.rationale) AS relevance_trace,
             ARRAY(SELECT object.name FROM context.company_objects object
-                  WHERE object.tenant_id=:tenant_id AND object.active
+                  WHERE object.tenant_id=:tenant_id AND object.active AND object.object_type<>'MARKET'
                     AND object.id=ANY(monitoring.matched_object_ids) ORDER BY object.name)
                 AS matched_company_objects,
             (SELECT entity.canonical_name FROM intelligence.signal_entities link
@@ -77,7 +77,14 @@ def visible_monitoring_sql() -> str:
             AND monitoring.relevance_score>=0.450 AND NOT assessment.decision_required
             AND (signal.tenant_id IS NULL OR signal.tenant_id=:tenant_id)
             AND (output.tenant_id IS NULL OR output.tenant_id=:tenant_id)
-            AND {current_sql(window=_WINDOW)} AND {meaningful_sql()} AND {matched_sql()}
+            AND {current_sql(window=_WINDOW)} AND {meaningful_sql()}
+            AND ({matched_sql()} OR (
+              monitoring.user_id=:user_id
+              AND monitoring.relevance_rationale->>'contract_version'='mvp-correction-1'
+              AND monitoring.relevance_rationale->>'meaningful_relevance'='true'
+              AND (jsonb_array_length(COALESCE(monitoring.relevance_rationale->'matched_focus_areas','[]'::jsonb))>0
+                OR jsonb_array_length(COALESCE(monitoring.relevance_rationale->'matched_role_concerns','[]'::jsonb))>0)
+            ))
           ORDER BY {identity_sql()},(monitoring.user_id IS NOT NULL) DESC,
             monitoring.relevance_score DESC,monitoring.id
         ) canonical_monitoring

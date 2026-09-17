@@ -96,8 +96,21 @@ def meaningful_sql(signal: str = "signal", output: str = "output") -> str:
 
 
 def matched_sql(assessment: str = "assessment") -> str:
-    return f"""(cardinality({assessment}.matched_object_ids)>0
-        OR jsonb_array_length(COALESCE({assessment}.rationale->'matched_rule_codes','[]'::jsonb))>0)"""
+    # Legacy rows remain stored. Recheck their actual company objects instead
+    # of treating a country ID or a rule code as meaningful applicability.
+    return f"""(EXISTS (
+          SELECT 1 FROM context.company_objects relevant_object
+          WHERE relevant_object.tenant_id={assessment}.tenant_id
+            AND relevant_object.tenant_id=:tenant_id AND relevant_object.active
+            AND relevant_object.id=ANY({assessment}.matched_object_ids)
+            AND relevant_object.object_type<>'MARKET'
+            AND length(BTRIM(relevant_object.name))>=2
+        ) OR (
+          {assessment}.rationale->>'contract_version'='mvp-correction-1'
+          AND {assessment}.rationale->>'meaningful_relevance'='true'
+          AND jsonb_array_length(COALESCE(
+            {assessment}.rationale->'matched_strategic_priorities','[]'::jsonb))>0
+        ))"""  # nosec B608 # Application identifiers; request values are bound
 
 
 def candidates_sql() -> str:

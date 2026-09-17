@@ -80,6 +80,7 @@ async def run_decision_briefs(event: dict[str, Any]) -> str:
             )
             evidence_ids = _evidence_ids(package, signal_id)
             if not assessment.decision_required:
+                monitored = False
                 if assessment.relevance_score >= _MONITORING_THRESHOLD:
                     await _persist_monitoring(
                         session,
@@ -90,32 +91,42 @@ async def run_decision_briefs(event: dict[str, Any]) -> str:
                         package,
                         assessment,
                     )
-                    lenses, focus_by_user = await _load_lenses(session, tenant_id)
-                    for user_id, lens in lenses:
-                        priority = calculate_personal_priority(
-                            assessment,
-                            lens,
-                            focus_by_user[user_id],
-                            package["primary_domain"],
-                            package["event_type"],
-                            frozenset(package["entity_ids"]),
-                            package["evidence_text"],
+                    monitored = True
+                lenses, focus_by_user = await _load_lenses(session, tenant_id)
+                for user_id, lens in lenses:
+                    priority = calculate_personal_priority(
+                        assessment, lens, focus_by_user[user_id],
+                        package["primary_domain"], package["event_type"],
+                        frozenset(package["entity_ids"]), package["evidence_text"],
+                    )
+                    if priority.score >= _MONITORING_THRESHOLD:
+                        await _persist_monitoring(
+                            session, tenant_id, output_id, signal_id, user_id,
+                            package, assessment, priority.score, priority.relevance_trace,
                         )
-                        if priority.score >= _MONITORING_THRESHOLD:
-                            await _persist_monitoring(
-                                session,
-                                tenant_id,
-                                output_id,
-                                signal_id,
-                                user_id,
-                                package,
-                                assessment,
-                                priority.score,
-                            )
-                    await session.commit()
+                        monitored = True
+                    else:
+                        # Focus removal can change relevance without changing
+                        # the lens version. Withdraw existing personal rows;
+                        # do not create monitoring rows for unrelated news.
+                        withdrawn = await session.execute(text("""
+                            UPDATE context.relevant_monitoring
+                            SET relevance_score=:score,relevance_rationale=CAST(:trace AS JSONB),
+                              lens_version=:lens_version,last_verified_at=NOW(),last_material_change_at=NOW()
+                            WHERE tenant_id=:tenant_id AND user_id=:user_id
+                              AND global_output_id=:output_id AND company_context_version=:version
+                              AND (relevance_score,relevance_rationale,lens_version) IS DISTINCT FROM
+                                  (:score,CAST(:trace AS JSONB),:lens_version)
+                            RETURNING id
+                        """), {
+                            "score": priority.score, "trace": json.dumps(priority.relevance_trace),
+                            "lens_version": lens.version, "tenant_id": tenant_id, "user_id": user_id,
+                            "output_id": output_id, "version": package["company_context_version"],
+                        })
+                        monitored = bool(withdrawn.scalar_one_or_none()) or monitored
+                await session.commit()
+                if monitored:
                     await _publish_monitoring(tenant_id)
-                else:
-                    await session.commit()
                 continue
             company_narrative = format_brief(
                 package["title"] or package["summary"], assessment
@@ -360,6 +371,7 @@ async def _persist_assessment(
     assessment: Any,
 ) -> UUID:
     rationale = {
+        **assessment.relevance_trace,
         "matched_rule_codes": assessment.matched_rule_codes,
         "score_formula": "applicability*.40+objects*.20+urgency*.15+entity*.10+strategy*.10",
     }
@@ -673,26 +685,29 @@ async def _persist_monitoring(
     package: dict[str, Any],
     assessment: Any,
     relevance_score: Decimal | None = None,
+    relevance_trace: dict[str, Any] | None = None,
 ) -> None:
     await session.execute(
         text(
             """
             INSERT INTO context.relevant_monitoring (
                 tenant_id,user_id,global_output_id,signal_id,company_context_version,
-                relevance_score,matched_object_ids,summary,lens_version
+                relevance_score,matched_object_ids,summary,lens_version,relevance_rationale
             ) VALUES (
                 :tenant_id,:user_id,:output_id,:signal_id,:context_version,
                 :score,:matched_ids,:summary,
                 (SELECT version FROM context.user_decision_lenses
-                 WHERE tenant_id=:tenant_id AND user_id=:user_id AND active)
+                 WHERE tenant_id=:tenant_id AND user_id=:user_id AND active),
+                CAST(:relevance_rationale AS JSONB)
             ) ON CONFLICT (tenant_id,user_id,global_output_id,company_context_version)
             DO UPDATE SET relevance_score=EXCLUDED.relevance_score,
                 matched_object_ids=EXCLUDED.matched_object_ids,
                 summary=EXCLUDED.summary,last_verified_at=NOW(),lens_version=EXCLUDED.lens_version,
+                relevance_rationale=EXCLUDED.relevance_rationale,
                 last_material_change_at=CASE WHEN
                   (context.relevant_monitoring.relevance_score,context.relevant_monitoring.matched_object_ids,
-                   context.relevant_monitoring.summary) IS DISTINCT FROM
-                  (EXCLUDED.relevance_score,EXCLUDED.matched_object_ids,EXCLUDED.summary)
+                   context.relevant_monitoring.summary,context.relevant_monitoring.relevance_rationale) IS DISTINCT FROM
+                  (EXCLUDED.relevance_score,EXCLUDED.matched_object_ids,EXCLUDED.summary,EXCLUDED.relevance_rationale)
                   THEN NOW() ELSE context.relevant_monitoring.last_material_change_at END
             """
         ),
@@ -705,6 +720,7 @@ async def _persist_monitoring(
             "score": relevance_score or assessment.relevance_score,
             "matched_ids": [item.id for item in assessment.matched_objects],
             "summary": package["summary"] or package["title"],
+            "relevance_rationale": json.dumps(relevance_trace or assessment.relevance_trace),
         },
     )
 
