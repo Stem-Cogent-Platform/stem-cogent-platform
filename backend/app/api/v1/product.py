@@ -27,6 +27,7 @@ from app.intelligence.freshness import (
     matched_sql,
     with_freshness,
 )
+from app.intelligence.evidence_normalization import normalize_evidence_bundle
 from app.core.config import get_settings
 
 router = APIRouter(prefix="/api/v1", tags=["product"])
@@ -231,9 +232,10 @@ async def get_brief(
             await context.session.execute(
                 text(
                     """
-                SELECT signal.id, signal.title, signal.source_url, signal.published_at,
-                       signal.detected_at, signal.confidence_band,
-                       source.source_name AS source_name
+                SELECT signal.id, signal.title, signal.source_url, signal.canonical_url,
+                       signal.published_at, signal.detected_at, signal.confidence_band,
+                       source.id AS source_id, source.source_name AS source_name,
+                       source.source_type, source.tier
                 FROM pipeline.signals AS signal
                 JOIN config.sources AS source ON source.id = signal.source_id
                 WHERE signal.id = ANY(:signal_ids)
@@ -311,10 +313,14 @@ async def get_brief(
         )
     await context.session.commit()
     lifecycle_enabled = get_settings().PHASE5_BRIEF_LIFECYCLE_ENABLED
+    deduped_evidence, source_metrics = normalize_evidence_bundle(
+        [dict(item) for item in evidence]
+    )
     return jsonable_encoder(
         {
             **dict(row),
-            "evidence": [dict(item) for item in evidence],
+            "evidence": [dict(item) for item in deduped_evidence],
+            "source_metrics": source_metrics.to_dict(),
             "actions": [dict(item) for item in actions],
             "timeline": [dict(item) for item in timeline] if lifecycle_enabled else [],
         }
@@ -703,7 +709,9 @@ async def signal_detail(
             await context.session.execute(
                 text("""
             SELECT DISTINCT signal.id, signal.title, signal.source_url,
-                   signal.published_at, signal.detected_at, source.source_name
+                   signal.canonical_url, signal.body_text_hash,
+                   signal.published_at, signal.detected_at, source.source_name,
+                   source.id AS source_id, source.source_type, source.tier
             FROM pipeline.signals signal
             JOIN config.sources source ON source.id=signal.source_id
             WHERE signal.id=ANY(CAST(:ids AS UUID[]))
@@ -728,6 +736,11 @@ async def signal_detail(
         for citation in signal["citations"] or []
         if str(citation.get("source_signal_id")) in allowed_ids
     ]
+    raw_evidence_items = [dict(item) for item in evidence]
+    deduped_evidence, source_metrics = normalize_evidence_bundle(
+        raw_evidence_items,
+        raw_citation_count=len(payload["citations"]) or len(raw_evidence_items),
+    )
     interpretation = (
         (
             await context.session.execute(
@@ -778,7 +791,8 @@ async def signal_detail(
         {
             "signal": with_freshness(payload),
             "entities": [dict(item) for item in entities],
-            "evidence": [with_freshness(item) for item in evidence],
+            "evidence": [with_freshness(item) for item in deduped_evidence],
+            "source_metrics": source_metrics.to_dict(),
             "tenant_interpretation": dict(interpretation) if interpretation else None,
             "related_intelligence": [with_freshness(item) for item in related],
             "historical_context": [

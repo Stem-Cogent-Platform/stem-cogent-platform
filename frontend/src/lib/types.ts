@@ -32,7 +32,15 @@ export type Brief = {
   guidance_status?: string;
   timeline?: BriefTimelineEvent[];
   evidence?: Evidence[];
+  source_metrics?: SourceMetrics;
   actions?: DecisionAction[];
+};
+
+export type SourceMetrics = {
+  source_count: number;
+  independent_source_count: number;
+  primary_source_count: number;
+  corroboration_strength: string;
 };
 
 export type DecisionPath = {
@@ -53,9 +61,15 @@ export type Evidence = {
   id: string;
   title?: string;
   source_url?: string;
+  canonical_url?: string;
   source_name: string;
   published_at?: string;
+  detected_at?: string;
   confidence_band?: string;
+  is_primary?: boolean;
+  duplicate_count?: number;
+  freshness?: string;
+  effective_at?: string;
 };
 
 export type DecisionAction = {

@@ -7,6 +7,12 @@ from uuid import UUID
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.intelligence.evidence_normalization import (
+    SourceMetrics,
+    map_confidence_to_cil,
+    normalize_evidence_bundle,
+)
+
 
 @dataclass(frozen=True, slots=True)
 class CILCitation:
@@ -62,8 +68,10 @@ async def _retrieve_brief(
                        assessment.decision_type, assessment.rationale,
                        output.id AS output_id, output.summary,
                        output.key_developments, output.global_implication,
-                       output.confidence_note
+                       output.confidence_note,
+                       signal.confidence_band, signal.confidence_score
                 FROM decision.briefs AS brief
+                JOIN pipeline.signals AS signal ON signal.id = brief.signal_id
                 JOIN decision.assessments AS assessment
                   ON assessment.id = brief.assessment_id
                  AND assessment.tenant_id = brief.tenant_id
@@ -92,7 +100,9 @@ async def _retrieve_brief(
             {"tenant_id": tenant_id, "object_ids": row["matched_object_ids"]},
         )
     ).mappings().all()
-    citations = await _load_citations(session, tenant_id, tuple(row["evidence_signal_ids"]))
+    citations, metrics = await _load_citations_with_metrics(
+        session, tenant_id, tuple(row["evidence_signal_ids"])
+    )
     context = {
         "brief": {key: row[key] for key in (
             "brief_id", "what_changed", "why_it_matters", "exposure_summary",
@@ -106,10 +116,12 @@ async def _retrieve_brief(
         "global_intelligence": {key: row[key] for key in (
             "output_id", "summary", "key_developments", "global_implication", "confidence_note",
         )},
+        "source_metrics": metrics.to_dict(),
     }
+    confidence = map_confidence_to_cil(row["confidence_band"]) if citations else "INSUFFICIENT_DATA"
     return CILRetrievalResult(
         context, citations, tuple(row["evidence_signal_ids"]), (row["output_id"],),
-        (brief_id,), "HIGH" if citations else "INSUFFICIENT_DATA",
+        (brief_id,), confidence,
     )
 
 
@@ -122,10 +134,14 @@ async def _retrieve_signal(
                 """
                 SELECT signal.id, signal.title, signal.body_text,
                        signal.primary_domain, signal.subcategory_tags,
-                       signal.confidence_score, signal.urgency_score,
-                       signal.published_at, source.source_name AS source_name,
+                       signal.confidence_score, signal.confidence_band,
+                       signal.urgency_score, signal.urgency_band,
+                       signal.published_at, signal.canonical_url,
+                       source.id AS source_id, source.source_name AS source_name,
+                       source.source_type, source.tier,
                        signal.source_url, output.id AS output_id,
-                       output.summary, output.global_implication
+                       output.summary, output.global_implication,
+                       output.confidence_note, output.citations
                 FROM pipeline.signals AS signal
                 JOIN config.sources AS source ON source.id = signal.source_id
                 LEFT JOIN intelligence.global_outputs AS output
@@ -141,9 +157,24 @@ async def _retrieve_signal(
     ).mappings().one_or_none()
     if row is None:
         return _insufficient()
-    citation = CILCitation(row["id"], row["source_name"], row["source_url"])
+
+    evidence_signal_ids: list[UUID] = [signal_id]
+    for citation in row.get("citations") or []:
+        try:
+            cid = UUID(str(citation.get("source_signal_id")))
+            if cid not in evidence_signal_ids:
+                evidence_signal_ids.append(cid)
+        except (ValueError, TypeError, KeyError):
+            pass
+
+    citations, metrics = await _load_citations_with_metrics(
+        session, tenant_id, tuple(evidence_signal_ids)
+    )
+    context = dict(row)
+    context["source_metrics"] = metrics.to_dict()
     output_ids = (row["output_id"],) if row["output_id"] else ()
-    return CILRetrievalResult(dict(row), (citation,), (signal_id,), output_ids, (), "HIGH")
+    confidence = map_confidence_to_cil(row["confidence_band"]) if citations else "INSUFFICIENT_DATA"
+    return CILRetrievalResult(context, citations, tuple(evidence_signal_ids), output_ids, (), confidence)
 
 
 async def _retrieve_entity(
@@ -197,14 +228,25 @@ async def _retrieve_entity(
             for evidence_id in relationship["evidence_signal_ids"]
         ]
     ))[:20]
-    citations = await _load_citations(session, tenant_id, signal_ids)
+    citations, metrics = await _load_citations_with_metrics(session, tenant_id, signal_ids)
+    confidence: Literal["HIGH", "MODERATE", "LOW", "INSUFFICIENT_DATA"]
+    if not citations:
+        confidence = "INSUFFICIENT_DATA"
+    elif metrics.corroboration_strength in {"PRIMARY_CONFIRMED", "HIGHLY_CORROBORATED"}:
+        confidence = "HIGH"
+    elif metrics.corroboration_strength == "CORROBORATED":
+        confidence = "MODERATE"
+    else:
+        confidence = "LOW"
+
     return CILRetrievalResult(
         {
             "entity": dict(entity),
             "recent_evidence": [dict(row) for row in signal_rows],
             "relationships": [dict(row) for row in relationships],
+            "source_metrics": metrics.to_dict(),
         }, citations,
-        signal_ids, (), (), "MODERATE" if citations else "INSUFFICIENT_DATA",
+        signal_ids, (), (), confidence,
     )
 
 
@@ -237,23 +279,47 @@ async def _retrieve_company_lens(
 async def _load_citations(
     session: AsyncSession, tenant_id: UUID, signal_ids: tuple[UUID, ...]
 ) -> tuple[CILCitation, ...]:
+    citations, _ = await _load_citations_with_metrics(session, tenant_id, signal_ids)
+    return citations
+
+
+async def _load_citations_with_metrics(
+    session: AsyncSession, tenant_id: UUID, signal_ids: tuple[UUID, ...]
+) -> tuple[tuple[CILCitation, ...], SourceMetrics]:
     if not signal_ids:
-        return ()
+        return (), SourceMetrics(0, 0, 0, "UNVERIFIED")
     rows = (await session.execute(
         text(
             """
-            SELECT DISTINCT ON (signal.id) signal.id,
-                   source.source_name AS source_name,
-                   signal.source_url
+            SELECT signal.id,
+                   source.id AS source_id,
+                   source.source_name,
+                   source.source_type,
+                   source.tier,
+                   signal.source_url,
+                   signal.canonical_url,
+                   signal.published_at,
+                   signal.body_text_hash
             FROM pipeline.signals AS signal
             JOIN config.sources AS source ON source.id = signal.source_id
             WHERE signal.id = ANY(CAST(:signal_ids AS UUID[]))
               AND (signal.tenant_id IS NULL OR signal.tenant_id = :tenant_id)
-            ORDER BY signal.id, signal.created_at DESC
+            ORDER BY signal.published_at DESC NULLS LAST, signal.created_at DESC
             """
         ), {"signal_ids": list(signal_ids), "tenant_id": tenant_id}
     )).mappings().all()
-    return tuple(CILCitation(row["id"], row["source_name"], row["source_url"]) for row in rows)
+
+    evidence_items = [dict(row) for row in rows]
+    collapsed, metrics = normalize_evidence_bundle(evidence_items, raw_citation_count=len(signal_ids))
+    citations = tuple(
+        CILCitation(
+            item["id"],
+            item["source_name"],
+            item.get("canonical_url") or item.get("source_url"),
+        )
+        for item in collapsed
+    )
+    return citations, metrics
 
 
 def _insufficient() -> CILRetrievalResult:

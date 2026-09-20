@@ -10,11 +10,41 @@ import { WorkspaceShell } from "@/components/workspace-shell";
 import { apiRequest } from "@/lib/api";
 import { LoadState } from "@/lib/types";
 
-type Evidence = { freshness?: string; effective_at?: string; id: string; title?: string; source_name: string; source_url?: string; published_at?: string; detected_at?: string };
+type Evidence = {
+  freshness?: string;
+  effective_at?: string;
+  id: string;
+  title?: string;
+  source_name: string;
+  source_url?: string;
+  published_at?: string;
+  detected_at?: string;
+  is_primary?: boolean;
+  duplicate_count?: number;
+};
+type SourceMetrics = {
+  source_count: number;
+  independent_source_count: number;
+  primary_source_count: number;
+  corroboration_strength: string;
+};
 type Dossier = {
-  signal: Evidence & { evidence_excerpt?: string; primary_domain?: string; confidence_band?: string; urgency_band?: string; summary?: string; global_implication?: string; confidence_note?: string; key_developments?: string[]; llm_synthesis_failed?: boolean; synthesized_at?: string; subcategory_tags?: string[] };
+  signal: Evidence & {
+    evidence_excerpt?: string;
+    primary_domain?: string;
+    confidence_band?: string;
+    urgency_band?: string;
+    summary?: string;
+    global_implication?: string;
+    confidence_note?: string;
+    key_developments?: string[];
+    llm_synthesis_failed?: boolean;
+    synthesized_at?: string;
+    subcategory_tags?: string[];
+  };
   entities: { id: string; canonical_name: string; entity_type: string }[];
   evidence: Evidence[];
+  source_metrics?: SourceMetrics;
   related_intelligence?: Evidence[];
   historical_context?: Evidence[];
   tenant_interpretation?: { relevance_band: string; decision_required: boolean; matched_company_objects: string[] } | null;
@@ -52,10 +82,19 @@ export default function SignalPage() {
           <p>{state.data.tenant_interpretation.decision_required ? "A company decision requires review." : "Monitor this development."}</p>
         </section> : <p>No current company relevance assessment is available for this development.</p>}
         <h2>Evidence and timing</h2>
-        <dl><dt>Published</dt><dd>{date(state.data.signal.published_at)}</dd><dt>First detected</dt><dd>{date(state.data.signal.detected_at)}</dd><dt>Analysis recorded</dt><dd>{date(state.data.signal.synthesized_at)}</dd><dt>Confidence</dt><dd>{state.data.signal.confidence_band?.replaceAll("_", " ").toLowerCase() || "Not assessed"}</dd></dl>
+        <dl>
+          <dt>Published</dt><dd>{date(state.data.signal.published_at)}</dd>
+          <dt>First detected</dt><dd>{date(state.data.signal.detected_at)}</dd>
+          <dt>Analysis recorded</dt><dd>{date(state.data.signal.synthesized_at)}</dd>
+          <dt>Confidence</dt><dd>{state.data.signal.confidence_band?.replaceAll("_", " ").toLowerCase() || "Not assessed"}</dd>
+          {state.data.source_metrics && <>
+            <dt>Independent sources</dt><dd>{state.data.source_metrics.independent_source_count}</dd>
+            <dt>Corroboration</dt><dd>{state.data.source_metrics.corroboration_strength.replaceAll("_", " ").toLowerCase()}{state.data.source_metrics.primary_source_count > 0 ? " (includes official source)" : ""}</dd>
+          </>}
+        </dl>
         {state.data.signal.confidence_note && <p>{state.data.signal.confidence_note}</p>}
         {state.data.signal.evidence_excerpt && <details><summary>Read stored source excerpt</summary><p>{state.data.signal.evidence_excerpt}</p></details>}
-        <ul className="evidence-list">{state.data.evidence.map((item) => <li key={item.id}><div><strong>{item.title || item.source_name}</strong><small>{item.freshness === "HISTORICAL" ? "Historical context: " : ""}{item.source_name} · Published: {date(item.published_at)}</small></div>{item.source_url && <a href={item.source_url} target="_blank" rel="noreferrer">Open source</a>}</li>)}</ul>
+        <ul className="evidence-list">{state.data.evidence.map((item) => <li key={item.id}><div><strong>{item.title || item.source_name}{item.is_primary ? " (Official source)" : ""}</strong><small>{item.freshness === "HISTORICAL" ? "Historical context: " : ""}{item.source_name}{item.duplicate_count && item.duplicate_count > 1 ? ` · ${item.duplicate_count} reports collapsed` : ""} · Published: {date(item.published_at)}</small></div>{item.source_url && <a href={item.source_url} target="_blank" rel="noreferrer">Open source</a>}</li>)}</ul>
         <h2>Historical context</h2>
         {state.data.historical_context?.length ? <ul>{state.data.historical_context.map((item) => <li key={item.id}><Link href={`/signals/${item.id}`}>{item.title}</Link><p>Historical context: Originally published: {date(item.published_at)}</p></li>)}</ul> : <p>No related historical evidence is stored for this development.</p>}
         <h2>Related intelligence</h2>
