@@ -25,6 +25,9 @@ class Result:
     def mappings(self) -> "Result":
         return self
 
+    def one_or_none(self):
+        return self.row
+
     def one(self):
         return self.row
 
@@ -62,9 +65,10 @@ def session_source(session: Session):
 async def test_ready_user_starts_exact_21_day_trial(monkeypatch) -> None:
     tenant_id, user_id, engagement_id = uuid4(), uuid4(), uuid4()
     session = Session(
-        Result(),
+        Result(), Result(row={"version": 3}), Result(scalar=45),
+        Result(row={"company_briefs": 1, "meaningful_monitoring_count": 0}),
         Result(
-            row={"accepted": True, "lens": True, "focus": True, "first_value": True}
+            row={"accepted": True, "onboarded": True, "personalised": True, "exception": False}
         ),
         Result(scalar=engagement_id),
         Result(),
@@ -110,9 +114,10 @@ async def test_ready_user_starts_exact_21_day_trial(monkeypatch) -> None:
 async def test_incomplete_or_started_pilot_is_not_restarted(monkeypatch) -> None:
     tenant_id, user_id = uuid4(), uuid4()
     incomplete = Session(
-        Result(),
+        Result(), Result(row={"version": 3}), Result(scalar=45),
+        Result(row={"company_briefs": 1, "meaningful_monitoring_count": 0}),
         Result(
-            row={"accepted": True, "lens": False, "focus": True, "first_value": True}
+            row={"accepted": True, "onboarded": False, "personalised": True, "exception": False}
         ),
     )
     monkeypatch.setattr(pilot_activation, "get_session", session_source(incomplete))
@@ -120,9 +125,10 @@ async def test_incomplete_or_started_pilot_is_not_restarted(monkeypatch) -> None
     assert incomplete.commits == 0
 
     started = Session(
-        Result(),
+        Result(), Result(row={"version": 3}), Result(scalar=45),
+        Result(row={"company_briefs": 1, "meaningful_monitoring_count": 0}),
         Result(
-            row={"accepted": True, "lens": True, "focus": True, "first_value": True}
+            row={"accepted": True, "onboarded": True, "personalised": True, "exception": False}
         ),
         Result(scalar=None),
     )
@@ -137,21 +143,29 @@ async def test_personalisation_rebuilds_each_output_then_checks_readiness(
 ) -> None:
     tenant_id, user_id = uuid4(), uuid4()
     outputs = [
-        {"global_output_id": uuid4(), "signal_id": uuid4()},
-        {"global_output_id": uuid4(), "signal_id": uuid4()},
+        {"global_output_id": uuid4(), "signal_id": uuid4(), "freshness_eligible": True, "meaningful": True},
+        {"global_output_id": uuid4(), "signal_id": uuid4(), "freshness_eligible": True, "meaningful": True},
     ]
-    session = Session(Result(), Result(rows=outputs))
+    session = Session(Result(), Result(row={"context_version": 6, "lens_version": 1}), Result(scalar=45), Result(), Result(), Result(), Result(rows=outputs), Result(), Result(scalar=user_id))
     decide = AsyncMock(return_value="created")
     readiness = AsyncMock()
     monkeypatch.setattr(pilot_activation, "get_session", session_source(session))
     monkeypatch.setattr(pilot_activation, "run_decision_briefs", decide)
     monkeypatch.setattr(pilot_activation, "_maybe_start_trial", readiness)
 
+    monkeypatch.setattr("app.workers.tasks.decision._publish_monitoring", AsyncMock())
     result = await pilot_activation.personalise_user(
-        {"tenant_id": str(tenant_id), "user_id": str(user_id)}
+        {"tenant_id": str(tenant_id), "user_id": str(user_id), "request_id": str(uuid4())}
     )
 
     assert result == "PERSONALISED:2"
+    candidate_index = next(i for i, sql in enumerate(session.statements) if "canonical_outputs" in sql)
+    candidates = session.statements[candidate_index]
+    assert "FROM intelligence.global_outputs output" in candidates
+    assert "FROM decision.assessments" not in candidates
+    assert "signal.published_at BETWEEN NOW()" in candidates
+    assert "signal.dedup_status NOT IN" in candidates
+    assert session.parameters[candidate_index]["lookback_days"] == 45
     assert decide.await_count == 2
     for call in decide.await_args_list:
         payload = call.args[0]["payload"]
@@ -159,6 +173,36 @@ async def test_personalisation_rebuilds_each_output_then_checks_readiness(
         assert isinstance(payload["signal_id"], str)
         assert payload["tenant_id"] == str(tenant_id)
     readiness.assert_awaited_once_with(tenant_id, user_id)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("personal", [False, True])
+async def test_candidate_timeout_commits_progress_then_records_failure(personal):
+    tenant_id, run_id, user_id, request_id = uuid4(), uuid4(), uuid4(), uuid4()
+    session = AsyncMock()
+    failure_writes = []
+
+    async def execute(statement, parameters=None):
+        sql = str(statement)
+        if "canonical_outputs" in sql:
+            assert session.commit.await_count == 1
+            raise TimeoutError("candidate inventory exceeded its time budget")
+        if "SET status='FAILED'" in sql:
+            failure_writes.append((sql, parameters))
+        return Result()
+
+    session.execute.side_effect = execute
+    kwargs = {"user_id": user_id, "request_id": request_id} if personal else {"run_id": run_id}
+    with pytest.raises(TimeoutError):
+        await pilot_activation._candidate_inventory(session, tenant_id, 45, **kwargs)
+
+    session.rollback.assert_awaited_once()
+    assert session.commit.await_count == 2
+    assert len(failure_writes) == 1
+    sql, parameters = failure_writes[0]
+    assert parameters["tenant_id"] == tenant_id
+    assert "CANDIDATE_QUERY_TIMEOUT" in parameters.values()
+    assert parameters["request_id" if personal else "run_id"] == (request_id if personal else run_id)
 
 
 @pytest.mark.asyncio

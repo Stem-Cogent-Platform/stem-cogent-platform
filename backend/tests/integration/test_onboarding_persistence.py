@@ -5,17 +5,18 @@ endpoint writes roll back, including endpoint-level commits via savepoints.
 """
 
 from dataclasses import replace
+import json
 from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import pytest
 import pytest_asyncio
-from fastapi import Request
+from fastapi import HTTPException, Request
 from sqlalchemy import make_url, text
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 
 from app.api.auth import Principal, RequestContext
-from app.api.v1 import compliance, context
+from app.api.v1 import compliance, context, product
 from app.compliance.documents import current_legal_documents
 from app.core.config import get_settings
 
@@ -34,7 +35,8 @@ async def onboarding_context(monkeypatch):
     engine = create_async_engine(url.set(drivername="postgresql+asyncpg"))
     monkeypatch.setattr(context, "invalidate_company", AsyncMock())
     monkeypatch.setattr(context, "invalidate_user", AsyncMock())
-    monkeypatch.setattr(context, "_queue_personalisation", lambda _: False)
+    monkeypatch.setattr(context, "_queue_personalisation", AsyncMock(return_value=False))
+    monkeypatch.setattr(context, "queue_company_users", AsyncMock())
     monkeypatch.setattr(settings, "JWT_SIGNING_SECRET_ARN", "local-test-consent-key")
     monkeypatch.setattr(compliance, "get_secret_string", lambda _: "local-test-only")
     tenant_id, user_id = uuid4(), uuid4()
@@ -45,7 +47,7 @@ async def onboarding_context(monkeypatch):
         permission_role="ADMIN",
         permissions=frozenset({
             "CONFIGURE_COMPANY_CONTEXT", "CONFIGURE_DECISION_LENS",
-            "CONFIGURE_FOCUS_AREAS", "CONFIGURE_ALERTS",
+            "CONFIGURE_FOCUS_AREAS", "CONFIGURE_ALERTS", "READ_INTELLIGENCE",
         }),
     )
     try:
@@ -178,3 +180,71 @@ async def test_final_onboarding_save_persists_delivery_and_completion(
         {"tenant_id": request_context.principal.tenant_id, "id": request_context.principal.user_id},
     )
     assert completed_at == first["completed_at"]
+
+
+async def test_unchanged_profile_retry_preserves_context_version(onboarding_context):
+    request_context = onboarding_context
+    body = context.CompanyProfileInput(
+        business_categories=["FINTECH"], operating_markets=["NG"],
+        strategic_priorities=["GROWTH"],
+    )
+    first = await context.put_company_context(body, request_context)
+    assert first["version"] == 1
+    changed = await context.put_company_context(
+        body.model_copy(update={"strategic_priorities": ["RELIABILITY"]}), request_context,
+    )
+    assert changed["version"] == 2
+
+
+async def test_signal_dossier_and_feed_use_real_postgres_tenant_boundaries(onboarding_context):
+    request_context = onboarding_context
+    session = request_context.session
+    source_id, job_id, private_tenant = uuid4(), uuid4(), uuid4()
+    public_id, duplicate_id, private_id = uuid4(), uuid4(), uuid4()
+    # Privileged fixture creation only; endpoint calls below retain runtime RLS.
+    # The surrounding test transaction rolls back every row, never deleting audit history.
+    await session.execute(text("SET LOCAL ROLE NONE"))
+    await session.execute(text("INSERT INTO auth.tenants(id,name,slug) VALUES (:id,'Other',:slug)"),
+                          {"id": private_tenant, "slug": str(private_tenant)})
+    await session.execute(text("""
+        INSERT INTO config.sources(id,source_code,source_name,source_type,tier,reliability_score)
+        VALUES (:id,:code,'Evidence source','API',1,0.9)
+    """), {"id": source_id, "code": str(source_id)})
+    await session.execute(text("""
+        INSERT INTO pipeline.collection_jobs(id,source_id,trigger_type,priority)
+        VALUES (:id,:source,'MANUAL','STANDARD')
+    """), {"id": job_id, "source": source_id})
+    for signal_id, tenant_id in ((public_id, None), (duplicate_id, None), (private_id, private_tenant)):
+        await session.execute(text("""
+            INSERT INTO pipeline.signals(id,collection_job_id,source_id,raw_storage_path,
+                signal_type,title,body_text,source_url,body_text_hash,detected_at,published_at,
+                tenant_id,is_proprietary,pipeline_stage,primary_domain,subcategory_tags,confidence_band)
+            VALUES (:id,:job,:source,'test/evidence','NEWS','Evidence title','Stored evidence',
+                'https://example.invalid/circular','same-content',NOW(),NOW(),:tenant,:private,'SCORED',
+                'REGULATORY_POLICY',ARRAY['CIRCULAR_ISSUED'],'HIGH')
+        """), {"id": signal_id, "job": job_id, "source": source_id,
+               "tenant": tenant_id, "private": tenant_id is not None})
+        await session.execute(text("""
+            INSERT INTO intelligence.global_outputs(signal_id,tenant_id,summary,citations,
+                synthesis_status,llm_synthesis_failed,synthesized_at)
+            VALUES (:id,:tenant,'Evidence summary',CAST(:citations AS JSONB),'COMPLETED',TRUE,NOW())
+        """), {"id": signal_id, "tenant": tenant_id, "citations": json.dumps([
+            {"source_signal_id": str(signal_id), "source_name": "Evidence source", "claim_index": 0}
+        ])})
+    await session.execute(text("SET LOCAL ROLE sc_app_runtime"))
+    dossier = await product.signal_detail(public_id, request_context)
+    assert dossier["signal"]["id"] == str(public_id)
+    assert dossier["signal"]["llm_synthesis_failed"] is True
+    assert [row["id"] for row in dossier["evidence"]] == [str(public_id)]
+    assert dossier["entities"] == []
+    feed = await product.wider_intelligence(limit=100, context=request_context)
+    matching = [row for row in feed if row["signal_id"] in {str(public_id), str(duplicate_id)}]
+    assert len(matching) == 1
+    assert str(private_id) not in {row["signal_id"] for row in feed}
+    with pytest.raises(HTTPException) as error:
+        await product.signal_detail(private_id, request_context)
+    assert error.value.status_code == 404
+    # Also parse/execute the updated object-watchlist SQL against PostgreSQL.
+    assert await product.watchlist(request_context) == {"company": [], "focus": []}
+    readiness = await product.briefing_readiness(request_context)
+    assert readiness["state"] == "SETUP_REQUIRED"

@@ -170,10 +170,11 @@ locals {
       "paystack_webhook_secret",
       "google_oauth_credentials",
       "linkedin_oauth_credentials",
+      "serpapi_api_key",
     ]
     frontend-service        = []
     scheduler-worker        = ["database_credentials", "redis_auth_token"]
-    collector-worker        = ["database_credentials", "redis_auth_token"]
+    collector-worker        = ["database_credentials", "redis_auth_token", "serpapi_api_key"]
     rss-collector-worker    = ["database_credentials", "redis_auth_token"]
     api-collector-worker    = ["database_credentials", "redis_auth_token"]
     scraper-worker          = ["database_credentials", "redis_auth_token"]
@@ -184,7 +185,7 @@ locals {
     classification-worker   = ["database_credentials", "redis_auth_token"]
     enrichment-worker       = ["database_credentials", "redis_auth_token", "openai_api_key"]
     clustering-worker       = ["database_credentials", "redis_auth_token", "openai_api_key"]
-    synthesis-worker        = ["database_credentials", "redis_auth_token", "openai_api_key", "groq_api_key"]
+    synthesis-worker        = ["database_credentials", "redis_auth_token", "openai_api_key", "groq_api_key", "serpapi_api_key"]
     alert-worker            = ["database_credentials", "redis_auth_token"]
     delivery-worker         = ["database_credentials", "redis_auth_token", "resend_api_key"]
     digest-worker           = ["database_credentials", "redis_auth_token", "openai_api_key", "groq_api_key", "resend_api_key"]

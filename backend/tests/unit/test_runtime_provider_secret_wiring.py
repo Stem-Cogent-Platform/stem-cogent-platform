@@ -14,6 +14,7 @@ def test_managed_provider_secret_arns_are_wired_into_every_runtime_environment()
         "RESEND_API_KEY_ARN": "resend_api_key",
         "GOOGLE_OAUTH_CREDENTIALS_ARN": "google_oauth_credentials",
         "LINKEDIN_OAUTH_CREDENTIALS_ARN": "linkedin_oauth_credentials",
+        "SERPAPI_API_KEY_ARN": "serpapi_api_key",
     }
 
     for environment in ("staging", "prod"):

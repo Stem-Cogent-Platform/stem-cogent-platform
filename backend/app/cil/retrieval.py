@@ -7,6 +7,13 @@ from uuid import UUID
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.cil.sufficiency import evaluate_evidence_sufficiency
+from app.intelligence.evidence_normalization import (
+    SourceMetrics,
+    map_confidence_to_cil,
+    normalize_evidence_bundle,
+)
+
 
 @dataclass(frozen=True, slots=True)
 class CILCitation:
@@ -32,16 +39,23 @@ async def retrieve_context(
     user_id: UUID,
     anchor_type: str,
     anchor_id: UUID,
+    query: str = "",
 ) -> CILRetrievalResult:
     if anchor_type == "DECISION_BRIEF":
-        return await _retrieve_brief(session, tenant_id, user_id, anchor_id)
-    if anchor_type == "SIGNAL":
-        return await _retrieve_signal(session, tenant_id, anchor_id)
-    if anchor_type == "ENTITY":
-        return await _retrieve_entity(session, tenant_id, anchor_id)
-    if anchor_type == "COMPANY_LENS":
-        return await _retrieve_company_lens(session, tenant_id, anchor_id)
-    raise ValueError(f"Unsupported CIL anchor type: {anchor_type}")
+        result = await _retrieve_brief(session, tenant_id, user_id, anchor_id)
+    elif anchor_type == "SIGNAL":
+        result = await _retrieve_signal(session, tenant_id, anchor_id, user_id=user_id)
+    elif anchor_type == "ENTITY":
+        result = await _retrieve_entity(session, tenant_id, anchor_id, user_id=user_id)
+    elif anchor_type == "COMPANY_LENS":
+        result = await _retrieve_company_lens(session, tenant_id, anchor_id)
+    else:
+        raise ValueError(f"Unsupported CIL anchor type: {anchor_type}")
+
+    decision = evaluate_evidence_sufficiency(query, result)
+    result.structured_context["sufficiency"] = decision.to_dict()
+    return result
+
 
 
 async def _retrieve_brief(
@@ -55,15 +69,21 @@ async def _retrieve_brief(
                        brief.why_it_matters, brief.exposure_summary,
                        brief.stakes_summary, brief.decision_prompt,
                        brief.owner_roles, brief.uncertainties,
-                       brief.evidence_signal_ids, assessment.id AS assessment_id,
+                       brief.evidence_signal_ids,
+                       brief.response_options, brief.next_validation_steps,
+                       brief.gaps_summary, brief.material_change_count,
+                       brief.decision_window, brief.brief_status,
+                       assessment.id AS assessment_id,
                        assessment.relevance_score, assessment.relevance_band,
                        assessment.matched_object_ids, assessment.exposure_types,
                        assessment.stakes_types, assessment.decision_required,
                        assessment.decision_type, assessment.rationale,
                        output.id AS output_id, output.summary,
                        output.key_developments, output.global_implication,
-                       output.confidence_note
+                       output.confidence_note,
+                       signal.confidence_band, signal.confidence_score
                 FROM decision.briefs AS brief
+                JOIN pipeline.signals AS signal ON signal.id = brief.signal_id
                 JOIN decision.assessments AS assessment
                   ON assessment.id = brief.assessment_id
                  AND assessment.tenant_id = brief.tenant_id
@@ -92,11 +112,15 @@ async def _retrieve_brief(
             {"tenant_id": tenant_id, "object_ids": row["matched_object_ids"]},
         )
     ).mappings().all()
-    citations = await _load_citations(session, tenant_id, tuple(row["evidence_signal_ids"]))
+    citations, metrics = await _load_citations_with_metrics(
+        session, tenant_id, tuple(row["evidence_signal_ids"])
+    )
     context = {
         "brief": {key: row[key] for key in (
             "brief_id", "what_changed", "why_it_matters", "exposure_summary",
             "stakes_summary", "decision_prompt", "owner_roles", "uncertainties",
+            "response_options", "next_validation_steps", "gaps_summary",
+            "material_change_count", "decision_window", "brief_status",
         )},
         "assessment": {key: row[key] for key in (
             "assessment_id", "relevance_score", "relevance_band", "exposure_types",
@@ -106,15 +130,37 @@ async def _retrieve_brief(
         "global_intelligence": {key: row[key] for key in (
             "output_id", "summary", "key_developments", "global_implication", "confidence_note",
         )},
+        "source_metrics": metrics.to_dict(),
     }
+    try:
+        user_lens = await _load_user_lens(session, tenant_id, user_id)
+        if user_lens:
+            context["user_lens"] = user_lens
+        focus_areas = await _load_user_focus_areas(session, tenant_id, user_id)
+        if focus_areas:
+            context["focus_areas"] = focus_areas
+        profile, company_objs = await _load_company_context(session, tenant_id)
+        if profile:
+            context["company_profile"] = profile
+        if company_objs:
+            context["company_objects"] = company_objs
+        domain = str(row.get("primary_domain") or "")
+        related = await _load_related_intelligence(
+            session, tenant_id, row["signal_id"], domain
+        )
+        if related:
+            context["related_intelligence"] = related
+    except Exception:
+        pass
+    confidence = map_confidence_to_cil(row["confidence_band"]) if citations else "INSUFFICIENT_DATA"
     return CILRetrievalResult(
         context, citations, tuple(row["evidence_signal_ids"]), (row["output_id"],),
-        (brief_id,), "HIGH" if citations else "INSUFFICIENT_DATA",
+        (brief_id,), confidence,
     )
 
 
 async def _retrieve_signal(
-    session: AsyncSession, tenant_id: UUID, signal_id: UUID
+    session: AsyncSession, tenant_id: UUID, signal_id: UUID, user_id: UUID | None = None
 ) -> CILRetrievalResult:
     row = (
         await session.execute(
@@ -122,10 +168,14 @@ async def _retrieve_signal(
                 """
                 SELECT signal.id, signal.title, signal.body_text,
                        signal.primary_domain, signal.subcategory_tags,
-                       signal.confidence_score, signal.urgency_score,
-                       signal.published_at, source.source_name AS source_name,
+                       signal.confidence_score, signal.confidence_band,
+                       signal.urgency_score, signal.urgency_band,
+                       signal.published_at, signal.canonical_url,
+                       source.id AS source_id, source.source_name AS source_name,
+                       source.source_type, source.tier,
                        signal.source_url, output.id AS output_id,
-                       output.summary, output.global_implication
+                       output.summary, output.global_implication,
+                       output.confidence_note, output.citations
                 FROM pipeline.signals AS signal
                 JOIN config.sources AS source ON source.id = signal.source_id
                 LEFT JOIN intelligence.global_outputs AS output
@@ -141,16 +191,97 @@ async def _retrieve_signal(
     ).mappings().one_or_none()
     if row is None:
         return _insufficient()
-    citation = CILCitation(row["id"], row["source_name"], row["source_url"])
+
+    evidence_signal_ids: list[UUID] = [signal_id]
+    for citation in row.get("citations") or []:
+        try:
+            cid = UUID(str(citation.get("source_signal_id")))
+            if cid not in evidence_signal_ids:
+                evidence_signal_ids.append(cid)
+        except (ValueError, TypeError, KeyError):
+            pass
+
+    citations, metrics = await _load_citations_with_metrics(
+        session, tenant_id, tuple(evidence_signal_ids)
+    )
+    context = dict(row)
+    context["source_metrics"] = metrics.to_dict()
+
+    if user_id is not None:
+        try:
+            user_lens = await _load_user_lens(session, tenant_id, user_id)
+            if user_lens:
+                context["user_lens"] = user_lens
+            focus_areas = await _load_user_focus_areas(session, tenant_id, user_id)
+            if focus_areas:
+                context["focus_areas"] = focus_areas
+            profile, company_objs = await _load_company_context(session, tenant_id)
+            if profile:
+                context["company_profile"] = profile
+            if company_objs:
+                context["company_objects"] = company_objs
+            domain = str(row.get("primary_domain") or "")
+            related = await _load_related_intelligence(
+                session, tenant_id, signal_id, domain
+            )
+            if related:
+                context["related_intelligence"] = related
+            if row.get("output_id"):
+                assessment_row = (
+                    await session.execute(
+                        text(
+                            """
+                            SELECT assessment.id AS assessment_id, assessment.relevance_score,
+                                   assessment.relevance_band, assessment.matched_object_ids,
+                                   assessment.exposure_types, assessment.stakes_types,
+                                   assessment.decision_required, assessment.decision_type,
+                                   assessment.rationale, monitoring.relevance_rationale
+                            FROM decision.assessments AS assessment
+                            LEFT JOIN context.relevant_monitoring AS monitoring
+                              ON monitoring.tenant_id = :tenant_id
+                             AND monitoring.global_output_id = assessment.global_output_id
+                             AND (monitoring.user_id IS NULL OR monitoring.user_id = :user_id)
+                            WHERE assessment.tenant_id = :tenant_id
+                              AND assessment.global_output_id = :output_id
+                            ORDER BY (monitoring.user_id IS NOT NULL) DESC, assessment.created_at DESC
+                            LIMIT 1
+                            """
+                        ),
+                        {"tenant_id": tenant_id, "user_id": user_id, "output_id": row["output_id"]},
+                    )
+                ).mappings().one_or_none()
+                if assessment_row:
+                    context["assessment"] = dict(assessment_row)
+                    if assessment_row.get("matched_object_ids"):
+                        matched_objs = (
+                            await session.execute(
+                                text(
+                                    """
+                                    SELECT id, object_type, name, importance
+                                    FROM context.company_objects
+                                    WHERE tenant_id = :tenant_id
+                                      AND id = ANY(CAST(:object_ids AS UUID[])) AND active
+                                    ORDER BY importance DESC, id
+                                    """
+                                ),
+                                {"tenant_id": tenant_id, "object_ids": assessment_row["matched_object_ids"]},
+                            )
+                        ).mappings().all()
+                        context["matched_company_context"] = [dict(item) for item in matched_objs]
+        except Exception:
+            pass
+
     output_ids = (row["output_id"],) if row["output_id"] else ()
-    return CILRetrievalResult(dict(row), (citation,), (signal_id,), output_ids, (), "HIGH")
+    confidence = map_confidence_to_cil(row["confidence_band"]) if citations else "INSUFFICIENT_DATA"
+    return CILRetrievalResult(context, citations, tuple(evidence_signal_ids), output_ids, (), confidence)
 
 
 async def _retrieve_entity(
-    session: AsyncSession, tenant_id: UUID, entity_id: UUID
+    session: AsyncSession, tenant_id: UUID, entity_id: UUID, user_id: UUID | None = None
 ) -> CILRetrievalResult:
     entity = (
         await session.execute(
+
             text("SELECT id, canonical_name, entity_type, region_tags, aliases FROM intelligence.entities WHERE id = :entity_id"),
             {"entity_id": entity_id},
         )
@@ -197,14 +328,25 @@ async def _retrieve_entity(
             for evidence_id in relationship["evidence_signal_ids"]
         ]
     ))[:20]
-    citations = await _load_citations(session, tenant_id, signal_ids)
+    citations, metrics = await _load_citations_with_metrics(session, tenant_id, signal_ids)
+    confidence: Literal["HIGH", "MODERATE", "LOW", "INSUFFICIENT_DATA"]
+    if not citations:
+        confidence = "INSUFFICIENT_DATA"
+    elif metrics.corroboration_strength in {"PRIMARY_CONFIRMED", "HIGHLY_CORROBORATED"}:
+        confidence = "HIGH"
+    elif metrics.corroboration_strength == "CORROBORATED":
+        confidence = "MODERATE"
+    else:
+        confidence = "LOW"
+
     return CILRetrievalResult(
         {
             "entity": dict(entity),
             "recent_evidence": [dict(row) for row in signal_rows],
             "relationships": [dict(row) for row in relationships],
+            "source_metrics": metrics.to_dict(),
         }, citations,
-        signal_ids, (), (), "MODERATE" if citations else "INSUFFICIENT_DATA",
+        signal_ids, (), (), confidence,
     )
 
 
@@ -234,26 +376,159 @@ async def _retrieve_company_lens(
     )
 
 
+async def _load_user_lens(
+    session: AsyncSession, tenant_id: UUID, user_id: UUID
+) -> dict[str, Any] | None:
+    try:
+        row = (
+            await session.execute(
+                text(
+                    """
+                    SELECT role, custom_role_title, focus_areas, responsibilities, default_lens
+                    FROM context.user_decision_lenses
+                    WHERE tenant_id = :tenant_id AND user_id = :user_id AND active
+                    ORDER BY updated_at DESC LIMIT 1
+                    """
+                ),
+                {"tenant_id": tenant_id, "user_id": user_id},
+            )
+        ).mappings().one_or_none()
+        return dict(row) if row else None
+    except Exception:
+        return None
+
+
+async def _load_company_context(
+    session: AsyncSession, tenant_id: UUID
+) -> tuple[dict[str, Any] | None, list[dict[str, Any]]]:
+    try:
+        profile = (
+            await session.execute(
+                text(
+                    """
+                    SELECT company_name, business_model, primary_products, target_customer_segments,
+                           geographic_footprint, regulatory_jurisdictions
+                    FROM context.company_profiles
+                    WHERE tenant_id = :tenant_id
+                    ORDER BY version DESC LIMIT 1
+                    """
+                ),
+                {"tenant_id": tenant_id},
+            )
+        ).mappings().one_or_none()
+        objects = (
+            await session.execute(
+                text(
+                    """
+                    SELECT id, object_type, name, importance
+                    FROM context.company_objects
+                    WHERE tenant_id = :tenant_id AND active
+                    ORDER BY importance DESC, id
+                    LIMIT 25
+                    """
+                ),
+                {"tenant_id": tenant_id},
+            )
+        ).mappings().all()
+        return (dict(profile) if profile else None, [dict(row) for row in objects])
+    except Exception:
+        return None, []
+
+
+async def _load_user_focus_areas(
+    session: AsyncSession, tenant_id: UUID, user_id: UUID
+) -> list[str]:
+    try:
+        rows = (
+            await session.execute(
+                text(
+                    """
+                    SELECT topic
+                    FROM context.user_focus_areas
+                    WHERE tenant_id = :tenant_id AND user_id = :user_id AND active
+                    ORDER BY created_at DESC
+                    LIMIT 5
+                    """
+                ),
+                {"tenant_id": tenant_id, "user_id": user_id},
+            )
+        ).mappings().all()
+        return [r["topic"] for r in rows if r.get("topic")]
+    except Exception:
+        return []
+
+
+async def _load_related_intelligence(
+    session: AsyncSession, tenant_id: UUID, current_signal_id: UUID, domain: str
+) -> list[dict[str, Any]]:
+    if not domain:
+        return []
+    try:
+        rows = (
+            await session.execute(
+                text(
+                    """
+                    SELECT id, title, primary_domain, published_at
+                    FROM pipeline.signals
+                    WHERE id != :signal_id
+                      AND (tenant_id IS NULL OR tenant_id = :tenant_id)
+                      AND primary_domain = :domain
+                    ORDER BY published_at DESC NULLS LAST
+                    LIMIT 3
+                    """
+                ),
+                {"signal_id": current_signal_id, "tenant_id": tenant_id, "domain": domain},
+            )
+        ).mappings().all()
+        return [dict(r) for r in rows]
+    except Exception:
+        return []
+
+
 async def _load_citations(
     session: AsyncSession, tenant_id: UUID, signal_ids: tuple[UUID, ...]
 ) -> tuple[CILCitation, ...]:
+    citations, _ = await _load_citations_with_metrics(session, tenant_id, signal_ids)
+    return citations
+
+
+async def _load_citations_with_metrics(
+    session: AsyncSession, tenant_id: UUID, signal_ids: tuple[UUID, ...]
+) -> tuple[tuple[CILCitation, ...], SourceMetrics]:
     if not signal_ids:
-        return ()
+        return (), SourceMetrics(0, 0, 0, "UNVERIFIED")
     rows = (await session.execute(
         text(
             """
-            SELECT DISTINCT ON (signal.id) signal.id,
-                   source.source_name AS source_name,
-                   signal.source_url
+            SELECT signal.id,
+                   source.id AS source_id,
+                   source.source_name,
+                   source.source_type,
+                   source.tier,
+                   signal.source_url,
+                   signal.canonical_url,
+                   signal.published_at,
+                   signal.body_text_hash
             FROM pipeline.signals AS signal
             JOIN config.sources AS source ON source.id = signal.source_id
             WHERE signal.id = ANY(CAST(:signal_ids AS UUID[]))
               AND (signal.tenant_id IS NULL OR signal.tenant_id = :tenant_id)
-            ORDER BY signal.id, signal.created_at DESC
+            ORDER BY signal.published_at DESC NULLS LAST, signal.created_at DESC
             """
         ), {"signal_ids": list(signal_ids), "tenant_id": tenant_id}
     )).mappings().all()
-    return tuple(CILCitation(row["id"], row["source_name"], row["source_url"]) for row in rows)
+
+    evidence_items = [dict(row) for row in rows]
+    collapsed, metrics = normalize_evidence_bundle(evidence_items, raw_citation_count=len(signal_ids))
+    citations = tuple(
+        CILCitation(
+            item["id"],
+            item["source_name"],
+            item.get("canonical_url") or item.get("source_url"),
+        )
+        for item in collapsed
+    )
+    return citations, metrics
 
 
 def _insufficient() -> CILRetrievalResult:

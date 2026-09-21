@@ -5,7 +5,7 @@ import hashlib
 import io
 import json
 import re
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
 from html.parser import HTMLParser
@@ -42,7 +42,9 @@ def canonicalize_source_url(value: str) -> str:
     scheme = parsed.scheme.casefold()
     hostname = (parsed.hostname or "").casefold()
     port = parsed.port
-    default_port = (scheme == "http" and port == 80) or (scheme == "https" and port == 443)
+    default_port = (scheme == "http" and port == 80) or (
+        scheme == "https" and port == 443
+    )
     netloc = hostname if port is None or default_port else f"{hostname}:{port}"
     query = urlencode(
         sorted(
@@ -68,6 +70,7 @@ class NormalizedDocument:
     original_language: str
     region_tags: tuple[str, ...]
     processing_flags: tuple[str, ...]
+    date_metadata: dict[str, Any] = field(default_factory=dict)
 
     @property
     def body_text_hash(self) -> str:
@@ -94,7 +97,9 @@ def normalize_payload(
     try:
         documents = parsers[source_type](body, source_url, content_type)
     except KeyError as exc:
-        raise ValueError(f"Unsupported normalization source type: {source_type}") from exc
+        raise ValueError(
+            f"Unsupported normalization source type: {source_type}"
+        ) from exc
     if not documents:
         raise ValueError("Payload did not contain a normalizable document")
     return tuple(documents)
@@ -108,6 +113,7 @@ def _document(
     published_at: datetime | None = None,
     *,
     flags: tuple[str, ...] = (),
+    date_metadata: dict[str, Any] | None = None,
 ) -> NormalizedDocument:
     cleaned = _clean_text(body)
     if not cleaned:
@@ -121,6 +127,8 @@ def _document(
         original_language="en",
         region_tags=("NG",),
         processing_flags=flags,
+        date_metadata=date_metadata
+        or {"basis": "SOURCE_PUBLICATION" if published_at else "UNKNOWN"},
     )
 
 
@@ -135,10 +143,21 @@ def _rss_documents(body: bytes, source_url: str, _: str) -> list[NormalizedDocum
         published = _parse_datetime(
             _xml_text(item, "pubDate")
             or _xml_text(item, "published")
-            or _xml_text(item, "updated")
             or _xml_text(item, "documentDate")
         )
-        documents.append(_document("FEED_ITEM", title, description or title or "", link, published))
+        documents.append(
+            _document(
+                "FEED_ITEM",
+                title,
+                description or title or "",
+                link,
+                published,
+                date_metadata={
+                    "source_updated_at": _xml_text(item, "updated"),
+                    "basis": "SOURCE_PUBLICATION" if published else "UNKNOWN",
+                },
+            )
+        )
     return documents
 
 
@@ -162,6 +181,16 @@ def _api_documents(body: bytes, source_url: str, _: str) -> list[NormalizedDocum
     payload = json.loads(body)
     records = payload if isinstance(payload, list) else [payload]
     window_limited = len(records) > _API_RECORD_LIMIT
+    if window_limited:
+        # Archive endpoints need not return newest first. Keep unknown dates
+        # stable, after dated records; do not mistake collection time for publication.
+        records = sorted(
+            records,
+            key=lambda value: (
+                _api_published_at(value) or datetime.min.replace(tzinfo=UTC)
+            ),
+            reverse=True,
+        )
     documents: list[NormalizedDocument] = []
     for index, value in enumerate(records[:_API_RECORD_LIMIT]):
         record = value if isinstance(value, dict) else {"value": value}
@@ -171,20 +200,28 @@ def _api_documents(body: bytes, source_url: str, _: str) -> list[NormalizedDocum
             or record.get("service")
             or f"API record {index + 1}"
         )
-        published = _parse_datetime(
-            str(
-                record.get("published_at")
-                or record.get("started_at")
-                or record.get("timestamp")
-                or record.get("documentDate")
-                or ""
-            )
-        )
+        published = _api_published_at(record)
         record_url = urljoin(
             source_url,
             str(record.get("url") or record.get("link") or source_url),
         )
-        text = "\n".join(f"{key}: {_scalar(value)}" for key, value in sorted(record.items()))
+        # Popularity and transport metadata are not changes to source evidence.
+        # Keep update timing in date_metadata, outside the material content hash.
+        volatile = {
+            "clickcount",
+            "viewcount",
+            "views",
+            "clicks",
+            "filesize",
+            "fetched_at",
+            "retrieved_at",
+            "updated_at",
+        }
+        text = "\n".join(
+            f"{key}: {_scalar(value)}"
+            for key, value in sorted(record.items())
+            if key.casefold() not in volatile
+        )
         documents.append(
             _document(
                 "API_RECORD",
@@ -193,12 +230,36 @@ def _api_documents(body: bytes, source_url: str, _: str) -> list[NormalizedDocum
                 record_url,
                 published,
                 flags=("LATEST_RECORD_WINDOW",) if window_limited else (),
+                date_metadata={
+                    "source_updated_at": record.get("updated_at"),
+                    "source_published_at": record.get("published_at")
+                    or record.get("documentDate"),
+                    "source_event_at": record.get("event_at")
+                    or record.get("started_at"),
+                    "basis": "SOURCE_PUBLICATION_OR_EVENT" if published else "UNKNOWN",
+                },
             )
         )
     return documents
 
 
-def _discovery_documents(body: bytes, source_url: str, _: str) -> list[NormalizedDocument]:
+def _api_published_at(value: Any) -> datetime | None:
+    if not isinstance(value, dict):
+        return None
+    return _parse_datetime(
+        str(
+            value.get("published_at")
+            or value.get("event_at")
+            or value.get("started_at")
+            or value.get("documentDate")
+            or ""
+        )
+    )
+
+
+def _discovery_documents(
+    body: bytes, source_url: str, _: str
+) -> list[NormalizedDocument]:
     payload = json.loads(body)
     articles = payload.get("articles", []) if isinstance(payload, dict) else []
     documents: list[NormalizedDocument] = []
@@ -212,7 +273,13 @@ def _discovery_documents(body: bytes, source_url: str, _: str) -> list[Normalize
             if article.get(key)
         }
         detail = "\n".join(
-            (title, *(f"{key}: {_scalar(value)}" for key, value in sorted(metadata.items())))
+            (
+                title,
+                *(
+                    f"{key}: {_scalar(value)}"
+                    for key, value in sorted(metadata.items())
+                ),
+            )
         )
         documents.append(
             _document(
@@ -220,8 +287,12 @@ def _discovery_documents(body: bytes, source_url: str, _: str) -> list[Normalize
                 title,
                 detail,
                 str(article["url"]),
-                _parse_datetime(str(article.get("seendate") or "")),
+                None,
                 flags=("DISCOVERY_LEAD", "REQUIRES_CORROBORATION"),
+                date_metadata={
+                    "discovery_seen_at": article.get("seendate"),
+                    "basis": "UNKNOWN",
+                },
             )
         )
     return documents
@@ -233,6 +304,8 @@ class _VisibleHTMLParser(HTMLParser):
         self.title: list[str] = []
         self.text: list[str] = []
         self.published_at: str | None = None
+        self.source_updated_at: str | None = None
+        self.time_values: list[str] = []
         self.canonical_url: str | None = None
         self.language = "en"
         self._ignored_depth = 0
@@ -244,8 +317,21 @@ class _VisibleHTMLParser(HTMLParser):
             self._ignored_depth += 1
         if tag in {"title", "h1"}:
             self._in_heading = True
-        if tag == "time" and attributes.get("datetime"):
-            self.published_at = attributes["datetime"]
+        if tag == "meta":
+            key = (
+                attributes.get("property")
+                or attributes.get("name")
+                or attributes.get("itemprop")
+            )
+            if key in {"article:published_time", "datePublished", "pubdate"}:
+                self.published_at = attributes.get("content")
+            elif key in {"article:modified_time", "dateModified"}:
+                self.source_updated_at = attributes.get("content")
+        time_value = attributes.get("datetime")
+        if tag == "time" and time_value:
+            self.time_values.append(time_value)
+            if attributes.get("itemprop") == "datePublished":
+                self.published_at = attributes["datetime"]
         if tag == "link" and attributes.get("rel") == "canonical":
             self.canonical_url = attributes.get("href")
         language = attributes.get("lang")
@@ -269,13 +355,46 @@ class _VisibleHTMLParser(HTMLParser):
 def _html_documents(body: bytes, source_url: str, _: str) -> list[NormalizedDocument]:
     parser = _VisibleHTMLParser()
     parser.feed(body.decode("utf-8", errors="replace"))
-    url = urljoin(source_url, parser.canonical_url) if parser.canonical_url else source_url
+    url = (
+        urljoin(source_url, parser.canonical_url)
+        if parser.canonical_url
+        else source_url
+    )
+    title = " ".join(parser.title)
+    visible = " ".join(parser.text)
+    index_page = bool(
+        re.search(
+            r"(?i)^(?:keep track of circulars|news\b.*latest news|latest news$)", title
+        )
+    )
+    published = parser.published_at
+    basis = "SOURCE_PUBLICATION" if published else "UNKNOWN"
+    if not published and len(set(parser.time_values)) == 1 and not index_page:
+        published = parser.time_values[0]
+        basis = "SOURCE_PUBLICATION"
+    if not published:
+        dates = re.findall(
+            r"(?i)\b(?:originally published|published|publication date)\s*:?\s*"
+            r"([A-Za-z]+\s+\d{1,2},?\s+\d{4}|\d{4}-\d{2}-\d{2})",
+            visible,
+        )
+        if len(set(dates)) == 1:
+            published, basis = dates[0], "EXTRACTED_PUBLICATION"
     document = _document(
         "WEB_DOCUMENT",
-        " ".join(parser.title),
-        " ".join(parser.text),
+        title,
+        visible,
         url,
-        _parse_datetime(parser.published_at),
+        _parse_datetime(published),
+        flags=("INDEX_PAGE",) if index_page else (),
+        date_metadata={
+            "source_published_at": parser.published_at,
+            "source_updated_at": parser.source_updated_at,
+            "extracted_publication": published
+            if basis == "EXTRACTED_PUBLICATION"
+            else None,
+            "basis": basis if _parse_datetime(published) else "UNKNOWN",
+        },
     )
     return [replace(document, original_language=parser.language)]
 
@@ -289,7 +408,9 @@ def _pdf_documents(body: bytes, source_url: str, _: str) -> list[NormalizedDocum
     return [_document("PDF_DOCUMENT", title, text, source_url)]
 
 
-def _upload_documents(body: bytes, source_url: str, content_type: str) -> list[NormalizedDocument]:
+def _upload_documents(
+    body: bytes, source_url: str, content_type: str
+) -> list[NormalizedDocument]:
     suffix = PurePosixPath(source_url).suffix.lower()
     if suffix == ".csv" or "csv" in content_type:
         rows = list(csv.DictReader(io.StringIO(body.decode("utf-8-sig"))))
@@ -306,9 +427,18 @@ def _upload_documents(body: bytes, source_url: str, content_type: str) -> list[N
     if suffix == ".docx" or "wordprocessingml" in content_type:
         document = Document(io.BytesIO(body))
         text = "\n".join(paragraph.text for paragraph in document.paragraphs)
-        return [_document("UPLOAD_DOCUMENT", None, text, source_url, flags=("PROPRIETARY_UPLOAD",))]
+        return [
+            _document(
+                "UPLOAD_DOCUMENT", None, text, source_url, flags=("PROPRIETARY_UPLOAD",)
+            )
+        ]
     if suffix == ".pdf" or content_type == "application/pdf":
-        return [replace(_pdf_documents(body, source_url, content_type)[0], processing_flags=("PROPRIETARY_UPLOAD",))]
+        return [
+            replace(
+                _pdf_documents(body, source_url, content_type)[0],
+                processing_flags=("PROPRIETARY_UPLOAD",),
+            )
+        ]
     raise ValueError("Unsupported user-upload format")
 
 
@@ -324,9 +454,13 @@ def _parse_datetime(value: str | None) -> datetime | None:
             else:
                 parsed = parsedate_to_datetime(value)
         except (TypeError, ValueError):
-            try:
-                parsed = datetime.strptime(value, "%d/%m/%Y").replace(tzinfo=UTC)
-            except ValueError:
+            for pattern in ("%d/%m/%Y", "%B %d, %Y", "%B %d %Y", "%d %B %Y"):
+                try:
+                    parsed = datetime.strptime(value, pattern).replace(tzinfo=UTC)
+                    break
+                except ValueError:
+                    continue
+            else:
                 return None
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=UTC)

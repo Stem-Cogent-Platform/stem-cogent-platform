@@ -83,7 +83,7 @@ Copy says "Decision required", "Review", "Investigate", "Consider", or "Escalate
 
 ## 2.1 Tone
 
-**Light-first institutional intelligence.** Premium research brief + operating console.
+**Institutional intelligence.** Premium research brief + operating console.
 
 - Base background: warm white / very light neutral.
 - Primary text: near-black.
@@ -156,7 +156,7 @@ CIL opens as a contextual right-side panel on desktop and full-screen sheet on m
 
 ## 4.2 Header
 
-- Stem Cogent wordmark
+- Cogent wordmark
 - global entity/brief search
 - alert icon
 - active company

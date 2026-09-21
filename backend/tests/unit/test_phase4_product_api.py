@@ -88,6 +88,7 @@ async def test_brief_listing_detail_and_action_paths(monkeypatch) -> None:
         product,
         "get_settings",
         lambda: SimpleNamespace(
+            PILOT_ACTIVATION_LOOKBACK_DAYS=45,
             PHASE5_BRIEF_LIFECYCLE_ENABLED=True,
             PHASE5_NEW_UI_ENABLED=True,
             PHASE5_PRODUCT_ANALYTICS_ENABLED=False,
@@ -99,7 +100,7 @@ async def test_brief_listing_detail_and_action_paths(monkeypatch) -> None:
     listing_session = Session(Result(rows=[row]))
     listing = context(listing_session)
     assert (await product.list_briefs(None, 20, listing))[0]["id"] == str(brief_id)
-    assert "CAST(:status_filter AS VARCHAR) IS NULL" in listing_session.statements[0]
+    assert "CAST(:status_filter AS TEXT) IS NULL" in listing_session.statements[0]
 
     detail_session = Session(
         Result(row=row),
@@ -157,6 +158,13 @@ async def test_brief_lifecycle_flag_is_an_effective_rollback_gate(monkeypatch) -
     disabled = await product.briefing_changes(None, context(Session()))
     assert disabled["enabled"] is False
     assert disabled["new_briefs"] == 0
+    assert disabled["new"] == 0
+    assert disabled["updated"] == 0
+    assert disabled["escalated"] == 0
+    assert disabled["new_evidence"] == 0
+    assert disabled["new_decision"] == 0
+    assert disabled["system_freshness_at"] is None
+    assert disabled["content_freshness_at"] is None
 
     brief_id = uuid4()
     action_session = Session(
@@ -174,6 +182,48 @@ async def test_brief_lifecycle_flag_is_an_effective_rollback_gate(monkeypatch) -
 
 
 @pytest.mark.asyncio
+async def test_briefing_changes_retention_contract(monkeypatch) -> None:
+    monkeypatch.setattr(
+        product,
+        "get_settings",
+        lambda: SimpleNamespace(
+            PILOT_ACTIVATION_LOOKBACK_DAYS=45,
+            PHASE5_BRIEF_LIFECYCLE_ENABLED=True,
+            PHASE5_NEW_UI_ENABLED=True,
+            PHASE5_PRODUCT_ANALYTICS_ENABLED=False,
+        ),
+    )
+    as_of = datetime(2026, 9, 21, 12, 0, tzinfo=UTC)
+    system_freshness = datetime(2026, 9, 21, 11, 55, tzinfo=UTC)
+    content_freshness = datetime(2026, 9, 21, 10, 0, tzinfo=UTC)
+    active_session = Session(
+        Result(row={"briefing_viewed_through": datetime(2026, 9, 20, 12, 0, tzinfo=UTC), "as_of": as_of}),
+        Result(
+            row={
+                "new_briefs": 2,
+                "updated_briefs": 1,
+                "new_evidence_items": 3,
+                "new_relevant_monitoring": 4,
+                "critical_count": 1,
+                "escalated_count": 1,
+                "monitoring_checked_at": system_freshness,
+                "latest_relevant_at": content_freshness,
+            }
+        ),
+    )
+    res = await product.briefing_changes(None, context(active_session))
+    assert res["enabled"] is True
+    assert res["since_known"] is True
+    assert res["new"] == 6  # 2 new briefs + 4 new relevant monitoring
+    assert res["updated"] == 1
+    assert res["escalated"] == 1
+    assert res["new_evidence"] == 3
+    assert res["new_decision"] == 2
+    assert res["system_freshness_at"] == system_freshness.isoformat()
+    assert res["content_freshness_at"] == content_freshness.isoformat()
+
+
+@pytest.mark.asyncio
 async def test_company_intelligence_entity_and_alert_paths() -> None:
     company = context(Session(Result(row={"name": "Stem"}), Result(rows=[]), Result(rows=[{"id": uuid4(), "evidence_signal_ids": [uuid4()]}])))
     assert (await product.company_lens(company))["profile"]["name"] == "Stem"
@@ -181,7 +231,7 @@ async def test_company_intelligence_entity_and_alert_paths() -> None:
     intelligence_session = Session(Result(rows=[{"id": uuid4(), "summary": "Change", "citations": [{"source_signal_id": str(uuid4())}]}]))
     intelligence = context(intelligence_session)
     assert (await product.wider_intelligence(12, intelligence))[0]["summary"] == "Change"
-    assert "source.source_name AS source_name" in intelligence_session.statements[0]
+    assert "source.source_name" in intelligence_session.statements[0]
 
     entity_id = uuid4()
     entity = context(
@@ -200,11 +250,16 @@ async def test_company_intelligence_entity_and_alert_paths() -> None:
         await product.entity_profile(uuid4(), missing_entity)
     assert rejected.value.status_code == 404
 
+    comp_id = uuid4()
     watchlist = await product.watchlist(
         context(
             Session(
-                Result(rows=[{"id": uuid4(), "name": "NIBSS", "recent_activity_count": 2}]),
-                Result(rows=[{"id": uuid4(), "label": "Settlement", "recent_activity_count": None}]),
+                Result(rows=[{"id": comp_id, "name": "NIBSS", "object_type": "DEPENDENCY"}]),
+                Result(rows=[{"id": uuid4(), "label": "Settlement", "focus_type": "TOPIC"}]),
+                Result(rows=[
+                    {"canonical_identity": "c1", "signal_id": uuid4(), "title": "A1", "matched_object_ids": [comp_id], "published_at": datetime.now(UTC), "changed_at": datetime.now(UTC), "decision": False, "entity_ids": [], "match_text": "settlement"},
+                    {"canonical_identity": "c2", "signal_id": uuid4(), "title": "A2", "matched_object_ids": [comp_id], "published_at": datetime.now(UTC), "changed_at": datetime.now(UTC), "decision": False, "entity_ids": [], "match_text": "settlement"},
+                ]),
             )
         )
     )

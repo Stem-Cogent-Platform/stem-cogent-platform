@@ -7,6 +7,7 @@ export type Brief = {
   decision_prompt?: string;
   owner_roles: string[];
   uncertainties: string[];
+  matched_company_objects?: string[];
   evidence_signal_ids: string[];
   brief_status: string;
   personal_priority_score?: number;
@@ -31,7 +32,36 @@ export type Brief = {
   guidance_status?: string;
   timeline?: BriefTimelineEvent[];
   evidence?: Evidence[];
+  source_metrics?: SourceMetrics;
   actions?: DecisionAction[];
+  brief_contract?: DecisionBriefContract;
+};
+
+export type DecisionBriefContract = {
+  decision: string;
+  why_now: string;
+  what_changed: string;
+  exposure: string;
+  exposure_types: string[];
+  stakes: string;
+  stakes_types: string[];
+  decision_paths: DecisionPath[];
+  trade_offs: string[];
+  validate_next: string[];
+  unknowns: string[];
+  owner: string;
+  timing: string;
+  evidence: Evidence[];
+  source_metrics: Record<string, unknown>;
+  entry_prompt: string;
+  suggested_inquiries: string[];
+};
+
+export type SourceMetrics = {
+  source_count: number;
+  independent_source_count: number;
+  primary_source_count: number;
+  corroboration_strength: string;
 };
 
 export type DecisionPath = {
@@ -52,9 +82,15 @@ export type Evidence = {
   id: string;
   title?: string;
   source_url?: string;
+  canonical_url?: string;
   source_name: string;
   published_at?: string;
+  detected_at?: string;
   confidence_band?: string;
+  is_primary?: boolean;
+  duplicate_count?: number;
+  freshness?: string;
+  effective_at?: string;
 };
 
 export type DecisionAction = {

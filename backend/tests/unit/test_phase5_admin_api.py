@@ -3,13 +3,26 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from uuid import UUID, uuid4
+from unittest.mock import AsyncMock
 
 import pytest
-from fastapi import HTTPException
+from fastapi import FastAPI, HTTPException
+from httpx import ASGITransport, AsyncClient
 from pydantic import ValidationError
 
 from app.api.auth import Principal, RequestContext
 from app.api.v1 import admin
+
+
+@pytest.fixture(autouse=True)
+def ready_value_gate(monkeypatch):
+    # Invitation value eligibility is exercised against PostgreSQL in the
+    # integration suite; these unit tests cover admin payloads and auditing.
+    monkeypatch.setattr(admin, "invitation_readiness", AsyncMock(return_value={
+        "ready": True, "reason": "READY_DECISION_BRIEF", "company_briefs": 1,
+        "meaningful_monitoring_count": 3, "context_version": 3,
+        "activation_run_id": uuid4(), "lookback_days": 45,
+    }))
 
 
 class Result:
@@ -73,6 +86,43 @@ def system_context(
     return RequestContext(principal=principal, session=session)  # type: ignore[arg-type]
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("method", ["POST", "PATCH"])
+async def test_readiness_rejection_is_json_serializable(monkeypatch, method) -> None:
+    tenant_id, run_id = uuid4(), uuid4()
+    session = Session(Result(scalar=1))
+    ctx = system_context(session)
+    gate = {
+        "ready": False,
+        "reason": "NOT_READY_NO_RECENT_INTELLIGENCE",
+        "company_briefs": 0,
+        "meaningful_monitoring_count": 0,
+        "activation_run_id": run_id,
+    }
+    monkeypatch.setattr(admin, "invitation_readiness", AsyncMock(return_value=gate))
+    monkeypatch.setattr(
+        admin, "get_settings",
+        lambda: SimpleNamespace(PHASE5_PILOT_INVITES_ENABLED=True),
+    )
+    app = FastAPI()
+    app.include_router(admin.router)
+    app.dependency_overrides[admin.get_system_admin_context] = lambda: ctx
+    path = f"/api/v1/internal/admin/tenants/{tenant_id}"
+    body = {"pilot_status": "READY"}
+    if method == "POST":
+        path += "/invitations"
+        body = {"email": "acceptance@example.invalid"}
+    async with AsyncClient(
+        transport=ASGITransport(app=app, raise_app_exceptions=False),
+        base_url="http://test",
+    ) as client:
+        response = await client.request(method, path, json=body)
+    assert response.status_code == 409
+    assert response.json()["detail"] == {**gate, "activation_run_id": str(run_id)}
+    assert session.commits == 0
+    assert not any("auth.tenant_invitations" in sql for sql in session.statements)
+
+
 def detail_results(tenant_id, **overrides) -> list[Result]:
     row = {
         "id": tenant_id,
@@ -96,7 +146,7 @@ def detail_results(tenant_id, **overrides) -> list[Result]:
         "focus_count": 1,
         **overrides,
     }
-    return [Result(row=row), Result(rows=[product()]), *(Result(rows=[]) for _ in range(4))]
+    return [Result(row=row), Result(rows=[product()]), Result(rows=[]), Result(rows=[]), Result(rows=[{"status":"COMPLETED","context_version":3}]), Result(rows=[])]
 
 
 def product():
@@ -265,6 +315,8 @@ async def test_invitation_create_and_revoke_are_audited(monkeypatch) -> None:
 
 @pytest.mark.asyncio
 async def test_activation_dispatch_and_status_views(monkeypatch) -> None:
+    resolution = AsyncMock(return_value={})
+    monkeypatch.setattr(admin, "audit_tenant_entities", resolution)
     tenant_id = uuid4()
     run_id = uuid4()
     sent: dict = {}
@@ -286,6 +338,7 @@ async def test_activation_dispatch_and_status_views(monkeypatch) -> None:
         system_context(session, tenant_id=operator_tenant_id),
     )
     assert queued == {"id": run_id, "status": "QUEUED"}
+    assert resolution.await_args.args[0] == tenant_id
     assert sent["kwargs"]["queue"] == "activation-queue"
     activation_parameters = next(
         parameters
@@ -305,6 +358,7 @@ async def test_activation_dispatch_and_status_views(monkeypatch) -> None:
 
 @pytest.mark.asyncio
 async def test_activation_dispatch_failure_is_persisted_safely(monkeypatch) -> None:
+    monkeypatch.setattr(admin, "audit_tenant_entities", AsyncMock(return_value={}))
     tenant_id = uuid4()
     run_id = uuid4()
     monkeypatch.setattr(

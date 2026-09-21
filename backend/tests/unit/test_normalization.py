@@ -1,3 +1,4 @@
+import json
 from datetime import UTC, datetime
 from pathlib import Path
 from uuid import UUID
@@ -95,7 +96,8 @@ def test_discovery_results_are_provenanced_untrusted_leads() -> None:
 
     assert documents[0].signal_type == "DISCOVERED_ARTICLE"
     assert documents[0].source_url == "https://news.example/paystack"
-    assert documents[0].published_at == datetime(2026, 8, 19, 10, 30, tzinfo=UTC)
+    assert documents[0].published_at is None
+    assert documents[0].date_metadata["discovery_seen_at"] == "20260819T103000Z"
     assert documents[0].processing_flags == (
         "DISCOVERY_LEAD",
         "REQUIRES_CORROBORATION",
@@ -116,6 +118,29 @@ def test_normalization_rejects_empty_or_unknown_payloads() -> None:
         normalize_payload("API", b"", "https://example.com")
     with pytest.raises(ValueError, match="Unsupported normalization"):
         normalize_payload("EMAIL", b"body", "https://example.com")
+
+
+def test_api_window_includes_newest_record_beyond_unsorted_archive_limit() -> None:
+    records = [{"title": f"old {index}", "documentDate": "01/01/2023"} for index in range(500)]
+    records.append({"title": "Recent circular", "documentDate": "06/09/2026"})
+    documents = normalize_payload("API", json.dumps(records).encode(), "https://example.com/archive")
+
+    assert len(documents) == 500
+    assert documents[0].title == "Recent circular"
+    assert documents[0].published_at == datetime(2026, 9, 6, tzinfo=UTC)
+    assert documents[1].title == "old 0"
+
+
+def test_api_window_keeps_unknown_dates_stable_without_inventing_freshness() -> None:
+    records = [{"title": f"unknown {index}", "documentDate": "invalid"} for index in range(501)]
+    records.append({"title": "Dated", "published_at": "2026-09-05T23:00:00-01:00"})
+    documents = normalize_payload("API", json.dumps(records).encode(), "https://example.com/archive")
+
+    assert documents[0].title == "Dated"
+    assert documents[0].published_at == datetime(2026, 9, 6, tzinfo=UTC)
+    assert documents[1].title == "unknown 0"
+    assert documents[-1].title == "unknown 498"
+    assert all(document.published_at is None for document in documents[1:])
 
 
 def test_source_url_identity_removes_tracking_and_normalizes_origin() -> None:

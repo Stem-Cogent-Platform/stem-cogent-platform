@@ -7,13 +7,10 @@ import { FormEvent, ReactNode, useCallback, useEffect, useState } from "react";
 import { StemMark } from "@/components/stem-mark";
 import { apiRequest, bootstrapSession, currentUser, logout } from "@/lib/api";
 
-const navigation = [
-  ["/briefing", "My Decision Briefing", "briefing"],
-  ["/company", "Company Lens", "company"],
-  ["/watchlist", "Watchlist", "watch"],
-  ["/intelligence", "Wider Intelligence", "intelligence"],
-  ["/alerts", "Alerts", "alerts"],
-  ["/digests", "Digests", "digests"]
+export const navigation = [
+  ["/briefing", "My Briefing", "briefing"],
+  ["/intelligence", "Intelligence", "intelligence"],
+  ["/company", "Company", "company"],
 ] as const;
 
 type ShellAlert = {
@@ -133,7 +130,7 @@ export function WorkspaceShell({ children }: { children: ReactNode }) {
         <nav aria-label="Primary navigation">
           {navigation.map(([href, text, icon]) => {
             const active = pathname.startsWith(href);
-            return <Link aria-current={active ? "page" : undefined} className={active ? "active" : ""} href={href} key={href} onClick={() => setMobileOpen(false)}><NavIcon name={icon} /><span>{text}</span>{href === "/alerts" && unreadAlerts > 0 && <i className="nav-count">{unreadAlerts > 99 ? "99+" : unreadAlerts}</i>}</Link>;
+            return <Link aria-current={active ? "page" : undefined} className={active ? "active" : ""} href={href} key={href} onClick={() => setMobileOpen(false)}><NavIcon name={icon} /><span>{text}</span></Link>;
           })}
         </nav>
         <div className="sidebar-spacer" />
@@ -149,7 +146,7 @@ export function WorkspaceShell({ children }: { children: ReactNode }) {
       <div className="app-frame">
         <header className="app-topnav">
           <button aria-label="Open navigation" className="mobile-menu" onClick={() => setMobileOpen(true)} type="button">☰</button>
-          <form className="global-search" onSubmit={search} role="search"><span aria-hidden="true">⌕</span><input aria-label="Search briefs, intelligence, and entities" onChange={(event) => setQuery(event.target.value)} placeholder="Search briefs, intelligence, entities…" type="search" value={query} /><button className="sr-only" type="submit">Search</button></form>
+          <form className="global-search" onSubmit={search} role="search"><span aria-hidden="true">⌕</span><input aria-label="Search intelligence or ask Cogent" onChange={(event) => setQuery(event.target.value)} placeholder="Search intelligence or ask Cogent…" type="search" value={query} /><button className="sr-only" type="submit">Search</button></form>
           <div className="topnav-actions">
             <button aria-expanded={notificationsOpen} aria-label={unreadAlerts ? `View ${unreadAlerts} unread alerts` : "View alerts"} className="topnav-icon" onClick={() => setNotificationsOpen((value) => !value)} type="button"><NavIcon name="alerts" />{unreadAlerts > 0 && <i />}</button>
             <span className="company-switcher"><small>Company</small><strong>{workspaceName}</strong></span>

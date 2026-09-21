@@ -20,7 +20,6 @@ functionally verified until its dependencies, data side effects, worker flow,
 authorization, and customer result are proven.
 
 ## Access points
-
 | Environment | Customer application | Internal admin |
 |---|---|---|
 | Staging | `https://app.staging.stem-cogent.com/login` | `https://app.staging.stem-cogent.com/internal/login` |
