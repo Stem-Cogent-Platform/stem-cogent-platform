@@ -27,6 +27,7 @@ _BILLING_EXEMPT_PREFIXES = (
     "/api/v1/auth",
     "/api/v1/billing",
     "/api/v1/compliance",
+    "/api/v1/internal/admin",
 )
 
 
@@ -142,7 +143,8 @@ async def get_request_context(
             entitlements=dict(row["entitlements"]),
         )
         if (
-            principal.billing_status not in _ACTIVE_BILLING_STATES
+            principal.permission_role != "SYSTEM_ADMIN"
+            and principal.billing_status not in _ACTIVE_BILLING_STATES
             and not request.url.path.startswith(_BILLING_EXEMPT_PREFIXES)
         ):
             raise HTTPException(
