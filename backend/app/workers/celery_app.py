@@ -71,10 +71,10 @@ def create_celery_app(settings: Settings | None = None) -> Celery:
     settings = settings or get_settings()
     queues = configured_queues(settings)
     default_queue = next(iter(queues), None)
-    raw_signals_queue = (
-        urlparse(settings.SQS_PIPELINE_RAW_SIGNALS_URL).path.rsplit("/", maxsplit=1)[-1]
-        if settings.SQS_PIPELINE_RAW_SIGNALS_URL
-        else "pipeline-raw-signals"
+    validated_signals_queue = (
+        urlparse(settings.SQS_PIPELINE_VALIDATED_URL).path.rsplit("/", maxsplit=1)[-1]
+        if settings.SQS_PIPELINE_VALIDATED_URL
+        else "pipeline-validated"
     )
 
     app = Celery("stem_cogent", broker="sqs://", include=TASK_MODULES)
@@ -101,7 +101,7 @@ def create_celery_app(settings: Settings | None = None) -> Celery:
         task_ignore_result=True,
         task_routes={
             "app.workers.tasks.signal_processing.process_incoming_signals": {
-                "queue": raw_signals_queue,
+                "queue": validated_signals_queue,
             },
         },
         # Celery otherwise finalizes every bare Queue with the default queue's

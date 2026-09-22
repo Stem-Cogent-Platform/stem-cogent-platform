@@ -115,6 +115,9 @@ class SignalExtractor:
 
         # Build clean JSON schema for NormalizedSignalPayload
         schema = NormalizedSignalPayload.model_json_schema()
+        schema["additionalProperties"] = False
+        if "properties" in schema:
+            schema["required"] = list(schema["properties"].keys())
 
         raw_json = await self._call_provider(user_input, schema)
         try:

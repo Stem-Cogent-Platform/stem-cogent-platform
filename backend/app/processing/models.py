@@ -42,13 +42,11 @@ class NormalizedSignalPayload(BaseModel):
     )
 
     secondary_entities: list[str] = Field(
-        default_factory=list,
-        description="Directly related third-party institutions, commercial partners, clearing switches, or commercial entities explicitly named in the text.",
+        description="Directly related third-party institutions, commercial partners, clearing switches, or commercial entities explicitly named in the text. Return empty list if none.",
     )
 
     affected_sectors: list[str] = Field(
-        default_factory=list,
-        description="Operating product verticals or operational disciplines directly impacted (e.g., checkout acquiring, card issuance, trade settlement, regulatory reporting).",
+        description="Operating product verticals or operational disciplines directly impacted (e.g., checkout acquiring, card issuance, trade settlement, regulatory reporting). Return empty list if none.",
     )
 
     executive_summary: str = Field(
@@ -58,13 +56,11 @@ class NormalizedSignalPayload(BaseModel):
     )
 
     statutory_deadline: str | None = Field(
-        default=None,
-        description="Official statutory compliance, sunset, or transition deadline in ISO format (YYYY-MM-DD) if explicitly stated in the source, otherwise None.",
+        description="Official statutory compliance, sunset, or transition deadline in ISO format (YYYY-MM-DD) if explicitly stated in the source, otherwise null.",
     )
 
     financial_impact_indicator: str | None = Field(
-        default=None,
-        description="Explicit quantitative, regulatory penalty, or commercial metric stated in the source (e.g., transactional cap, fee percentage, fine amount, capital threshold), otherwise None.",
+        description="Explicit quantitative, regulatory penalty, or commercial metric stated in the source (e.g., transactional cap, fee percentage, fine amount, capital threshold), otherwise null.",
     )
 
     @field_validator("statutory_deadline")
