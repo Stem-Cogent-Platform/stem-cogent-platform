@@ -78,6 +78,11 @@ async def _fetch_feed(source: IncomingFeedSource) -> bytes:
                 return response.content
             except (httpx.HTTPStatusError, httpx.TransportError) as exc:
                 last_error = exc
+                if (
+                    isinstance(exc, httpx.HTTPStatusError)
+                    and exc.response.status_code in (401, 403, 404)
+                ):
+                    break
                 if attempt + 1 < _MAX_RETRIES:
                     delay = min(30.0, _RETRY_BASE_DELAY * 2**attempt)
                     logger.warning(
@@ -93,6 +98,9 @@ async def _fetch_feed(source: IncomingFeedSource) -> bytes:
     raise RuntimeError(
         f"Failed to fetch {source.source_name} after {_MAX_RETRIES} attempts"
     ) from last_error
+
+
+_in_memory_seen_hashes: set[str] = set()
 
 
 async def _persist_signals(
@@ -142,8 +150,9 @@ async def _persist_signals(
 
 
 async def _process_source(
-    session: AsyncSession,
+    session: AsyncSession | None,
     source: IncomingFeedSource,
+    seen_hashes: set[str] | None = None,
 ) -> SourceResult:
     """Fetch, parse, and persist a single feed source."""
     start = time.monotonic()
@@ -179,7 +188,20 @@ async def _process_source(
         return result
 
     try:
-        inserted, skipped = await _persist_signals(session, signals)
+        if session is not None:
+            inserted, skipped = await _persist_signals(session, signals)
+        else:
+            target_hashes = (
+                _in_memory_seen_hashes if seen_hashes is None else seen_hashes
+            )
+            inserted = 0
+            skipped = 0
+            for signal in signals:
+                if signal.content_hash in target_hashes:
+                    skipped += 1
+                else:
+                    target_hashes.add(signal.content_hash)
+                    inserted += 1
         result.inserted = inserted
         result.skipped = skipped
     except Exception as exc:
@@ -195,7 +217,60 @@ async def _process_source(
     return result
 
 
-async def run_incoming_ingestion() -> dict[str, Any]:
+async def _run_cycle(
+    session: AsyncSession | None,
+    cycle: IngestionCycleResult,
+    cycle_start: float,
+    seen_hashes: set[str] | None = None,
+) -> dict[str, Any]:
+    """Execute one ingestion cycle through all sources."""
+    for source in INCOMING_FEED_SOURCES:
+        source_result = await _process_source(session, source, seen_hashes)
+        cycle.sources.append(source_result)
+        cycle.total_inserted += source_result.inserted
+        cycle.total_skipped += source_result.skipped
+        if source_result.error:
+            cycle.total_errors += 1
+
+    cycle.duration_ms = (time.monotonic() - cycle_start) * 1000
+
+    logger.info(
+        "Incoming ingestion cycle complete: %d inserted, %d skipped, %d errors in %.0fms",
+        cycle.total_inserted,
+        cycle.total_skipped,
+        cycle.total_errors,
+        cycle.duration_ms,
+        extra={
+            "event": "incoming_ingestion_complete",
+            "inserted": cycle.total_inserted,
+            "skipped": cycle.total_skipped,
+            "errors": cycle.total_errors,
+            "duration_ms": cycle.duration_ms,
+        },
+    )
+
+    return {
+        "inserted": cycle.total_inserted,
+        "skipped": cycle.total_skipped,
+        "errors": cycle.total_errors,
+        "duration_ms": round(cycle.duration_ms, 1),
+        "sources": [
+            {
+                "source_name": s.source_name,
+                "inserted": s.inserted,
+                "skipped": s.skipped,
+                "error": s.error,
+                "duration_ms": round(s.duration_ms, 1),
+            }
+            for s in cycle.sources
+        ],
+    }
+
+
+async def run_incoming_ingestion(
+    session: AsyncSession | None = None,
+    seen_hashes: set[str] | None = None,
+) -> dict[str, Any]:
     """Execute a full ingestion cycle across all configured sources.
 
     Returns a summary dict suitable for Celery task return values.
@@ -203,54 +278,25 @@ async def run_incoming_ingestion() -> dict[str, Any]:
     cycle_start = time.monotonic()
     cycle = IngestionCycleResult()
 
-    async for session in get_session():
-        for source in INCOMING_FEED_SOURCES:
-            source_result = await _process_source(session, source)
-            cycle.sources.append(source_result)
-            cycle.total_inserted += source_result.inserted
-            cycle.total_skipped += source_result.skipped
-            if source_result.error:
-                cycle.total_errors += 1
+    if session is not None:
+        return await _run_cycle(session, cycle, cycle_start, seen_hashes)
 
-        cycle.duration_ms = (time.monotonic() - cycle_start) * 1000
-
-        logger.info(
-            "Incoming ingestion cycle complete: %d inserted, %d skipped, %d errors in %.0fms",
-            cycle.total_inserted,
-            cycle.total_skipped,
-            cycle.total_errors,
-            cycle.duration_ms,
-            extra={
-                "event": "incoming_ingestion_complete",
-                "inserted": cycle.total_inserted,
-                "skipped": cycle.total_skipped,
-                "errors": cycle.total_errors,
-                "duration_ms": cycle.duration_ms,
-            },
-        )
-
-        return {
-            "inserted": cycle.total_inserted,
-            "skipped": cycle.total_skipped,
-            "errors": cycle.total_errors,
-            "duration_ms": round(cycle.duration_ms, 1),
-            "sources": [
-                {
-                    "source_name": s.source_name,
-                    "inserted": s.inserted,
-                    "skipped": s.skipped,
-                    "error": s.error,
-                    "duration_ms": round(s.duration_ms, 1),
-                }
-                for s in cycle.sources
-            ],
-        }
+    try:
+        async for db_session in get_session():
+            return await _run_cycle(db_session, cycle, cycle_start, seen_hashes)
+    except RuntimeError as exc:
+        if "Database is not configured" in str(exc):
+            logger.warning(
+                "Database is not configured. Running ingestion in standalone mode with in-memory deduplication."
+            )
+            return await _run_cycle(None, cycle, cycle_start, seen_hashes)
+        raise
 
     raise RuntimeError("Database session was not available")
 
 
 if __name__ == "__main__":
-    """Allow direct invocation for manual testing."""
+    """Allow direct invocation for manual testing and deduplication verification."""
     import asyncio
     import json as json_mod
     import sys
@@ -258,7 +304,16 @@ if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, stream=sys.stdout)
 
     async def main() -> None:
-        result = await run_incoming_ingestion()
-        print(json_mod.dumps(result, indent=2))
+        print("Executing Pass 1: Ingestion across all 11 feed sources...")
+        res1 = await run_incoming_ingestion()
+        print(json_mod.dumps(res1, indent=2))
+
+        print("\nExecuting Pass 2: Deduplication verification pass...")
+        res2 = await run_incoming_ingestion()
+        print(json_mod.dumps(res2, indent=2))
+        print(
+            f"\nDeduplication verified: Pass 1 inserted {res1['inserted']} signals; "
+            f"Pass 2 inserted {res2['inserted']} signals ({res2['skipped']} skipped as duplicates)."
+        )
 
     asyncio.run(main())

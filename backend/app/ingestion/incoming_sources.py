@@ -60,4 +60,19 @@ INCOMING_FEED_SOURCES: tuple[IncomingFeedSource, ...] = (
         url="https://businessday.ng/technology/feed/",
         parser="rss",
     ),
+    IncomingFeedSource(
+        source_name="Techpoint Africa",
+        url="https://techpoint.africa",
+        parser="rss",
+    ),
+    IncomingFeedSource(
+        source_name="SEC Nigeria Circulars",
+        url="https://sec.gov.ng/feeds/circulars.rss",
+        parser="rss",
+    ),
+    IncomingFeedSource(
+        source_name="SEC Nigeria Enforcement",
+        url="https://home.sec.gov.ng/feeds/enforcement-updates.rss",
+        parser="rss",
+    ),
 )
