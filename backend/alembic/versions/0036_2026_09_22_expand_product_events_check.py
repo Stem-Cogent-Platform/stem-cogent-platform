@@ -15,8 +15,9 @@ depends_on = None
 def upgrade() -> None:
     op.execute("""
         ALTER TABLE feedback.product_events
-        DROP CONSTRAINT IF EXISTS product_events_name_check;
-
+        DROP CONSTRAINT IF EXISTS product_events_name_check
+    """)
+    op.execute("""
         ALTER TABLE feedback.product_events
         ADD CONSTRAINT product_events_name_check CHECK (event_name IN (
             'SESSION_STARTED','BRIEFING_VIEWED','BRIEF_OPENED','BRIEF_UPDATED_VIEWED',
@@ -26,15 +27,16 @@ def upgrade() -> None:
             'INTELLIGENCE_TAB_CHANGED','WATCHLIST_ITEM_VIEWED',
             'FOCUS_AREA_ADDED','FOCUS_AREA_UPDATED','SEARCH_PERFORMED','ALERT_OPENED',
             'DIGEST_OPENED','DECISION_PATHS_VIEWED'
-        ));
+        ))
     """)
 
 
 def downgrade() -> None:
     op.execute("""
         ALTER TABLE feedback.product_events
-        DROP CONSTRAINT IF EXISTS product_events_name_check;
-
+        DROP CONSTRAINT IF EXISTS product_events_name_check
+    """)
+    op.execute("""
         ALTER TABLE feedback.product_events
         ADD CONSTRAINT product_events_name_check CHECK (event_name IN (
             'SESSION_STARTED','BRIEFING_VIEWED','BRIEF_OPENED','BRIEF_UPDATED_VIEWED',
@@ -43,5 +45,5 @@ def downgrade() -> None:
             'BRIEF_DISMISSED','WIDER_INTELLIGENCE_VIEWED','WATCHLIST_ITEM_VIEWED',
             'FOCUS_AREA_ADDED','FOCUS_AREA_UPDATED','SEARCH_PERFORMED','ALERT_OPENED',
             'DIGEST_OPENED','DECISION_PATHS_VIEWED'
-        ));
+        ))
     """)
