@@ -37,6 +37,7 @@ TASK_MODULES = (
     "app.workers.tasks.delivery",
     "app.workers.tasks.pilot_activation",
     "app.workers.tasks.scheduler",
+    "app.workers.tasks.incoming_ingestion",
 )
 
 
