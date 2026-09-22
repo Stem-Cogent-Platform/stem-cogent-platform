@@ -34,6 +34,27 @@ export type Brief = {
   evidence?: Evidence[];
   source_metrics?: SourceMetrics;
   actions?: DecisionAction[];
+  brief_contract?: DecisionBriefContract;
+};
+
+export type DecisionBriefContract = {
+  decision: string;
+  why_now: string;
+  what_changed: string;
+  exposure: string;
+  exposure_types: string[];
+  stakes: string;
+  stakes_types: string[];
+  decision_paths: DecisionPath[];
+  trade_offs: string[];
+  validate_next: string[];
+  unknowns: string[];
+  owner: string;
+  timing: string;
+  evidence: Evidence[];
+  source_metrics: Record<string, unknown>;
+  entry_prompt: string;
+  suggested_inquiries: string[];
 };
 
 export type SourceMetrics = {

@@ -45,7 +45,7 @@ Persist investigation context: user/tenant, origin object, messages, citations, 
 Verify:
 ```text
 How does this affect me?
-→ What about Moniepoint?
+→ What about.....?
 → Which matters more?
 ```
 
@@ -158,10 +158,10 @@ Settings
 
 Do not start premium visual redesign yet.
 
-## Track 17 — End-to-end CFO acceptance
+## Track 17 — End-to-end acceptance
 Create a fresh realistic Nigerian fintech pilot and test:
 1. Company Context;
-2. CFO Lens;
+2. Lens;
 3. activation;
 4. readiness;
 5. invite;

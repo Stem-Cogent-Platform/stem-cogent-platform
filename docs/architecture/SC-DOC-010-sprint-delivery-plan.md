@@ -515,7 +515,7 @@ Source/classification/entity review APIs + Decision relevance dispute/reason cap
 
 ## Stage 4.1 — Frontend Shell & Onboarding
 
-Build light-first institutional design from SC-DOC-007.
+Build institutional design from SC-DOC-007.
 
 Order:
 
@@ -537,7 +537,7 @@ Build `/briefs/[briefId]` and `/company`, actions, trust/evidence panel, quantif
 
 Build supporting intelligence feed, watchlist/focus management, entity profile.
 
-Full graph visualisation is not required for launch.
+Full graph visualisation is required for launch.
 
 ## Stage 4.5 — CIL
 

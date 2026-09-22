@@ -27,6 +27,7 @@ locals {
       PAYSTACK_WEBHOOK_SECRET_ARN           = module.secrets.secret_arns["paystack_webhook_secret"]
       GOOGLE_OAUTH_CREDENTIALS_ARN          = module.secrets.secret_arns["google_oauth_credentials"]
       LINKEDIN_OAUTH_CREDENTIALS_ARN        = module.secrets.secret_arns["linkedin_oauth_credentials"]
+      SERPAPI_API_KEY_ARN                   = module.secrets.secret_arns["serpapi_api_key"]
       SYNTHESIS_ENABLED                     = "true"
       CIL_ENABLED                           = "true"
       CLICKHOUSE_ENABLED                    = "false"

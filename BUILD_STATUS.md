@@ -1,5 +1,38 @@
 # Build Status
 
+## 2026-09-17 - MVP product correction, Track 1 under verification
+
+Track 1 implements supported relevance, explicit company/personal match traces,
+country-only exclusion from visible value and readiness, and personal monitoring
+withdrawal after Focus Area removal. Draft PR #105 targets staging from its
+current commit `68624364`, preserving the existing local Phase 5 working tree.
+
+Passed: 32 targeted database integration tests, 30 targeted unit tests, 33 frontend
+unit tests, TypeScript, ESLint (three existing temporary-script warnings), backend
+Ruff and mypy. Local migration 0032 -> 0033 -> 0032 -> 0033 passed. Full backend
+unit tests, CI, and staging deployment/verification remain pending. Track 2 has
+not started. No production change has been made.
+
+Details: [Track 1 record](docs/qa/mvp-product-correction-track1.md).
+
+## 2026-09-16 - MVP product correction, Track 0 baseline
+
+The product correction specification and its Track 0-18 sequence govern this work.
+Track 0 is complete; Track 1 relevance correction is starting. Canonical application source
+matches staging `68624364` after line-ending normalization; one pre-existing
+migration-test difference and the existing working tree are preserved.
+
+Baseline passes: 438 backend unit tests, 53 PostgreSQL/Redis integration tests,
+33 frontend unit tests, backend Ruff, whitespace, frontend TypeScript, ESLint
+and production build. All 18 browser checks pass in approved execution outside
+the sandbox. The initial approval-service limit and sandbox timeout are resolved.
+Staging liveness and PostgreSQL/Redis readiness pass. A read-only country-only
+fixture reproduces score 0.587 against the unchanged 0.450 monitoring threshold.
+No product correction or production deployment has occurred.
+
+Full baseline and ordered continuation: [Track 0 record](docs/qa/mvp-product-correction-track0.md).
+
+
 ## 2026-09-08 — Phase 5 value-loop recovery deployed; acceptance blocked
 
 Recovery PRs #93, #94 and #95 are deployed to staging, latest application

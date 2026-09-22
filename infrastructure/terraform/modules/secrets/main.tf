@@ -60,6 +60,11 @@ locals {
       description       = "LinkedIn OpenID Connect client ID and client secret"
       rotation_schedule = "manual"
     }
+    serpapi_api_key = {
+      path              = "search/serpapi/api-key"
+      description       = "SerpApi API key used by Stem Cogent live search discovery"
+      rotation_schedule = "90-days-manual"
+    }
   }
 
   common_tags = merge(
@@ -75,7 +80,7 @@ locals {
 
 check "complete_secret_inventory" {
   assert {
-    condition     = length(local.secret_definitions) == 12
+    condition     = length(local.secret_definitions) == 13
     error_message = "All managed application secret definitions must be present."
   }
 }

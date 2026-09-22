@@ -106,6 +106,14 @@ class Settings(BaseSettings):
     CIL_RATE_LIMIT_PER_MINUTE: int = 10
     CLICKHOUSE_ENABLED: bool = True
 
+    SERPAPI_API_KEY_ARN: str | None = None
+    SERPAPI_API_KEY: str | None = None
+    SERPAPI_BASE_URL: str = "https://serpapi.com/search.json"
+    SERPAPI_ENGINE: str = "google"
+    LIVE_SEARCH_ENABLED: bool = True
+    LIVE_SEARCH_TIMEOUT_SECONDS: float = 8.0
+    LIVE_SEARCH_RATE_LIMIT_PER_MINUTE: int = 10
+
     # Phase 5 capabilities are deliberately fail-closed. Deployment
     # configuration may enable them independently after staging acceptance.
     PHASE5_PILOT_INVITES_ENABLED: bool = False

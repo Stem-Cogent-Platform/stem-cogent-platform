@@ -61,7 +61,18 @@ export default function AlertsPage() {
     <WorkspaceShell>
       <section className="content-page">
         <div className="page-heading">
-          <div><p className="eyebrow">Decision Brief notifications</p><h1>Alerts</h1></div>
+          <div>
+            <p className="eyebrow">Delivery Mechanism</p>
+            <h1>Alert Delivery History</h1>
+            <p className="text-secondary" style={{ marginTop: "4px", fontSize: "0.88rem" }}>
+              Alerts deliver notifications to your email and channels. All active assessments, full evidence, and decision paths are reviewed in{" "}
+              <Link className="text-link" href="/briefing">My Briefing</Link> or{" "}
+              <Link className="text-link" href="/intelligence">Intelligence</Link>.
+            </p>
+          </div>
+          <div>
+            <Link className="secondary-button" href="/briefing">Return to My Briefing</Link>
+          </div>
         </div>
         {state.status === "loading" && <ModuleLoading label="Loading alerts" />}
         {state.status === "error" && <ModuleFailure message={state.message} retry={() => void load()} />}
@@ -71,9 +82,12 @@ export default function AlertsPage() {
             {state.data.map((item) => (
               <article className={item.read_at ? "" : "unread"} key={item.id}>
                 <span className={`priority-chip priority-${item.priority.toLowerCase()}`}>{item.priority}</span>
-                <div><h2>{item.what_changed || item.subject}</h2><p>{item.payload?.why_delivered || "Matched your configured Decision Lens."}</p></div>
-                <button className="text-link" disabled={openingId === item.id} onClick={() => void open(item)} type="button">
-                  {openingId === item.id ? "Opening…" : "Open brief"}
+                <div>
+                  <h2>{item.what_changed || item.subject}</h2>
+                  <p>{item.payload?.why_delivered || "Matched your configured Decision Lens."}</p>
+                </div>
+                <button className="secondary-button" disabled={openingId === item.id} onClick={() => void open(item)} type="button">
+                  {openingId === item.id ? "Opening…" : "Open Decision Brief →"}
                 </button>
               </article>
             ))}
@@ -81,7 +95,10 @@ export default function AlertsPage() {
               <section className="empty-brief">
                 <h2>{stateMessages.alertsEmpty.title}</h2>
                 <p>{stateMessages.alertsEmpty.body}</p>
-                <Link href="/briefing">Return to briefing</Link>
+                <div style={{ display: "flex", gap: "12px", marginTop: "16px" }}>
+                  <Link className="primary-button" href="/briefing">Return to My Briefing</Link>
+                  <Link className="secondary-button" href="/settings">Delivery Settings</Link>
+                </div>
               </section>
             )}
           </div>

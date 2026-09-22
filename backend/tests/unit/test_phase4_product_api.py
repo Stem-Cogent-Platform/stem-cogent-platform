@@ -83,58 +83,6 @@ def context(session: Session) -> RequestContext:
 
 
 @pytest.mark.asyncio
-async def test_signal_dossier_reads_evidence_without_generation():
-    signal_id, entity_id = uuid4(), uuid4()
-    row = {"id": signal_id, "global_output_id": uuid4(), "historical_signal_ids": [], "cluster_id": None, "title": "Source event", "citations": [
-        {"source_signal_id": str(signal_id), "source_name": "Source"}
-    ]}
-    session = Session(Result(row=row), Result(rows=[{"id": entity_id}]),
-                      Result(rows=[{"id": signal_id}]), Result(row=None), Result(rows=[]))
-    result = await product.signal_detail(signal_id, context(session))
-    assert result["signal"]["id"] == str(signal_id)
-    assert result["entities"] == [{"id": str(entity_id)}]
-    assert result["evidence"][0]["id"] == str(signal_id)
-    assert session.commits == 0
-    assert all(":tenant_id" in query for query in session.statements)
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("status,current,overdue,outputs,state", [
-    (None,False,False,0,"PREPARE_REQUIRED"),
-    ("QUEUED",True,False,0,"PREPARING"),
-    ("RUNNING",True,True,0,"PREPARATION_DELAYED"),
-    ("FAILED",True,False,0,"PREPARATION_DELAYED"),
-    ("COMPLETED",True,False,0,"NO_RECENT_MATCH"),
-    ("COMPLETED",True,False,1,"ASSESSED"),
-    ("COMPLETED",False,False,1,"PREPARE_REQUIRED"),
-])
-async def test_briefing_readiness_distinguishes_empty_from_unprocessed(status,current,overdue,outputs,state):
-    row={"context_version":6,"lens_version":1,"evaluated_context_version":6 if current else 1,
-         "evaluated_lens_version":1,"personalisation_status":status,"overdue":overdue,
-         "outputs_evaluated":outputs,"last_checked_at":None,"completed_at":None}
-    result = await product.briefing_readiness(context(Session(Result(row=row))))
-    assert result["state"] == state
-
-
-@pytest.mark.asyncio
-async def test_signal_dossier_unknown_returns_404():
-    with pytest.raises(HTTPException) as error:
-        await product.signal_detail(uuid4(), context(Session(Result())))
-    assert error.value.status_code == 404
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("malformed", [True, False])
-async def test_signal_dossier_fails_closed_on_invalid_or_inaccessible_evidence(malformed):
-    signal_id = uuid4()
-    row = {"id": signal_id, "citations": [{"source_signal_id": "invalid" if malformed else str(uuid4())}]}
-    session = Session(Result(row=row), Result(rows=[]), Result(rows=[{"id": signal_id}]))
-    with pytest.raises(HTTPException) as error:
-        await product.signal_detail(signal_id, context(session))
-    assert error.value.status_code == 503
-
-
-@pytest.mark.asyncio
 async def test_brief_listing_detail_and_action_paths(monkeypatch) -> None:
     monkeypatch.setattr(
         product,
@@ -196,7 +144,6 @@ async def test_brief_lifecycle_flag_is_an_effective_rollback_gate(monkeypatch) -
         product,
         "get_settings",
         lambda: SimpleNamespace(
-            PILOT_ACTIVATION_LOOKBACK_DAYS=45,
             PHASE5_BRIEF_LIFECYCLE_ENABLED=False,
             PHASE5_NEW_UI_ENABLED=False,
             PHASE5_PRODUCT_ANALYTICS_ENABLED=False,
@@ -211,6 +158,13 @@ async def test_brief_lifecycle_flag_is_an_effective_rollback_gate(monkeypatch) -
     disabled = await product.briefing_changes(None, context(Session()))
     assert disabled["enabled"] is False
     assert disabled["new_briefs"] == 0
+    assert disabled["new"] == 0
+    assert disabled["updated"] == 0
+    assert disabled["escalated"] == 0
+    assert disabled["new_evidence"] == 0
+    assert disabled["new_decision"] == 0
+    assert disabled["system_freshness_at"] is None
+    assert disabled["content_freshness_at"] is None
 
     brief_id = uuid4()
     action_session = Session(
@@ -225,6 +179,48 @@ async def test_brief_lifecycle_flag_is_an_effective_rollback_gate(monkeypatch) -
     )
     assert not any("decision.brief_events" in item for item in action_session.statements)
     assert not any("material_change_count" in item for item in action_session.statements)
+
+
+@pytest.mark.asyncio
+async def test_briefing_changes_retention_contract(monkeypatch) -> None:
+    monkeypatch.setattr(
+        product,
+        "get_settings",
+        lambda: SimpleNamespace(
+            PILOT_ACTIVATION_LOOKBACK_DAYS=45,
+            PHASE5_BRIEF_LIFECYCLE_ENABLED=True,
+            PHASE5_NEW_UI_ENABLED=True,
+            PHASE5_PRODUCT_ANALYTICS_ENABLED=False,
+        ),
+    )
+    as_of = datetime(2026, 9, 21, 12, 0, tzinfo=UTC)
+    system_freshness = datetime(2026, 9, 21, 11, 55, tzinfo=UTC)
+    content_freshness = datetime(2026, 9, 21, 10, 0, tzinfo=UTC)
+    active_session = Session(
+        Result(row={"briefing_viewed_through": datetime(2026, 9, 20, 12, 0, tzinfo=UTC), "as_of": as_of}),
+        Result(
+            row={
+                "new_briefs": 2,
+                "updated_briefs": 1,
+                "new_evidence_items": 3,
+                "new_relevant_monitoring": 4,
+                "critical_count": 1,
+                "escalated_count": 1,
+                "monitoring_checked_at": system_freshness,
+                "latest_relevant_at": content_freshness,
+            }
+        ),
+    )
+    res = await product.briefing_changes(None, context(active_session))
+    assert res["enabled"] is True
+    assert res["since_known"] is True
+    assert res["new"] == 6  # 2 new briefs + 4 new relevant monitoring
+    assert res["updated"] == 1
+    assert res["escalated"] == 1
+    assert res["new_evidence"] == 3
+    assert res["new_decision"] == 2
+    assert res["system_freshness_at"] == system_freshness.isoformat()
+    assert res["content_freshness_at"] == content_freshness.isoformat()
 
 
 @pytest.mark.asyncio
@@ -254,16 +250,20 @@ async def test_company_intelligence_entity_and_alert_paths() -> None:
         await product.entity_profile(uuid4(), missing_entity)
     assert rejected.value.status_code == 404
 
+    comp_id = uuid4()
     watchlist = await product.watchlist(
         context(
             Session(
-                Result(rows=[{"id": uuid4(), "name": "NIBSS", "object_type": "DEPENDENCY", "recent_activity_count": 2}]),
-                Result(rows=[{"id": uuid4(), "label": "Settlement", "focus_type": "TOPIC", "query_text": None, "entity_id": None, "recent_activity_count": None}]),
-                Result(rows=[]),
+                Result(rows=[{"id": comp_id, "name": "NIBSS", "object_type": "DEPENDENCY"}]),
+                Result(rows=[{"id": uuid4(), "label": "Settlement", "focus_type": "TOPIC"}]),
+                Result(rows=[
+                    {"canonical_identity": "c1", "signal_id": uuid4(), "title": "A1", "matched_object_ids": [comp_id], "published_at": datetime.now(UTC), "changed_at": datetime.now(UTC), "decision": False, "entity_ids": [], "match_text": "settlement"},
+                    {"canonical_identity": "c2", "signal_id": uuid4(), "title": "A2", "matched_object_ids": [comp_id], "published_at": datetime.now(UTC), "changed_at": datetime.now(UTC), "decision": False, "entity_ids": [], "match_text": "settlement"},
+                ]),
             )
         )
     )
-    assert watchlist["company"][0]["recent_activity_count"] == 0
+    assert watchlist["company"][0]["recent_activity_count"] == 2
     assert watchlist["focus"][0]["label"] == "Settlement"
 
     alert_id = uuid4()

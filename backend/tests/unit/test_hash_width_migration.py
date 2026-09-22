@@ -53,4 +53,3 @@ def test_offline_sql_widens_every_algorithm_tagged_digest_column() -> None:
     ):
         assert qualified_column in result.stdout
     assert result.stdout.count("TYPE VARCHAR(100)") == 5
-

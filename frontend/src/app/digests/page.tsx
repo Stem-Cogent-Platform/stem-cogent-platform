@@ -38,17 +38,38 @@ export default function DigestsPage() {
   return (
     <WorkspaceShell>
       <section className="content-page">
-        <div className="page-heading"><div><p className="eyebrow">Decisions requiring attention first</p><h1>Digests</h1></div></div>
+        <div className="page-heading">
+          <div>
+            <p className="eyebrow">Delivery Mechanism</p>
+            <h1>Periodic Intelligence Digests</h1>
+            <p className="text-secondary" style={{ marginTop: "4px", fontSize: "0.88rem" }}>
+              Digests summarize recurring briefing updates delivered to your team. Full evidence, dossiers, and decision paths are accessed directly in{" "}
+              <Link className="text-link" href="/briefing">My Briefing</Link>.
+            </p>
+          </div>
+          <div>
+            <Link className="secondary-button" href="/briefing">Return to My Briefing</Link>
+          </div>
+        </div>
         {state.status === "loading" && <ModuleLoading label="Loading digests" />}
         {state.status === "error" && <ModuleFailure message={state.message} retry={() => void load()} />}
         {state.status === "ready" && (
           <div className="intelligence-list">
             {state.data.map((item) => (
               <article key={item.id}>
-                <div className="brief-meta"><span>{new Date(item.period_start).toLocaleDateString()} – {new Date(new Date(item.period_end).getTime() - 1).toLocaleDateString()}</span><span>{item.status === "READY" ? "Ready to read" : item.status}</span></div>
+                <div className="brief-meta">
+                  <span>{new Date(item.period_start).toLocaleDateString()} – {new Date(new Date(item.period_end).getTime() - 1).toLocaleDateString()}</span>
+                  <span>{item.status === "READY" ? "Ready to read" : item.status}</span>
+                </div>
                 <h2>{item.content.latest_brief?.what_changed || "Decision Brief digest"}</h2>
                 <p>{item.brief_ids.length} brief{item.brief_ids.length === 1 ? "" : "s"} included.</p>
-                <ul>{item.briefs?.map((brief) => <li key={brief.id}><Link href={`/briefs/${brief.id}`} prefetch={false}>{brief.what_changed}</Link></li>)}</ul>
+                <ul>
+                  {item.briefs?.map((brief) => (
+                    <li key={brief.id}>
+                      <Link href={`/briefs/${brief.id}`} prefetch={false}>{brief.what_changed}</Link>
+                    </li>
+                  ))}
+                </ul>
               </article>
             ))}
             {!state.data.length && (
@@ -56,8 +77,16 @@ export default function DigestsPage() {
                 <p className="eyebrow">Your briefing digest</p>
                 <h2>{stateMessages.digestEmpty.title}</h2>
                 <p>{stateMessages.digestEmpty.body}</p>
-                <ul><li>Decisions requiring attention</li><li>Unresolved watched briefs</li><li>Important Focus Area changes</li><li>Selected Wider Intelligence</li></ul>
-                <Link href="/settings">Digest settings</Link>
+                <ul>
+                  <li>Decisions requiring attention</li>
+                  <li>Unresolved watched briefs</li>
+                  <li>Important Focus Area changes</li>
+                  <li>Selected Intelligence</li>
+                </ul>
+                <div style={{ display: "flex", gap: "12px", marginTop: "16px" }}>
+                  <Link className="primary-button" href="/briefing">Return to My Briefing</Link>
+                  <Link className="secondary-button" href="/settings">Digest Settings</Link>
+                </div>
               </section>
             )}
           </div>

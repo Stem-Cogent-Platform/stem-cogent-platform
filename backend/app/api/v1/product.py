@@ -28,6 +28,8 @@ from app.intelligence.freshness import (
     with_freshness,
 )
 from app.intelligence.evidence_normalization import normalize_evidence_bundle
+from app.intelligence.dossier import build_signal_dossier_contract
+from app.intelligence.decision_brief import build_decision_brief_contract
 from app.core.config import get_settings
 
 router = APIRouter(prefix="/api/v1", tags=["product"])
@@ -100,6 +102,8 @@ _PRODUCT_EVENTS = Literal[
     "BRIEF_ACTED_ON",
     "BRIEF_DISMISSED",
     "WIDER_INTELLIGENCE_VIEWED",
+    "INTELLIGENCE_VIEWED",
+    "INTELLIGENCE_TAB_CHANGED",
     "WATCHLIST_ITEM_VIEWED",
     "FOCUS_AREA_ADDED",
     "FOCUS_AREA_UPDATED",
@@ -316,9 +320,16 @@ async def get_brief(
     deduped_evidence, source_metrics = normalize_evidence_bundle(
         [dict(item) for item in evidence]
     )
+    brief_contract = build_decision_brief_contract(
+        brief_data=dict(row),
+        deduped_evidence=[dict(item) for item in deduped_evidence],
+        source_metrics=source_metrics,
+        user_role=context.principal.permission_role,
+    )
     return jsonable_encoder(
         {
             **dict(row),
+            "brief_contract": brief_contract.model_dump(),
             "evidence": [dict(item) for item in deduped_evidence],
             "source_metrics": source_metrics.to_dict(),
             "actions": [dict(item) for item in actions],
@@ -600,6 +611,7 @@ async def wider_intelligence(
     context: RequestContext = Depends(get_request_context),
     freshness: Literal["CURRENT", "HISTORICAL", "DATE_UNCERTAIN", "ALL"] = "CURRENT",
     q: str = "",
+    tab: str = Query(default="ALL"),
 ) -> list[dict[str, Any]]:
     require_permission(context, "READ_INTELLIGENCE")
     filters = {
@@ -608,6 +620,29 @@ async def wider_intelligence(
         "DATE_UNCERTAIN": "(signal.published_at IS NULL OR signal.published_at>NOW() OR 'DISCOVERY_LEAD'=ANY(signal.processing_flags))",
         "ALL": "TRUE",
     }
+
+    tab_val = getattr(tab, "default", tab) or "ALL"
+    tab_upper = str(tab_val).upper().replace(" ", "_").replace("-", "_").replace("&", "")
+    tab_domain_map: dict[str, list[str]] = {
+        "REGULATORY": ["REGULATORY_POLICY"],
+        "COMPETITION": ["COMPETITIVE_PRODUCT"],
+        "INFRASTRUCTURE": ["INFRASTRUCTURE_RELIABILITY", "INFRASTRUCTURE_INCIDENTS"],
+        "MARKET_CUSTOMERS": ["CUSTOMER_MARKET", "MARKET_CUSTOMERS"],
+        "FINANCIAL_ECONOMIC": ["FINANCIAL_ECONOMIC"],
+        "CAPITAL_PARTNERSHIPS": ["CAPITAL_PARTNERSHIP", "CAPITAL_PARTNERSHIPS"],
+        "EXPANSION": ["MARKET_EXPANSION", "EXPANSION"],
+        "RISK_TRUST": ["FRAUD_RISK_TRUST", "RISK_TRUST"],
+    }
+
+    tab_filter_sql = "TRUE"
+    tab_domains_param: list[str] = []
+
+    if tab_upper in ("FOR_YOU", "FORYOU"):
+        tab_filter_sql = "(assessment.relevance_score >= 0.45 OR COALESCE(cardinality(assessment.matched_object_ids), 0) > 0 OR assessment.decision_required IS TRUE)"
+    elif tab_upper in tab_domain_map:
+        tab_filter_sql = "signal.primary_domain = ANY(CAST(:tab_domains AS TEXT[]))"
+        tab_domains_param = tab_domain_map[tab_upper]
+
     rows = (
         (
             await context.session.execute(
@@ -617,24 +652,33 @@ async def wider_intelligence(
             output.key_developments,output.global_implication,output.confidence_note,output.citations,
             output.synthesized_at,output.llm_synthesis_failed,signal.title,signal.primary_domain,
             signal.subcategory_tags[1] event_type,signal.urgency_band,signal.confidence_band,
-            signal.source_url,signal.published_at,signal.detected_at,signal.processing_flags,source.source_name
+            signal.source_url,signal.published_at,signal.detected_at,signal.processing_flags,source.source_name,
+            assessment.relevance_score,assessment.relevance_band,assessment.decision_required,
+            assessment.decision_type,assessment.exposure_types,
+            ARRAY(SELECT object.name FROM context.company_objects object
+                  WHERE object.tenant_id=:tenant_id AND object.active AND object.id=ANY(assessment.matched_object_ids)) AS matched_company_objects,
+            assessment.rationale->>'rationale' AS why_relevant
           FROM intelligence.global_outputs output
           JOIN pipeline.signals signal ON signal.id=output.signal_id
           JOIN config.sources source ON source.id=signal.source_id
+          LEFT JOIN decision.assessments assessment ON assessment.global_output_id=output.id
+            AND assessment.tenant_id=:tenant_id
           WHERE output.synthesis_status='COMPLETED'
             AND (output.tenant_id IS NULL OR output.tenant_id=:tenant_id)
             AND (signal.tenant_id IS NULL OR signal.tenant_id=:tenant_id)
             AND signal.dedup_status NOT IN ('EXACT_DUPLICATE','SEMANTIC_DUPLICATE')
             AND jsonb_array_length(output.citations)>0 AND {filters[freshness]}
             AND (:q='' OR signal.title ILIKE :pattern OR output.summary ILIKE :pattern)
+            AND {tab_filter_sql}
           ORDER BY {identity_sql()},output.synthesized_at DESC,output.id
-        ) feed ORDER BY published_at DESC NULLS LAST,id LIMIT :limit
+        ) feed ORDER BY COALESCE(relevance_score, 0) DESC, published_at DESC NULLS LAST,id LIMIT :limit
     """),  # nosec B608 # Fixed application SQL fragments; request values are bound
                 {
                     **_value_params(context, 60),
                     "q": q[:200],
                     "pattern": "%" + q[:200] + "%",
                     "limit": limit,
+                    "tab_domains": tab_domains_param,
                 },
             )
         )
@@ -785,10 +829,25 @@ async def signal_detail(
         .mappings()
         .all()
     )
+    dossier_contract = build_signal_dossier_contract(
+        signal=payload,
+        global_output=payload if payload.get("global_output_id") else None,
+        tenant_interpretation=dict(interpretation) if interpretation else None,
+        deduped_evidence=[with_freshness(item) for item in deduped_evidence],
+        source_metrics=source_metrics,
+        related_items=[with_freshness(item) for item in related],
+        historical_items=[
+            with_freshness(item)
+            for item in related
+            if with_freshness(item)["freshness"] == "HISTORICAL"
+        ],
+        user_role=context.principal.permission_role,
+    )
     payload.pop("historical_signal_ids", None)
     payload.pop("cluster_id", None)
     return jsonable_encoder(
         {
+            "dossier": dossier_contract.model_dump(),
             "signal": with_freshness(payload),
             "entities": [dict(item) for item in entities],
             "evidence": [with_freshness(item) for item in deduped_evidence],
@@ -1006,12 +1065,12 @@ async def watchlist(
     ]
     focus_result = []
     for row in focus:
-        label = (row["query_text"] or row["label"]).strip().casefold()
+        label = (row.get("query_text") or row.get("label") or "").strip().casefold()
         items = [
             item
             for item in activity
-            if (row["entity_id"] is not None and row["entity_id"] in item["entity_ids"])
-            or (row["entity_id"] is None and label and label in item["match_text"])
+            if (row.get("entity_id") is not None and row.get("entity_id") in item["entity_ids"])
+            or (row.get("entity_id") is None and label and label in item["match_text"])
         ]
         focus_result.append(project(dict(row), items))
     return jsonable_encoder({"company": company_result, "focus": focus_result})
@@ -1479,6 +1538,13 @@ async def briefing_changes(
             "new_evidence_items": 0,
             "new_relevant_monitoring": 0,
             "critical_count": 0,
+            "new": 0,
+            "updated": 0,
+            "escalated": 0,
+            "new_evidence": 0,
+            "new_decision": 0,
+            "system_freshness_at": None,
+            "content_freshness_at": None,
             "since": since,
             "since_known": False,
             "enabled": False,
@@ -1522,7 +1588,14 @@ async def briefing_changes(
            WHERE COALESCE(last_material_change_at,detected_at)>:since
              AND COALESCE(last_material_change_at,detected_at)<=:as_of) new_relevant_monitoring,
           (SELECT COUNT(*) FROM open_briefs WHERE relevance_band='CRITICAL'
-             AND last_material_change_at>:since AND last_material_change_at<=:as_of) critical_count
+             AND last_material_change_at>:since AND last_material_change_at<=:as_of) critical_count,
+          (SELECT COUNT(*) FROM open_briefs WHERE brief_status='ESCALATED'
+             AND last_material_change_at>:since AND last_material_change_at<=:as_of) escalated_count,
+          (SELECT MAX(completed_at) FROM pipeline.collection_jobs WHERE status='COMPLETED') monitoring_checked_at,
+          GREATEST(
+            (SELECT MAX(COALESCE(first_published_at,created_at)) FROM open_briefs),
+            (SELECT MAX(COALESCE(last_material_change_at,detected_at)) FROM visible_monitoring)
+          ) latest_relevant_at
     """),  # nosec B608 # Fixed application SQL fragments; request values are bound
                 {**_value_params(context), "since": since, "as_of": window["as_of"]},
             )
@@ -1530,9 +1603,23 @@ async def briefing_changes(
         .mappings()
         .one()
     )
+    row_dict = dict(row)
+    new_briefs = int(row_dict.get("new_briefs") or 0)
+    new_monitoring = int(row_dict.get("new_relevant_monitoring") or 0)
+    updated_briefs = int(row_dict.get("updated_briefs") or 0)
+    escalated_count = int(row_dict.get("escalated_count") or 0)
+    new_evidence = int(row_dict.get("new_evidence_items") or 0)
+
     return jsonable_encoder(
         {
-            **dict(row),
+            **row_dict,
+            "new": new_briefs + new_monitoring,
+            "updated": updated_briefs,
+            "escalated": escalated_count,
+            "new_evidence": new_evidence,
+            "new_decision": new_briefs,
+            "system_freshness_at": row_dict.get("monitoring_checked_at"),
+            "content_freshness_at": row_dict.get("latest_relevant_at"),
             "since": since,
             "since_known": since_known,
             "as_of": window["as_of"],

@@ -32,7 +32,20 @@ preserving history and stable identities.
 - Frontend typechecking and all 33 unit tests passed.
 - Local test database upgraded from `0032` to `0033`, downgraded to `0032`,
   and upgraded again successfully.
-- Full backend unit suite and frontend lint are pending.
+- Full backend unit suite passed: 452 tests, with three existing Starlette
+  deprecation warnings. Log: `backend/_tmp_correction_track1_full_unit.log`.
+- Frontend lint passed with the same three pre-existing temporary-script warnings.
+- Frontend CI passed. Full local integration suite and backend CI are pending.
+
+## Read-only staging impact
+
+Before deployment, migration remains `0032`. A bounded sample of the five most
+recent company profiles contains 44 current, verified assessments. Seven retain
+a supported company match; 37 fail the corrected company filter. Three of those
+companies have no supported company assessments in the sample. These are
+assessment counts, not deduplicated First Value counts or personal-match counts.
+No staging rows were changed. Report:
+`backend/_tmp_correction_track1_staging_impact.json`.
 
 Fixtures run only against local `sc_test`; no synthetic staging intelligence was
 created. Track 2 remains gated on Track 1 staging deployment and verification.

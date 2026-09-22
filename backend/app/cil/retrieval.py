@@ -7,6 +7,7 @@ from uuid import UUID
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.cil.sufficiency import evaluate_evidence_sufficiency
 from app.intelligence.evidence_normalization import (
     SourceMetrics,
     map_confidence_to_cil,
@@ -38,16 +39,23 @@ async def retrieve_context(
     user_id: UUID,
     anchor_type: str,
     anchor_id: UUID,
+    query: str = "",
 ) -> CILRetrievalResult:
     if anchor_type == "DECISION_BRIEF":
-        return await _retrieve_brief(session, tenant_id, user_id, anchor_id)
-    if anchor_type == "SIGNAL":
-        return await _retrieve_signal(session, tenant_id, anchor_id)
-    if anchor_type == "ENTITY":
-        return await _retrieve_entity(session, tenant_id, anchor_id)
-    if anchor_type == "COMPANY_LENS":
-        return await _retrieve_company_lens(session, tenant_id, anchor_id)
-    raise ValueError(f"Unsupported CIL anchor type: {anchor_type}")
+        result = await _retrieve_brief(session, tenant_id, user_id, anchor_id)
+    elif anchor_type == "SIGNAL":
+        result = await _retrieve_signal(session, tenant_id, anchor_id, user_id=user_id)
+    elif anchor_type == "ENTITY":
+        result = await _retrieve_entity(session, tenant_id, anchor_id, user_id=user_id)
+    elif anchor_type == "COMPANY_LENS":
+        result = await _retrieve_company_lens(session, tenant_id, anchor_id)
+    else:
+        raise ValueError(f"Unsupported CIL anchor type: {anchor_type}")
+
+    decision = evaluate_evidence_sufficiency(query, result)
+    result.structured_context["sufficiency"] = decision.to_dict()
+    return result
+
 
 
 async def _retrieve_brief(
@@ -61,7 +69,11 @@ async def _retrieve_brief(
                        brief.why_it_matters, brief.exposure_summary,
                        brief.stakes_summary, brief.decision_prompt,
                        brief.owner_roles, brief.uncertainties,
-                       brief.evidence_signal_ids, assessment.id AS assessment_id,
+                       brief.evidence_signal_ids,
+                       brief.response_options, brief.next_validation_steps,
+                       brief.gaps_summary, brief.material_change_count,
+                       brief.decision_window, brief.brief_status,
+                       assessment.id AS assessment_id,
                        assessment.relevance_score, assessment.relevance_band,
                        assessment.matched_object_ids, assessment.exposure_types,
                        assessment.stakes_types, assessment.decision_required,
@@ -107,6 +119,8 @@ async def _retrieve_brief(
         "brief": {key: row[key] for key in (
             "brief_id", "what_changed", "why_it_matters", "exposure_summary",
             "stakes_summary", "decision_prompt", "owner_roles", "uncertainties",
+            "response_options", "next_validation_steps", "gaps_summary",
+            "material_change_count", "decision_window", "brief_status",
         )},
         "assessment": {key: row[key] for key in (
             "assessment_id", "relevance_score", "relevance_band", "exposure_types",
@@ -118,6 +132,26 @@ async def _retrieve_brief(
         )},
         "source_metrics": metrics.to_dict(),
     }
+    try:
+        user_lens = await _load_user_lens(session, tenant_id, user_id)
+        if user_lens:
+            context["user_lens"] = user_lens
+        focus_areas = await _load_user_focus_areas(session, tenant_id, user_id)
+        if focus_areas:
+            context["focus_areas"] = focus_areas
+        profile, company_objs = await _load_company_context(session, tenant_id)
+        if profile:
+            context["company_profile"] = profile
+        if company_objs:
+            context["company_objects"] = company_objs
+        domain = str(row.get("primary_domain") or "")
+        related = await _load_related_intelligence(
+            session, tenant_id, row["signal_id"], domain
+        )
+        if related:
+            context["related_intelligence"] = related
+    except Exception:
+        pass
     confidence = map_confidence_to_cil(row["confidence_band"]) if citations else "INSUFFICIENT_DATA"
     return CILRetrievalResult(
         context, citations, tuple(row["evidence_signal_ids"]), (row["output_id"],),
@@ -126,7 +160,7 @@ async def _retrieve_brief(
 
 
 async def _retrieve_signal(
-    session: AsyncSession, tenant_id: UUID, signal_id: UUID
+    session: AsyncSession, tenant_id: UUID, signal_id: UUID, user_id: UUID | None = None
 ) -> CILRetrievalResult:
     row = (
         await session.execute(
@@ -172,16 +206,82 @@ async def _retrieve_signal(
     )
     context = dict(row)
     context["source_metrics"] = metrics.to_dict()
+
+    if user_id is not None:
+        try:
+            user_lens = await _load_user_lens(session, tenant_id, user_id)
+            if user_lens:
+                context["user_lens"] = user_lens
+            focus_areas = await _load_user_focus_areas(session, tenant_id, user_id)
+            if focus_areas:
+                context["focus_areas"] = focus_areas
+            profile, company_objs = await _load_company_context(session, tenant_id)
+            if profile:
+                context["company_profile"] = profile
+            if company_objs:
+                context["company_objects"] = company_objs
+            domain = str(row.get("primary_domain") or "")
+            related = await _load_related_intelligence(
+                session, tenant_id, signal_id, domain
+            )
+            if related:
+                context["related_intelligence"] = related
+            if row.get("output_id"):
+                assessment_row = (
+                    await session.execute(
+                        text(
+                            """
+                            SELECT assessment.id AS assessment_id, assessment.relevance_score,
+                                   assessment.relevance_band, assessment.matched_object_ids,
+                                   assessment.exposure_types, assessment.stakes_types,
+                                   assessment.decision_required, assessment.decision_type,
+                                   assessment.rationale, monitoring.relevance_rationale
+                            FROM decision.assessments AS assessment
+                            LEFT JOIN context.relevant_monitoring AS monitoring
+                              ON monitoring.tenant_id = :tenant_id
+                             AND monitoring.global_output_id = assessment.global_output_id
+                             AND (monitoring.user_id IS NULL OR monitoring.user_id = :user_id)
+                            WHERE assessment.tenant_id = :tenant_id
+                              AND assessment.global_output_id = :output_id
+                            ORDER BY (monitoring.user_id IS NOT NULL) DESC, assessment.created_at DESC
+                            LIMIT 1
+                            """
+                        ),
+                        {"tenant_id": tenant_id, "user_id": user_id, "output_id": row["output_id"]},
+                    )
+                ).mappings().one_or_none()
+                if assessment_row:
+                    context["assessment"] = dict(assessment_row)
+                    if assessment_row.get("matched_object_ids"):
+                        matched_objs = (
+                            await session.execute(
+                                text(
+                                    """
+                                    SELECT id, object_type, name, importance
+                                    FROM context.company_objects
+                                    WHERE tenant_id = :tenant_id
+                                      AND id = ANY(CAST(:object_ids AS UUID[])) AND active
+                                    ORDER BY importance DESC, id
+                                    """
+                                ),
+                                {"tenant_id": tenant_id, "object_ids": assessment_row["matched_object_ids"]},
+                            )
+                        ).mappings().all()
+                        context["matched_company_context"] = [dict(item) for item in matched_objs]
+        except Exception:
+            pass
+
     output_ids = (row["output_id"],) if row["output_id"] else ()
     confidence = map_confidence_to_cil(row["confidence_band"]) if citations else "INSUFFICIENT_DATA"
     return CILRetrievalResult(context, citations, tuple(evidence_signal_ids), output_ids, (), confidence)
 
 
 async def _retrieve_entity(
-    session: AsyncSession, tenant_id: UUID, entity_id: UUID
+    session: AsyncSession, tenant_id: UUID, entity_id: UUID, user_id: UUID | None = None
 ) -> CILRetrievalResult:
     entity = (
         await session.execute(
+
             text("SELECT id, canonical_name, entity_type, region_tags, aliases FROM intelligence.entities WHERE id = :entity_id"),
             {"entity_id": entity_id},
         )
@@ -274,6 +374,115 @@ async def _retrieve_company_lens(
         {"company_profile": dict(profile), "company_objects": [dict(row) for row in objects]},
         (), (), (), (), "INSUFFICIENT_DATA",
     )
+
+
+async def _load_user_lens(
+    session: AsyncSession, tenant_id: UUID, user_id: UUID
+) -> dict[str, Any] | None:
+    try:
+        row = (
+            await session.execute(
+                text(
+                    """
+                    SELECT role, custom_role_title, focus_areas, responsibilities, default_lens
+                    FROM context.user_decision_lenses
+                    WHERE tenant_id = :tenant_id AND user_id = :user_id AND active
+                    ORDER BY updated_at DESC LIMIT 1
+                    """
+                ),
+                {"tenant_id": tenant_id, "user_id": user_id},
+            )
+        ).mappings().one_or_none()
+        return dict(row) if row else None
+    except Exception:
+        return None
+
+
+async def _load_company_context(
+    session: AsyncSession, tenant_id: UUID
+) -> tuple[dict[str, Any] | None, list[dict[str, Any]]]:
+    try:
+        profile = (
+            await session.execute(
+                text(
+                    """
+                    SELECT company_name, business_model, primary_products, target_customer_segments,
+                           geographic_footprint, regulatory_jurisdictions
+                    FROM context.company_profiles
+                    WHERE tenant_id = :tenant_id
+                    ORDER BY version DESC LIMIT 1
+                    """
+                ),
+                {"tenant_id": tenant_id},
+            )
+        ).mappings().one_or_none()
+        objects = (
+            await session.execute(
+                text(
+                    """
+                    SELECT id, object_type, name, importance
+                    FROM context.company_objects
+                    WHERE tenant_id = :tenant_id AND active
+                    ORDER BY importance DESC, id
+                    LIMIT 25
+                    """
+                ),
+                {"tenant_id": tenant_id},
+            )
+        ).mappings().all()
+        return (dict(profile) if profile else None, [dict(row) for row in objects])
+    except Exception:
+        return None, []
+
+
+async def _load_user_focus_areas(
+    session: AsyncSession, tenant_id: UUID, user_id: UUID
+) -> list[str]:
+    try:
+        rows = (
+            await session.execute(
+                text(
+                    """
+                    SELECT topic
+                    FROM context.user_focus_areas
+                    WHERE tenant_id = :tenant_id AND user_id = :user_id AND active
+                    ORDER BY created_at DESC
+                    LIMIT 5
+                    """
+                ),
+                {"tenant_id": tenant_id, "user_id": user_id},
+            )
+        ).mappings().all()
+        return [r["topic"] for r in rows if r.get("topic")]
+    except Exception:
+        return []
+
+
+async def _load_related_intelligence(
+    session: AsyncSession, tenant_id: UUID, current_signal_id: UUID, domain: str
+) -> list[dict[str, Any]]:
+    if not domain:
+        return []
+    try:
+        rows = (
+            await session.execute(
+                text(
+                    """
+                    SELECT id, title, primary_domain, published_at
+                    FROM pipeline.signals
+                    WHERE id != :signal_id
+                      AND (tenant_id IS NULL OR tenant_id = :tenant_id)
+                      AND primary_domain = :domain
+                    ORDER BY published_at DESC NULLS LAST
+                    LIMIT 3
+                    """
+                ),
+                {"signal_id": current_signal_id, "tenant_id": tenant_id, "domain": domain},
+            )
+        ).mappings().all()
+        return [dict(r) for r in rows]
+    except Exception:
+        return []
 
 
 async def _load_citations(
