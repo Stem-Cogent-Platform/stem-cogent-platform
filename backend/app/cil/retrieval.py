@@ -81,7 +81,7 @@ async def _retrieve_brief(
                        output.id AS output_id, output.summary,
                        output.key_developments, output.global_implication,
                        output.confidence_note,
-                       signal.confidence_band, signal.confidence_score
+                       signal.confidence_band, signal.confidence_score, signal.primary_domain
                 FROM decision.briefs AS brief
                 JOIN pipeline.signals AS signal ON signal.id = brief.signal_id
                 JOIN decision.assessments AS assessment
@@ -98,20 +98,24 @@ async def _retrieve_brief(
     ).mappings().one_or_none()
     if row is None:
         return _insufficient()
-    objects = (
-        await session.execute(
-            text(
-                """
-                SELECT id, object_type, name, importance
-                FROM context.company_objects
-                WHERE tenant_id = :tenant_id
-                  AND id = ANY(CAST(:object_ids AS UUID[])) AND active
-                ORDER BY importance DESC, id
-                """
-            ),
-            {"tenant_id": tenant_id, "object_ids": row["matched_object_ids"]},
-        )
-    ).mappings().all()
+    matched_ids = row.get("matched_object_ids")
+    if matched_ids:
+        objects = (
+            await session.execute(
+                text(
+                    """
+                    SELECT id, object_type, name, importance
+                    FROM context.company_objects
+                    WHERE tenant_id = :tenant_id
+                      AND id = ANY(CAST(:object_ids AS UUID[])) AND active
+                    ORDER BY importance DESC, id
+                    """
+                ),
+                {"tenant_id": tenant_id, "object_ids": list(matched_ids)},
+            )
+        ).mappings().all()
+    else:
+        objects = []
     citations, metrics = await _load_citations_with_metrics(
         session, tenant_id, tuple(row["evidence_signal_ids"])
     )
@@ -252,7 +256,8 @@ async def _retrieve_signal(
                 ).mappings().one_or_none()
                 if assessment_row:
                     context["assessment"] = dict(assessment_row)
-                    if assessment_row.get("matched_object_ids"):
+                    matched_ids = assessment_row.get("matched_object_ids")
+                    if matched_ids:
                         matched_objs = (
                             await session.execute(
                                 text(
@@ -264,7 +269,7 @@ async def _retrieve_signal(
                                     ORDER BY importance DESC, id
                                     """
                                 ),
-                                {"tenant_id": tenant_id, "object_ids": assessment_row["matched_object_ids"]},
+                                {"tenant_id": tenant_id, "object_ids": list(matched_ids)},
                             )
                         ).mappings().all()
                         context["matched_company_context"] = [dict(item) for item in matched_objs]
@@ -380,20 +385,21 @@ async def _load_user_lens(
     session: AsyncSession, tenant_id: UUID, user_id: UUID
 ) -> dict[str, Any] | None:
     try:
-        row = (
-            await session.execute(
-                text(
-                    """
-                    SELECT role, custom_role_title, focus_areas, responsibilities, default_lens
-                    FROM context.user_decision_lenses
-                    WHERE tenant_id = :tenant_id AND user_id = :user_id AND active
-                    ORDER BY updated_at DESC LIMIT 1
-                    """
-                ),
-                {"tenant_id": tenant_id, "user_id": user_id},
-            )
-        ).mappings().one_or_none()
-        return dict(row) if row else None
+        async with session.begin_nested():
+            row = (
+                await session.execute(
+                    text(
+                        """
+                        SELECT role_code, responsibility_tags, priority_domains, delivery_preference
+                        FROM context.user_decision_lenses
+                        WHERE tenant_id = :tenant_id AND user_id = :user_id AND active
+                        ORDER BY updated_at DESC LIMIT 1
+                        """
+                    ),
+                    {"tenant_id": tenant_id, "user_id": user_id},
+                )
+            ).mappings().one_or_none()
+            return dict(row) if row else None
     except Exception:
         return None
 
@@ -402,35 +408,41 @@ async def _load_company_context(
     session: AsyncSession, tenant_id: UUID
 ) -> tuple[dict[str, Any] | None, list[dict[str, Any]]]:
     try:
-        profile = (
-            await session.execute(
-                text(
-                    """
-                    SELECT company_name, business_model, primary_products, target_customer_segments,
-                           geographic_footprint, regulatory_jurisdictions
-                    FROM context.company_profiles
-                    WHERE tenant_id = :tenant_id
-                    ORDER BY version DESC LIMIT 1
-                    """
-                ),
-                {"tenant_id": tenant_id},
-            )
-        ).mappings().one_or_none()
-        objects = (
-            await session.execute(
-                text(
-                    """
-                    SELECT id, object_type, name, importance
-                    FROM context.company_objects
-                    WHERE tenant_id = :tenant_id AND active
-                    ORDER BY importance DESC, id
-                    LIMIT 25
-                    """
-                ),
-                {"tenant_id": tenant_id},
-            )
-        ).mappings().all()
-        return (dict(profile) if profile else None, [dict(row) for row in objects])
+        async with session.begin_nested():
+            profile = (
+                await session.execute(
+                    text(
+                        """
+                        SELECT t.name AS company_name,
+                               p.business_categories,
+                               p.operating_markets,
+                               p.customer_segments,
+                               p.regulatory_categories,
+                               p.strategic_priorities
+                        FROM context.company_profiles p
+                        JOIN auth.tenants t ON t.id = p.tenant_id
+                        WHERE p.tenant_id = :tenant_id
+                        ORDER BY p.version DESC LIMIT 1
+                        """
+                    ),
+                    {"tenant_id": tenant_id},
+                )
+            ).mappings().one_or_none()
+            objects = (
+                await session.execute(
+                    text(
+                        """
+                        SELECT id, object_type, name, importance
+                        FROM context.company_objects
+                        WHERE tenant_id = :tenant_id AND active
+                        ORDER BY importance DESC, id
+                        LIMIT 25
+                        """
+                    ),
+                    {"tenant_id": tenant_id},
+                )
+            ).mappings().all()
+            return (dict(profile) if profile else None, [dict(row) for row in objects])
     except Exception:
         return None, []
 
@@ -439,21 +451,22 @@ async def _load_user_focus_areas(
     session: AsyncSession, tenant_id: UUID, user_id: UUID
 ) -> list[str]:
     try:
-        rows = (
-            await session.execute(
-                text(
-                    """
-                    SELECT topic
-                    FROM context.user_focus_areas
-                    WHERE tenant_id = :tenant_id AND user_id = :user_id AND active
-                    ORDER BY created_at DESC
-                    LIMIT 5
-                    """
-                ),
-                {"tenant_id": tenant_id, "user_id": user_id},
-            )
-        ).mappings().all()
-        return [r["topic"] for r in rows if r.get("topic")]
+        async with session.begin_nested():
+            rows = (
+                await session.execute(
+                    text(
+                        """
+                        SELECT label
+                        FROM context.focus_areas
+                        WHERE tenant_id = :tenant_id AND user_id = :user_id AND active
+                        ORDER BY created_at DESC
+                        LIMIT 5
+                        """
+                    ),
+                    {"tenant_id": tenant_id, "user_id": user_id},
+                )
+            ).mappings().all()
+            return [r["label"] for r in rows if r.get("label")]
     except Exception:
         return []
 
@@ -464,23 +477,24 @@ async def _load_related_intelligence(
     if not domain:
         return []
     try:
-        rows = (
-            await session.execute(
-                text(
-                    """
-                    SELECT id, title, primary_domain, published_at
-                    FROM pipeline.signals
-                    WHERE id != :signal_id
-                      AND (tenant_id IS NULL OR tenant_id = :tenant_id)
-                      AND primary_domain = :domain
-                    ORDER BY published_at DESC NULLS LAST
-                    LIMIT 3
-                    """
-                ),
-                {"signal_id": current_signal_id, "tenant_id": tenant_id, "domain": domain},
-            )
-        ).mappings().all()
-        return [dict(r) for r in rows]
+        async with session.begin_nested():
+            rows = (
+                await session.execute(
+                    text(
+                        """
+                        SELECT id, title, primary_domain, published_at
+                        FROM pipeline.signals
+                        WHERE id != :signal_id
+                          AND (tenant_id IS NULL OR tenant_id = :tenant_id)
+                          AND primary_domain = :domain
+                        ORDER BY published_at DESC NULLS LAST
+                        LIMIT 3
+                        """
+                    ),
+                    {"signal_id": current_signal_id, "tenant_id": tenant_id, "domain": domain},
+                )
+            ).mappings().all()
+            return [dict(r) for r in rows]
     except Exception:
         return []
 
