@@ -4,7 +4,6 @@ from typing import Any
 from unittest.mock import AsyncMock
 from uuid import uuid4
 
-import httpx
 import pytest
 
 from app.cil.answering import deterministic_answer
@@ -12,7 +11,6 @@ from app.cil.retrieval import CILCitation, CILRetrievalResult
 from app.intelligence.live_search.client import (
     LiveSearchRateLimitError,
     LiveSearchTimeoutError,
-    SerpApiClient,
 )
 from app.intelligence.live_search.models import (
     LiveSearchLifecycle,

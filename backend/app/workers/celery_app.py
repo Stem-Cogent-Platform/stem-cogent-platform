@@ -38,6 +38,7 @@ TASK_MODULES = (
     "app.workers.tasks.pilot_activation",
     "app.workers.tasks.scheduler",
     "app.workers.tasks.incoming_ingestion",
+    "app.workers.tasks.signal_processing",
 )
 
 
@@ -70,6 +71,12 @@ def create_celery_app(settings: Settings | None = None) -> Celery:
     settings = settings or get_settings()
     queues = configured_queues(settings)
     default_queue = next(iter(queues), None)
+    raw_signals_queue = (
+        urlparse(settings.SQS_PIPELINE_RAW_SIGNALS_URL).path.rsplit("/", maxsplit=1)[-1]
+        if settings.SQS_PIPELINE_RAW_SIGNALS_URL
+        else "pipeline-raw-signals"
+    )
+
     app = Celery("stem_cogent", broker="sqs://", include=TASK_MODULES)
     app.conf.update(
         accept_content=["json"],
@@ -92,6 +99,11 @@ def create_celery_app(settings: Settings | None = None) -> Celery:
         task_create_missing_queues=False,
         task_default_queue=default_queue,
         task_ignore_result=True,
+        task_routes={
+            "app.workers.tasks.signal_processing.process_incoming_signals": {
+                "queue": raw_signals_queue,
+            },
+        },
         # Celery otherwise finalizes every bare Queue with the default queue's
         # exchange and routing key. For SQS that silently sends explicitly
         # routed tasks to the default physical queue instead of their assigned

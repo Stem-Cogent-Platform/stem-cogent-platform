@@ -13,7 +13,6 @@ from app.cil.threads import (
     InvestigationThread,
     ThreadMessage,
     create_thread,
-    get_or_create_thread,
     get_thread,
     update_thread_state,
 )
