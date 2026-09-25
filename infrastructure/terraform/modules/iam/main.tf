@@ -77,6 +77,7 @@ locals {
       consume = []
       publish = [
         "ingestion-priority",
+        "pipeline-validated",
         "pipeline-synthesized",
         "feedback-events",
       ]
@@ -87,7 +88,7 @@ locals {
     }
     scheduler-worker = {
       consume = []
-      publish = ["ingestion-priority", "ingestion-standard"]
+      publish = ["ingestion-priority", "ingestion-standard", "pipeline-validated"]
     }
     collector-worker = {
       consume = ["ingestion-priority", "ingestion-standard"]
@@ -119,7 +120,7 @@ locals {
     }
     normalization-worker = {
       consume = ["pipeline-validated"]
-      publish = ["pipeline-normalized", "entity-review"]
+      publish = ["pipeline-normalized", "entity-review", "pipeline-validated"]
     }
     classification-worker = {
       consume = ["pipeline-normalized"]
@@ -171,6 +172,7 @@ locals {
       "google_oauth_credentials",
       "linkedin_oauth_credentials",
       "serpapi_api_key",
+      "exa_api_key",
     ]
     frontend-service        = []
     scheduler-worker        = ["database_credentials", "redis_auth_token"]
@@ -241,7 +243,7 @@ locals {
     pdf-collector-worker    = {}
     upload-collector-worker = { enterprise_uploads = ["tenant/*"] }
     validation-worker       = { raw_signals = ["raw/*"] }
-    normalization-worker    = { raw_signals = ["raw/*"] }
+    normalization-worker    = { raw_signals = ["raw/*"], enterprise_uploads = ["tenant/*/policies/*"] }
     classification-worker   = { ml_artefacts = ["models/classification/*"] }
     enrichment-worker       = {}
     clustering-worker       = {}

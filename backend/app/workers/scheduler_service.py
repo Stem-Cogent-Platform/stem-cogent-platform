@@ -30,6 +30,8 @@ async def serve(max_consecutive_failures: int = 5) -> None:
     while not stop.is_set():
         try:
             dispatched = await run_scheduler_tick()
+            from app.workers.tasks.regulatory_gap import recover_jobs
+            await recover_jobs()
             failures = 0
             logger.info("scheduler_tick_complete", extra={"jobs_dispatched": len(dispatched)})
         except Exception:

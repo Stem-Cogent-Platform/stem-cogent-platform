@@ -22,6 +22,7 @@ class StructuredGenerationClient(Protocol):
         instructions: str,
         context: dict[str, Any],
         schema: dict[str, Any],
+        max_output_tokens: int = 1200,
     ) -> dict[str, Any]: ...
 
     async def aclose(self) -> None: ...
@@ -56,6 +57,7 @@ class OpenAIResponsesClient:
         instructions: str,
         context: dict[str, Any],
         schema: dict[str, Any],
+        max_output_tokens: int = 1200,
     ) -> dict[str, Any]:
         request = {
             "model": self.model,
@@ -69,7 +71,7 @@ class OpenAIResponsesClient:
                     "schema": schema,
                 }
             },
-            "max_output_tokens": 1200,
+            "max_output_tokens": max_output_tokens,
         }
         for attempt in range(self._max_retries + 1):
             try:
@@ -133,6 +135,7 @@ class GroqChatCompletionsClient:
         instructions: str,
         context: dict[str, Any],
         schema: dict[str, Any],
+        max_output_tokens: int = 1200,
     ) -> dict[str, Any]:
         request = {
             "model": self.model,
@@ -150,7 +153,7 @@ class GroqChatCompletionsClient:
                 },
             ],
             "response_format": {"type": "json_object"},
-            "max_completion_tokens": 1200,
+            "max_completion_tokens": max_output_tokens,
             "temperature": 0,
         }
         for attempt in range(self._max_retries + 1):
@@ -210,6 +213,7 @@ class FallbackGenerationClient:
         instructions: str,
         context: dict[str, Any],
         schema: dict[str, Any],
+        max_output_tokens: int = 1200,
     ) -> dict[str, Any]:
         self.last_provider = self._primary_provider
         self.last_model = self._primary.model
@@ -217,7 +221,8 @@ class FallbackGenerationClient:
         self.model = self._primary.model
         try:
             return await self._primary.generate(
-                instructions=instructions, context=context, schema=schema
+                instructions=instructions, context=context, schema=schema,
+                max_output_tokens=max_output_tokens,
             )
         except Exception:
             self.fallback_used = True
@@ -225,7 +230,8 @@ class FallbackGenerationClient:
             self.last_model = self._fallback.model
             self.model = self._fallback.model
             return await self._fallback.generate(
-                instructions=instructions, context=context, schema=schema
+                instructions=instructions, context=context, schema=schema,
+                max_output_tokens=max_output_tokens,
             )
 
     async def aclose(self) -> None:

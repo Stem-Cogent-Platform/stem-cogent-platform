@@ -62,6 +62,8 @@ class Settings(BaseSettings):
     CLASSIFICATION_REVIEW_THRESHOLD: float = 0.65
 
     EMBEDDING_PROVIDER: str = "openai"
+    REGULATORY_GAP_ENABLED: bool = False
+    POLICY_MAX_UPLOAD_BYTES: int = 20 * 1024 * 1024
     EMBEDDING_MODEL: str = "text-embedding-3-small"
     EMBEDDING_INPUT_VERSION: str = "v1"
     EMBEDDING_DIMENSION: int = 1536
@@ -105,6 +107,13 @@ class Settings(BaseSettings):
     CIL_ENABLED: bool = True
     CIL_RATE_LIMIT_PER_MINUTE: int = 10
     CLICKHOUSE_ENABLED: bool = True
+
+    OPENAI_API_KEY: str | None = None
+    EXA_API_KEY_ARN: str | None = None
+    EXA_API_KEY: str | None = None
+    EXA_SEARCH_TIMEOUT_SECONDS: float = 10.0
+    GEMINI_API_KEY_ARN: str | None = None
+    GEMINI_API_KEY: str | None = None
 
     SERPAPI_API_KEY_ARN: str | None = None
     SERPAPI_API_KEY: str | None = None

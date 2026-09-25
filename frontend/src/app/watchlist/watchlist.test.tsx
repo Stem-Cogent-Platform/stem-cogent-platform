@@ -49,16 +49,18 @@ describe("Track 11 - Remove Watchlist from primary customer product", () => {
 
     // 2. Verify exact canonical primary destinations
     expect(navigation.map(([href]) => href)).toEqual([
-      "/briefing",
-      "/intelligence",
-      "/company",
+      "/radar",
+      "/artifacts",
+      "/workspace",
+      "/settings",
     ]);
 
     // 3. Verify labels
     expect(navigation.map(([, label]) => label)).toEqual([
-      "My Briefing",
-      "Intelligence",
-      "Company",
+      "Radar Feed",
+      "Decision Artifacts",
+      "Executive Copilot",
+      "Company & Settings",
     ]);
   });
 });

@@ -175,6 +175,7 @@ async def process_incoming_signals_batch(
                     extracted.primary_entity,
                 )
 
+
             except (ExtractionError, Exception) as exc:
                 # 4. Resilient failure isolation: never block other signals in the batch
                 logger.error(
@@ -202,6 +203,14 @@ async def process_incoming_signals_batch(
                 failed_ids.append(str(signal_id))
 
         await session.commit()
+        # Publish only committed signals; workers must never race the promotion transaction.
+        from app.workers.celery_app import celery_app
+        for promoted_id in promoted_ids:
+            try:
+                celery_app.send_task('app.workers.tasks.context_matching.route_signal_to_tenant_contexts', args=[promoted_id])
+                celery_app.send_task('app.workers.tasks.regulatory_gap.extract_signal', args=[promoted_id])
+            except Exception:
+                logger.warning('Post-commit signal dispatch failed', extra={'signal_id': promoted_id})
 
         return {
             "fetched": len(rows),

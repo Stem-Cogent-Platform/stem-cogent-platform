@@ -4,6 +4,7 @@ const apiOrigin = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
 const nextConfig: NextConfig = {
   output: "standalone",
+  experimental: { proxyClientMaxBodySize: "25mb" },
   async rewrites() {
     return [
       { source: "/api/:path*", destination: `${apiOrigin}/api/:path*` },

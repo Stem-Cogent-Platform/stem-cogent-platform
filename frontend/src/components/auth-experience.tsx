@@ -37,7 +37,7 @@ export function AuthExperience({ mode }: { mode: "login" | "signup" }) {
         router.replace(
           destination?.startsWith("/") && !destination.startsWith("//")
             ? destination
-            : "/briefing"
+            : "/radar"
         );
       }
     } catch (error) {

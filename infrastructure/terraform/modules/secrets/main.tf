@@ -65,6 +65,11 @@ locals {
       description       = "SerpApi API key used by Stem Cogent live search discovery"
       rotation_schedule = "90-days-manual"
     }
+    exa_api_key = {
+      path              = "search/exa/api-key"
+      description       = "Exa API key used by Stem Decision Workspace dynamic search"
+      rotation_schedule = "90-days-manual"
+    }
   }
 
   common_tags = merge(
@@ -80,7 +85,7 @@ locals {
 
 check "complete_secret_inventory" {
   assert {
-    condition     = length(local.secret_definitions) == 13
+    condition     = length(local.secret_definitions) == 14
     error_message = "All managed application secret definitions must be present."
   }
 }

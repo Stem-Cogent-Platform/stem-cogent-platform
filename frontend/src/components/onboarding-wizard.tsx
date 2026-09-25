@@ -1,145 +1,512 @@
 "use client";
 
-import { parseContextList } from "@/lib/context-labels";
-
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { StemMark } from "@/components/stem-mark";
+import {
+  bootstrapSession,
+  getOnboardingStatus,
+  submitStageA,
+  submitStageB,
+} from "@/lib/api";
 
-import { apiRequest, bootstrapSession } from "@/lib/api";
+const AVAILABLE_LICENSES = [
+  { id: "PSSP", label: "PSSP", desc: "Payment Solution Service Provider" },
+  { id: "MMO", label: "MMO", desc: "Mobile Money Operator" },
+  { id: "MFB", label: "MFB", desc: "Tier-1 / Tier-2 Microfinance Bank" },
+  { id: "Switching & Processing", label: "Switching & Processing", desc: "Full Transaction Switch" },
+  { id: "IMTO", label: "IMTO", desc: "Cross-Border Remittance" },
+  { id: "Super Agent", label: "Super Agent", desc: "Agency Banking Network" },
+  { id: "Payment Gateway", label: "Payment Gateway", desc: "Online Merchant Acquiring" },
+];
 
-const steps = ["Company", "Company Context", "Your Role", "Decision Lens", "Focus Areas", "Delivery"];
-const roles = [
-  ["CEO", "Founder / CEO", "Company direction, capital and major trade-offs"],
-  ["CSO", "CSO / Strategy", "Market moves, competition and strategic choices"],
-  ["COO", "COO / Operations", "Reliability, dependencies and execution"],
-  ["CFO", "CFO / Finance", "Revenue, margin, capital and financial exposure"],
-  ["PRODUCT", "Product", "Product impact, roadmap and customer needs"],
-  ["GROWTH", "Growth", "Acquisition, expansion and market movement"],
-  ["COMPLIANCE_RISK", "Compliance / Risk", "Regulation, controls and obligations"],
-  ["RESEARCH", "Research", "Evidence, patterns and market intelligence"],
-  ["OTHER", "Other", "Configure priorities around your responsibilities"]
-] as const;
-const domains = ["REGULATORY_POLICY", "INFRASTRUCTURE_RELIABILITY", "COMPETITIVE_PRODUCT", "MARKET_EXPANSION", "FINANCIAL_ECONOMIC", "FRAUD_RISK_TRUST", "CUSTOMER_MARKET"];
-const domainLabels: Record<string, string> = { REGULATORY_POLICY: "Regulatory policy", INFRASTRUCTURE_RELIABILITY: "Infrastructure reliability", COMPETITIVE_PRODUCT: "Competitive product", MARKET_EXPANSION: "Market expansion", FINANCIAL_ECONOMIC: "Financial & economic", FRAUD_RISK_TRUST: "Security, fraud & trust", CUSTOMER_MARKET: "Customer & market" };
-const marketLabels: Record<string, string> = { NG: "Nigeria", GH: "Ghana", KE: "Kenya", ZA: "South Africa", GB: "United Kingdom", OTHER: "Other" };
-const alertThresholds = [
-  ["CRITICAL_ONLY", "Critical only", "Only developments that require immediate review"],
-  ["IMPORTANT_AND_CRITICAL", "Important + Critical", "Recommended for active decision owners"]
-] as const;
-const digestCadences = [
-  ["NONE", "Off", "Do not send a scheduled digest"],
-  ["DAILY", "Daily", "One structured briefing each workday"],
-  ["WEEKLY", "Weekly", "A consolidated weekly decision view"]
-] as const;
+const AVAILABLE_RAILS = [
+  { id: "Providus Bank Core", label: "Providus Bank Core", type: "Settlement Partner" },
+  { id: "NIBSS Instant Payment (NIP)", label: "NIBSS (NIP)", type: "National Clearing Switch" },
+  { id: "Wema ALAT Direct", label: "Wema ALAT", type: "Virtual Account Rail" },
+  { id: "Interswitch Core Switch", label: "Interswitch", type: "Card & Switching Rail" },
+  { id: "Zenith Bank Direct", label: "Zenith Direct", type: "Commercial Bank Clearing" },
+  { id: "Sterling Bank Switch", label: "Sterling Bank", type: "Partner Core" },
+];
 
-function list(value: string) {
-  return parseContextList(value);
-}
+const AVAILABLE_PRODUCTS = [
+  "Virtual Accounts",
+  "Direct Debit Collections",
+  "Payment Gateway Checkout",
+  "POS Merchant Acquiring",
+  "Card Issuing Rail",
+  "Cross-Border Settlement",
+];
+
+const BUSINESS_FUNCTIONS = [
+  { id: "EXECUTIVE_STRATEGY", label: "Executive Strategy", desc: "Founder / CEO / Board: Strategic bets & capital allocation" },
+  { id: "COMPLIANCE_LEGAL", label: "Compliance & Legal", desc: "Regulatory liaison, CBN circular compliance, and audit defense" },
+  { id: "PRODUCT_ENGINEERING", label: "Product & Engineering", desc: "APIs, checkout latency, failover routing, and switch uptime" },
+  { id: "TREASURY_RECONCILIATION", label: "Treasury & Settlement", desc: "Float reconciliation, interchange spreads, and clearing queues" },
+];
+
+type DecisionLensType = "executive_strategy" | "compliance_legal" | "product_engineering" | "treasury_reconciliation";
 
 export function OnboardingWizard() {
   const router = useRouter();
-  const [step, setStep] = useState(0);
-  const [sessionReady, setSessionReady] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [message, setMessage] = useState("");
-  const [state, setState] = useState({
-    categories: [] as string[], markets: ["NG"] as string[], segments: [] as string[],
-    products: "", dependencies: "", competitors: "", regulatory: "", priorities: "",
-    role: "CEO", responsibilities: "", domains: [] as string[], focus: "",
-    alertThreshold: "IMPORTANT_AND_CRITICAL",
-    digestCadence: "WEEKLY"
-  });
-  const progress = useMemo(() => ((step + 1) / steps.length) * 100, [step]);
 
+  // Wizard state: "loading" | "stage_a" | "bootstrapping" | "stage_b" | "completing"
+  const [stage, setStage] = useState<"loading" | "stage_a" | "bootstrapping" | "stage_b" | "completing">("loading");
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  // Stage A Fields
+  const [companyName, setCompanyName] = useState("");
+  const [selectedLicenses, setSelectedLicenses] = useState<string[]>(["PSSP"]);
+  const [selectedRails, setSelectedRails] = useState<string[]>(["Providus Bank Core", "NIBSS Instant Payment (NIP)"]);
+  const [selectedProducts, setSelectedProducts] = useState<string[]>(["Virtual Accounts", "Payment Gateway Checkout"]);
+
+  // Stage B Fields
+  const [businessFunction, setBusinessFunction] = useState("EXECUTIVE_STRATEGY");
+  const [decisionLens, setDecisionLens] = useState<DecisionLensType>("executive_strategy");
+  const [priorityFocus, setPriorityFocus] = useState("");
+  const [alertSensitivity, setAlertSensitivity] = useState<"IMPORTANT_AND_CRITICAL" | "CRITICAL_ONLY">("IMPORTANT_AND_CRITICAL");
+
+  // Bootstrap initial status
   useEffect(() => {
     let active = true;
-    void bootstrapSession().then((authenticated) => {
-      if (!active) return;
-      if (!authenticated) {
+    async function checkStatus() {
+      const ok = await bootstrapSession();
+      if (!ok) {
         router.replace("/login?next=%2Fonboarding");
         return;
       }
-      setSessionReady(true);
-    });
+      try {
+        const status = await getOnboardingStatus();
+        if (!active) return;
+        if (status.organization_name) {
+          setCompanyName(status.organization_name);
+        }
+        if (status.stage_a_completed && status.stage_b_completed) {
+          router.replace("/radar");
+          return;
+        }
+        if (status.stage_a_completed) {
+          setStage("stage_b");
+        } else {
+          setStage("stage_a");
+        }
+      } catch {
+        if (active) setStage("stage_a");
+      }
+    }
+    void checkStatus();
     return () => {
       active = false;
     };
   }, [router]);
 
-  function toggle(key: "categories" | "markets" | "segments" | "domains", value: string) {
-    setState((current) => ({ ...current, [key]: current[key].includes(value) ? current[key].filter((item) => item !== value) : [...current[key], value] }));
-  }
-
-  async function finish(event: FormEvent) {
-    event.preventDefault();
-    setSaving(true);
-    setMessage("");
-    try {
-      if (!(await bootstrapSession())) {
-        router.replace("/login?next=%2Fonboarding");
-        return;
+  function toggleItem(list: string[], item: string, setter: (val: string[]) => void) {
+    if (list.includes(item)) {
+      if (list.length > 1) {
+        setter(list.filter((x) => x !== item));
       }
-      await apiRequest("/api/v1/context/company", { method: "PUT", body: JSON.stringify({
-        business_categories: state.categories,
-        operating_markets: state.markets,
-        customer_segments: state.segments,
-        regulatory_categories: list(state.regulatory),
-        strategic_priorities: list(state.priorities)
-      }) });
-      const objects = [
-        ...list(state.products).map((name) => ({ object_type: "PRODUCT", name })),
-        ...list(state.dependencies).map((name) => ({ object_type: "DEPENDENCY", name, importance: "HIGH" })),
-        ...list(state.competitors).map((name) => ({ object_type: "COMPETITOR", name }))
-      ];
-      await Promise.all(objects.map((object) => apiRequest("/api/v1/context/company/objects", { method: "POST", body: JSON.stringify(object) })));
-      await apiRequest("/api/v1/me/decision-lens", { method: "PUT", body: JSON.stringify({
-        role_code: state.role,
-        responsibility_tags: list(state.responsibilities),
-        priority_domains: state.domains.slice(0, 5),
-        delivery_preference: state.alertThreshold
-      }) });
-      await Promise.all(list(state.focus).map((label) => apiRequest("/api/v1/me/focus-areas", { method: "POST", body: JSON.stringify({ focus_type: "TOPIC", label, query_text: label, weight: 1 }) })));
-      await apiRequest("/api/v1/me/onboarding/complete", { method: "POST", body: JSON.stringify({
-        alert_threshold: state.alertThreshold,
-        digest_cadence: state.digestCadence
-      }) });
-      router.replace("/briefing");
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Your setup could not be saved. Please try again.");
-    } finally {
-      setSaving(false);
+    } else {
+      setter([...list, item]);
     }
   }
 
-  if (!sessionReady) {
-    return <main className="centered-state"><p>Restoring your secure workspace session...</p></main>;
+  async function handleStageASubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!companyName.trim()) {
+      setErrorMessage("Please enter your organization or fintech name.");
+      return;
+    }
+    setErrorMessage(null);
+    setStage("bootstrapping");
+
+    try {
+      await submitStageA({
+        company_name: companyName.trim(),
+        operating_licenses: selectedLicenses,
+        active_products: selectedProducts,
+        clearing_rails: selectedRails,
+        primary_country: "NG",
+        compliance_thresholds: {},
+      });
+
+      // Brief visual pause to show bootstrap progress
+      setTimeout(() => {
+        setStage("stage_b");
+      }, 1000);
+    } catch (err) {
+      setStage("stage_a");
+      setErrorMessage(err instanceof Error ? err.message : "Failed to save operational profile.");
+    }
+  }
+
+  async function handleStageBSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setErrorMessage(null);
+    setStage("completing");
+
+    try {
+      await submitStageB({
+        business_function: businessFunction,
+        decision_lens: decisionLens,
+        priority_focus: priorityFocus.trim() || undefined,
+        alert_sensitivity: alertSensitivity,
+      });
+
+      // Smooth transition into Radar
+      setTimeout(() => {
+        router.replace("/radar");
+      }, 600);
+    } catch (err) {
+      setStage("stage_b");
+      setErrorMessage(err instanceof Error ? err.message : "Failed to save decision lens profile.");
+    }
+  }
+
+  if (stage === "loading") {
+    return (
+      <main className="min-h-screen flex items-center justify-center bg-slate-50">
+        <div className="flex flex-col items-center gap-3">
+          <div className="h-10 w-10 animate-spin rounded-full border-3 border-blue-600 border-t-transparent" />
+          <p className="text-sm font-semibold text-slate-700">Connecting to workspace intelligence...</p>
+        </div>
+      </main>
+    );
   }
 
   return (
-    <form className="onboarding-wizard" onSubmit={finish}>
-      <aside className="wizard-sidebar">
-        <p className="eyebrow">Workspace setup</p>
-        <h1>Make every brief relevant from day one.</h1>
-        <p>About five minutes. You can update every choice later in Settings.</p>
-        <ol>{steps.map((label, index) => <li className={index === step ? "current" : index < step ? "visited" : ""} key={label}><span>{index + 1}</span><strong>{label}</strong></li>)}</ol>
-      </aside>
-      <section className="wizard-stage">
-        <div className="wizard-progress"><i style={{ width: `${progress}%` }} /></div>
-        <header><span>Step {step + 1} of {steps.length}</span><button onClick={() => router.replace("/briefing")} type="button">Finish later</button></header>
+    <main className="min-h-screen bg-slate-50 text-slate-900 flex flex-col justify-between">
+      {/* Top Header */}
+      <header className="h-16 border-b border-slate-200 bg-white/90 backdrop-blur-md px-6 flex items-center justify-between">
+        <div className="flex items-center gap-2.5">
+          <StemMark compact />
+          <span className="font-extrabold tracking-tight text-slate-900 text-lg">Stem Cogent</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="text-xs font-semibold text-slate-500">Step {stage === "stage_a" || stage === "bootstrapping" ? "1 of 2" : "2 of 2"}</span>
+          <div className="w-20 h-1.5 rounded-full bg-slate-100 overflow-hidden border border-slate-200">
+            <div
+              className="h-full bg-blue-600 transition-all duration-300"
+              style={{ width: stage === "stage_a" || stage === "bootstrapping" ? "50%" : "100%" }}
+            />
+          </div>
+        </div>
+      </header>
 
-        {step === 0 && <div className="wizard-panel"><p className="eyebrow">Company</p><h2>Tell us where your business operates.</h2><p>This creates the first boundary for relevant intelligence.</p><ChoiceGroup label="Fintech category" options={["Payments", "Lending", "Banking", "Infrastructure", "Insurance", "Wealth", "Commerce"]} values={state.categories} onToggle={(value) => toggle("categories", value)} /><ChoiceGroup label="Operating markets" labels={marketLabels} options={["NG", "GH", "KE", "ZA", "GB", "OTHER"]} values={state.markets} onToggle={(value) => toggle("markets", value)} /><ChoiceGroup label="Customer segments" options={["Consumers", "SMEs", "Enterprises", "Banks", "Merchants", "Developers"]} values={state.segments} onToggle={(value) => toggle("segments", value)} /></div>}
-        {step === 1 && <div className="wizard-panel"><p className="eyebrow">Company Context</p><h2>What should Stem understand about the business?</h2><p>Use concise comma-separated names. Only provide information you are authorised to share.</p><div className="wizard-fields"><label><span>Products and services</span><input value={state.products} onChange={(event) => setState({ ...state, products: event.target.value })} /></label><label><span>Critical dependencies and partners</span><input value={state.dependencies} onChange={(event) => setState({ ...state, dependencies: event.target.value })} /></label><label><span>Direct competitors</span><input value={state.competitors} onChange={(event) => setState({ ...state, competitors: event.target.value })} /></label><label><span>Regulatory categories</span><input value={state.regulatory} onChange={(event) => setState({ ...state, regulatory: event.target.value })} /></label><label className="full"><span>Strategic priorities</span><input value={state.priorities} onChange={(event) => setState({ ...state, priorities: event.target.value })} /></label></div></div>}
-        {step === 2 && <div className="wizard-panel"><p className="eyebrow">Your Role</p><h2>Which decisions are you responsible for?</h2><div className="role-card-grid">{roles.map(([value,label,description]) => <button className={state.role === value ? "selected" : ""} onClick={() => setState({ ...state, role: value })} type="button" key={value}><strong>{label}</strong><span>{description}</span></button>)}</div></div>}
-        {step === 3 && <div className="wizard-panel"><p className="eyebrow">Decision Lens</p><h2>What do you want Stem Cogent to prioritise for you?</h2><p>Select up to five domains, then add responsibility detail.</p><ChoiceGroup label="Priority decision domains" labels={domainLabels} options={domains} values={state.domains} onToggle={(value) => state.domains.includes(value) || state.domains.length < 5 ? toggle("domains", value) : undefined} /><div className="wizard-fields single"><label><span>Your responsibilities</span><input value={state.responsibilities} onChange={(event) => setState({ ...state, responsibilities: event.target.value })} /></label></div></div>}
-        {step === 4 && <div className="wizard-panel"><p className="eyebrow">Focus Areas</p><h2>What should we watch especially closely right now?</h2><p>Add competitors, regulators, infrastructure providers, markets, product categories, or active initiatives.</p><div className="wizard-fields single"><label><span>Focus areas</span><input value={state.focus} onChange={(event) => setState({ ...state, focus: event.target.value })} /></label></div><div className="focus-examples"><span>Examples</span>{["CBN circulars", "NIBSS reliability", "Merchant margin", "Cross-border payments"].map((item) => <button onClick={() => setState({ ...state, focus: state.focus ? `${state.focus}, ${item}` : item })} type="button" key={item}>+ {item}</button>)}</div></div>}
-        {step === 5 && <div className="wizard-panel"><p className="eyebrow">Delivery</p><h2>How should important developments reach you?</h2><h3>Alert threshold</h3><p>Choose which developments should interrupt you.</p><div className="delivery-list">{alertThresholds.map(([value,label,description]) => <button className={state.alertThreshold === value ? "selected" : ""} onClick={() => setState({ ...state, alertThreshold: value })} type="button" key={value}><i /> <span><strong>{label}</strong><small>{description}</small></span></button>)}</div><h3>Digest cadence</h3><p>Choose how often Stem should collect updates into a briefing.</p><div className="delivery-list">{digestCadences.map(([value,label,description]) => <button className={state.digestCadence === value ? "selected" : ""} onClick={() => setState({ ...state, digestCadence: value })} type="button" key={value}><i /> <span><strong>{label}</strong><small>{description}</small></span></button>)}</div>{message && <p className="form-message" role="alert">{message}</p>}</div>}
+      {/* Main Container */}
+      <div className="flex-1 flex items-center justify-center p-4 sm:p-8">
+        <div className="w-full max-w-2xl bg-white border border-slate-200 rounded-2xl p-6 sm:p-10 shadow-[0_4px_12px_rgba(0,0,0,0.06)]">
+          {errorMessage && (
+            <div className="mb-6 rounded-xl bg-red-50 p-4 border border-red-200 text-xs text-red-700 font-medium">
+              {errorMessage}
+            </div>
+          )}
 
-        <footer><button className="secondary-button" disabled={step === 0 || saving} onClick={() => setStep((value) => value - 1)} type="button">Back</button>{step < steps.length - 1 ? <button className="primary-button" disabled={(step === 0 && (!state.categories.length || !state.markets.length)) || (step === 3 && !state.domains.length)} onClick={() => setStep((value) => value + 1)} type="button">Continue</button> : <button className="primary-button" disabled={saving} type="submit">{saving ? "Creating your briefing…" : "Open my briefing"}</button>}</footer>
-      </section>
-    </form>
+          {/* STAGE A: COMPANY SETUP */}
+          {(stage === "stage_a" || stage === "bootstrapping") && (
+            <form onSubmit={handleStageASubmit} className="space-y-6">
+              <div>
+                <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold uppercase tracking-wider bg-blue-50 text-blue-700 border border-blue-200 mb-2">
+                  Stage A · Company Operational Footprint
+                </span>
+                <h1 className="text-2xl font-black tracking-tight text-slate-900">
+                  Configure Your Operational Rail & Licensing Profile
+                </h1>
+                <p className="mt-1.5 text-xs text-slate-600 leading-relaxed">
+                  Stem uses your active regulatory licenses and partner bank corridors to immediately compute direct statutory exposures, margin threats, and rail stress.
+                </p>
+              </div>
+
+              {/* Organization Name */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold uppercase tracking-wider text-slate-700 block">
+                  Fintech / Company Name
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={companyName}
+                  onChange={(e) => setCompanyName(e.target.value)}
+                  placeholder="e.g. Kuda, Moniepoint, Flutterwave, Paystack"
+                  className="w-full h-11 px-3.5 rounded-xl border border-slate-300 text-sm focus:border-blue-600 focus:outline-none transition shadow-2xs font-medium"
+                />
+              </div>
+
+              {/* Multi-Select Licenses */}
+              <div className="space-y-2">
+                <label className="text-xs font-bold uppercase tracking-wider text-slate-700 block">
+                  Operating Licenses & Authorizations (Multi-Select)
+                </label>
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                  {AVAILABLE_LICENSES.map((lic) => {
+                    const active = selectedLicenses.includes(lic.id);
+                    return (
+                      <button
+                        key={lic.id}
+                        type="button"
+                        onClick={() => toggleItem(selectedLicenses, lic.id, setSelectedLicenses)}
+                        className={`p-2.5 rounded-xl text-left border transition-all ${
+                          active
+                            ? "border-blue-600 bg-blue-50 text-blue-900 shadow-2xs"
+                            : "border-slate-200 bg-white text-slate-700 hover:border-slate-300"
+                        }`}
+                      >
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-bold">{lic.label}</span>
+                          {active && <span className="text-blue-600 font-bold text-xs">✓</span>}
+                        </div>
+                        <span className="text-[10px] text-slate-500 block truncate mt-0.5">{lic.desc}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Multi-Select Rails */}
+              <div className="space-y-2">
+                <label className="text-xs font-bold uppercase tracking-wider text-slate-700 block">
+                  Active Clearing Rails & Partner Banks (Multi-Select)
+                </label>
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                  {AVAILABLE_RAILS.map((rail) => {
+                    const active = selectedRails.includes(rail.id);
+                    return (
+                      <button
+                        key={rail.id}
+                        type="button"
+                        onClick={() => toggleItem(selectedRails, rail.id, setSelectedRails)}
+                        className={`p-2.5 rounded-xl text-left border transition-all ${
+                          active
+                            ? "border-blue-600 bg-blue-50 text-blue-900 shadow-2xs"
+                            : "border-slate-200 bg-white text-slate-700 hover:border-slate-300"
+                        }`}
+                      >
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-bold">{rail.label}</span>
+                          {active && <span className="text-blue-600 font-bold text-xs">✓</span>}
+                        </div>
+                        <span className="text-[10px] text-slate-500 block truncate mt-0.5">{rail.type}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Active Products Pills */}
+              <div className="space-y-2">
+                <label className="text-xs font-bold uppercase tracking-wider text-slate-700 block">
+                  Core Active Product Lines
+                </label>
+                <div className="flex flex-wrap gap-2">
+                  {AVAILABLE_PRODUCTS.map((prod) => {
+                    const active = selectedProducts.includes(prod);
+                    return (
+                      <button
+                        key={prod}
+                        type="button"
+                        onClick={() => toggleItem(selectedProducts, prod, setSelectedProducts)}
+                        className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition ${
+                          active
+                            ? "border-blue-600 bg-blue-600 text-white"
+                            : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+                        }`}
+                      >
+                        {active ? `✓ ${prod}` : `+ ${prod}`}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Submit Action */}
+              <button
+                type="submit"
+                disabled={stage === "bootstrapping"}
+                className="w-full h-12 rounded-xl bg-blue-600 text-white font-bold text-sm shadow-sm hover:bg-blue-700 active:scale-[0.99] transition disabled:opacity-75 flex items-center justify-center gap-2"
+              >
+                {stage === "bootstrapping" ? (
+                  <>
+                    <svg className="animate-spin h-4 w-4 text-white" viewBox="0 0 24 24" fill="none">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                    </svg>
+                    <span>Bootstrapping ecosystem intelligence...</span>
+                  </>
+                ) : (
+                  <>
+                    <span>Save Operational Profile & Continue</span>
+                    <span>→</span>
+                  </>
+                )}
+              </button>
+            </form>
+          )}
+
+          {/* STAGE B: PERSONAL LENS SETUP */}
+          {(stage === "stage_b" || stage === "completing") && (
+            <form onSubmit={handleStageBSubmit} className="space-y-6">
+              <div>
+                <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold uppercase tracking-wider bg-emerald-50 text-emerald-700 border border-emerald-200 mb-2">
+                  Stage B · Personal Executive Lens
+                </span>
+                <h1 className="text-2xl font-black tracking-tight text-slate-900">
+                  Calibrate Your Executive Radar & Decision Prioritization
+                </h1>
+                <p className="mt-1.5 text-xs text-slate-600 leading-relaxed">
+                  Customize the AI agent synthesis and alert thresholds to match your specific accountability and risk sensitivity.
+                </p>
+              </div>
+
+              {/* Question 1: Business Function */}
+              <div className="space-y-2">
+                <label className="text-xs font-bold uppercase tracking-wider text-slate-700 block">
+                  1. What is your primary business function?
+                </label>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                  {BUSINESS_FUNCTIONS.map((fn) => {
+                    const active = businessFunction === fn.id;
+                    return (
+                      <button
+                        key={fn.id}
+                        type="button"
+                        onClick={() => {
+                          setBusinessFunction(fn.id);
+                          // Auto align lens
+                          const map: Record<string, DecisionLensType> = {
+                            EXECUTIVE_STRATEGY: "executive_strategy",
+                            COMPLIANCE_LEGAL: "compliance_legal",
+                            PRODUCT_ENGINEERING: "product_engineering",
+                            TREASURY_RECONCILIATION: "treasury_reconciliation",
+                          };
+                          if (map[fn.id]) setDecisionLens(map[fn.id]);
+                        }}
+                        className={`p-3 rounded-xl text-left border transition ${
+                          active
+                            ? "border-blue-600 bg-blue-50 text-blue-900 shadow-2xs"
+                            : "border-slate-200 bg-white text-slate-700 hover:border-slate-300"
+                        }`}
+                      >
+                        <div className="font-bold text-xs">{fn.label}</div>
+                        <div className="text-[11px] text-slate-500 mt-1 leading-snug">{fn.desc}</div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Question 2: Decision Lens */}
+              <div className="space-y-2">
+                <label className="text-xs font-bold uppercase tracking-wider text-slate-700 block">
+                  2. Select your dominant Decision Lens
+                </label>
+                <div className="grid grid-cols-2 gap-2">
+                  {[
+                    { id: "executive_strategy", label: "Executive Strategy", desc: "M&A, licenses, commercial threats" },
+                    { id: "compliance_legal", label: "Compliance & Legal", desc: "Circulars, penalties, regulatory audits" },
+                    { id: "product_engineering", label: "Product & Engineering", desc: "Node latency, failover, drop rates" },
+                    { id: "treasury_reconciliation", label: "Treasury & Finance", desc: "Settlement float, liquidity, reserves" },
+                  ].map((lens) => {
+                    const active = decisionLens === lens.id;
+                    return (
+                      <button
+                        key={lens.id}
+                        type="button"
+                        onClick={() => setDecisionLens(lens.id as DecisionLensType)}
+                        className={`p-2.5 rounded-xl text-left border transition ${
+                          active
+                            ? "border-blue-600 bg-blue-50 text-blue-900 shadow-2xs"
+                            : "border-slate-200 bg-white text-slate-700 hover:border-slate-300"
+                        }`}
+                      >
+                        <div className="font-bold text-xs">{lens.label}</div>
+                        <div className="text-[10px] text-slate-500 mt-0.5 truncate">{lens.desc}</div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Priority Domain Focus (Optional) */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold uppercase tracking-wider text-slate-700 block">
+                  Specific Strategic Focus (Optional)
+                </label>
+                <input
+                  type="text"
+                  value={priorityFocus}
+                  onChange={(e) => setPriorityFocus(e.target.value)}
+                  placeholder="e.g. Cross-border FX spreads, CBN merchant KYC circulars, NIP inward stability"
+                  className="w-full h-11 px-3.5 rounded-xl border border-slate-300 text-sm focus:border-blue-600 focus:outline-none transition shadow-2xs font-medium"
+                />
+              </div>
+
+              {/* Question 3: Notification Sensitivity */}
+              <div className="space-y-2">
+                <label className="text-xs font-bold uppercase tracking-wider text-slate-700 block">
+                  3. Alert Notification Sensitivity
+                </label>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                  <button
+                    type="button"
+                    onClick={() => setAlertSensitivity("IMPORTANT_AND_CRITICAL")}
+                    className={`p-3 rounded-xl text-left border transition ${
+                      alertSensitivity === "IMPORTANT_AND_CRITICAL"
+                        ? "border-blue-600 bg-blue-50 text-blue-900 shadow-2xs"
+                        : "border-slate-200 bg-white text-slate-700 hover:border-slate-300"
+                    }`}
+                  >
+                    <div className="font-bold text-xs">Important & Critical (Recommended)</div>
+                    <div className="text-[11px] text-slate-500 mt-1">
+                      Deliver real-time telemetry drops, statutory circular deadlines, and competitive price wars.
+                    </div>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setAlertSensitivity("CRITICAL_ONLY")}
+                    className={`p-3 rounded-xl text-left border transition ${
+                      alertSensitivity === "CRITICAL_ONLY"
+                        ? "border-blue-600 bg-blue-50 text-blue-900 shadow-2xs"
+                        : "border-slate-200 bg-white text-slate-700 hover:border-slate-300"
+                    }`}
+                  >
+                    <div className="font-bold text-xs">Critical Emergency Only</div>
+                    <div className="text-[11px] text-slate-500 mt-1">
+                      Only page when active rail outages exceed 15 minutes or immediate fines apply.
+                    </div>
+                  </button>
+                </div>
+              </div>
+
+              {/* Submit Action */}
+              <button
+                type="submit"
+                disabled={stage === "completing"}
+                className="w-full h-12 rounded-xl bg-emerald-600 text-white font-bold text-sm shadow-sm hover:bg-emerald-700 active:scale-[0.99] transition disabled:opacity-75 flex items-center justify-center gap-2"
+              >
+                {stage === "completing" ? (
+                  <>
+                    <svg className="animate-spin h-4 w-4 text-white" viewBox="0 0 24 24" fill="none">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                    </svg>
+                    <span>Launching Executive Radar...</span>
+                  </>
+                ) : (
+                  <>
+                    <span>Complete Setup & Launch Radar Feed</span>
+                    <span>→</span>
+                  </>
+                )}
+              </button>
+            </form>
+          )}
+        </div>
+      </div>
+
+      {/* Footer */}
+      <footer className="h-12 border-t border-slate-200 bg-white text-center flex items-center justify-center text-xs text-slate-500 font-medium">
+        Stem Cogent Decision Intelligence Platform · Grounded on Central Bank of Nigeria Gazettes & Switch Telemetry
+      </footer>
+    </main>
   );
-}
-
-function ChoiceGroup({ label, labels = {}, options, values, onToggle }: { label: string; labels?: Record<string, string>; options: string[]; values: string[]; onToggle: (value: string) => void }) {
-  return <fieldset className="choice-group"><legend>{label}</legend><div>{options.map((option) => <button className={values.includes(option) ? "selected" : ""} onClick={() => onToggle(option)} type="button" key={option}>{values.includes(option) ? "✓ " : "+ "}{labels[option] ?? option}</button>)}</div></fieldset>;
 }

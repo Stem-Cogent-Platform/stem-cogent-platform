@@ -33,7 +33,10 @@ def upgrade() -> None:
         ALTER TABLE pipeline.incoming_signals
             ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             ADD COLUMN IF NOT EXISTS error_message TEXT;
-
+        """
+    )
+    op.execute(
+        """
         ALTER TABLE pipeline.signals
             ADD COLUMN IF NOT EXISTS incoming_signal_id UUID
                 REFERENCES pipeline.incoming_signals(id) ON DELETE SET NULL;
@@ -132,5 +135,4 @@ def downgrade() -> None:
             DROP COLUMN IF EXISTS updated_at;
         """
     )
-
 

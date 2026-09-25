@@ -82,13 +82,11 @@ async def register(
 ) -> AccessTokenResponse:
     """Create a public trial workspace and sign its first administrator in."""
 
-    if get_settings().PHASE5_PILOT_INVITES_ENABLED:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Registration is unavailable")
-
     await _enforce_rate_limit(request, body.email)
     tenant_id = uuid4()
     user_id = uuid4()
     started_at = datetime.now(UTC)
+    pilot_expires = started_at + timedelta(days=14)
     slug = _workspace_slug(body.company_name, tenant_id)
     async for session in get_session():
         existing = (
@@ -109,21 +107,35 @@ async def register(
         await session.execute(
             text(
                 """
-                INSERT INTO auth.tenants (id, name, slug, plan_tier, status)
-                VALUES (:tenant_id, :company_name, :slug, 'TRIAL', 'TRIAL')
+                INSERT INTO auth.tenants (
+                    id, name, slug, plan_tier, status,
+                    subscription_tier, pilot_expires_at,
+                    monthly_workspace_query_limit, queries_used_this_period,
+                    stage_a_completed
+                ) VALUES (
+                    :tenant_id, :company_name, :slug, 'TRIAL', 'TRIAL',
+                    'pilot', :pilot_expires, 30, 0, FALSE
+                )
                 """
             ),
-            {"tenant_id": tenant_id, "company_name": body.company_name, "slug": slug},
+            {
+                "tenant_id": tenant_id,
+                "company_name": body.company_name,
+                "slug": slug,
+                "pilot_expires": pilot_expires,
+            },
         )
         await session.execute(
             text(
                 """
                 INSERT INTO auth.users (
                     id, tenant_id, email, display_name,
-                    permission_role, status, password_hash
+                    permission_role, status, password_hash,
+                    is_superuser, stage_b_completed, email_verified
                 ) VALUES (
                     :user_id, :tenant_id, :email, :display_name,
-                    'ADMIN', 'ACTIVE', :password_hash
+                    'ADMIN', 'ACTIVE', :password_hash,
+                    FALSE, FALSE, TRUE
                 )
                 """
             ),
@@ -150,14 +162,14 @@ async def register(
                 INSERT INTO billing.subscriptions (
                     tenant_id, plan_code, status, trial_started_at, trial_ends_at
                 ) VALUES (
-                    :tenant_id, 'TRIAL', 'TRIALING', :started_at, :trial_ends_at
+                    :tenant_id, 'pilot', 'TRIALING', :started_at, :trial_ends_at
                 )
                 """
             ),
             {
                 "tenant_id": tenant_id,
                 "started_at": started_at,
-                "trial_ends_at": started_at + timedelta(days=21),
+                "trial_ends_at": pilot_expires,
             },
         )
         row = {
@@ -167,6 +179,10 @@ async def register(
             "display_name": body.display_name,
             "permission_role": "ADMIN",
             "tenant_name": body.company_name,
+            "is_superuser": False,
+            "stage_a_completed": False,
+            "stage_b_completed": False,
+            "subscription_tier": "pilot",
         }
         return await _issue_session(session, row, request, response)
     raise HTTPException(
@@ -205,7 +221,11 @@ async def login(
                         """
                     SELECT users.id, users.tenant_id, users.email, users.display_name,
                            users.permission_role, users.password_hash,
-                           users.onboarding_completed_at, tenants.name AS tenant_name
+                           users.onboarding_completed_at, users.is_superuser,
+                           users.stage_b_completed, users.decision_lens,
+                           users.business_function,
+                           tenants.name AS tenant_name,
+                           tenants.subscription_tier, tenants.stage_a_completed
                     FROM auth.users AS users
                     JOIN auth.tenants AS tenants ON tenants.id = users.tenant_id
                     WHERE users.tenant_id = :tenant_id
@@ -408,8 +428,11 @@ async def me(context: RequestContext = Depends(get_request_context)) -> dict[str
             await context.session.execute(
                 text(
                     """
-                SELECT users.email,users.display_name,users.onboarding_completed_at,
-                       tenants.name AS tenant_name
+                SELECT users.email, users.display_name, users.onboarding_completed_at,
+                       users.is_superuser, users.stage_b_completed, users.decision_lens,
+                       users.business_function,
+                       tenants.name AS tenant_name, tenants.stage_a_completed,
+                       tenants.subscription_tier
                 FROM auth.users AS users
                 JOIN auth.tenants AS tenants ON tenants.id = users.tenant_id
                 WHERE users.id = :user_id AND users.tenant_id = :tenant_id
@@ -438,6 +461,173 @@ async def me(context: RequestContext = Depends(get_request_context)) -> dict[str
         "legal_acceptance_current": context.principal.current_compliance_ledger_id
         is not None,
     }
+
+
+class AcceptInvitationInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    token: str = Field(min_length=16, max_length=256)
+    display_name: str = Field(min_length=2, max_length=255)
+    password: str = Field(min_length=12, max_length=256)
+
+
+@router.get("/invitations/validate")
+async def validate_invitation(token: str) -> dict[str, Any]:
+    """Validate an invitation token for UI invite acceptance."""
+    if not token or len(token) < 16:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Invalid invitation token")
+    token_hash = hashlib.sha256(token.encode()).hexdigest()
+    async for session in get_session():
+        row = (
+            await session.execute(
+                text(
+                    """
+                    SELECT inv.id, inv.organization_id, inv.email, inv.expires_at,
+                           t.name AS workspace_name
+                    FROM auth.organization_invitations AS inv
+                    JOIN auth.tenants AS t ON t.id = inv.organization_id
+                    WHERE inv.token_hash = :hash
+                      AND inv.accepted_at IS NULL
+                      AND inv.expires_at > NOW()
+                    LIMIT 1
+                    """
+                ),
+                {"hash": token_hash},
+            )
+        ).mappings().one_or_none()
+        if row is None:
+            raise HTTPException(
+                status.HTTP_404_NOT_FOUND,
+                "This invitation is invalid, expired, or has already been used",
+            )
+        return {
+            "valid": True,
+            "workspace_name": row["workspace_name"],
+            "email": row["email"],
+            "expires_at": (
+                row["expires_at"].isoformat()
+                if hasattr(row["expires_at"], "isoformat")
+                else str(row["expires_at"])
+            ),
+        }
+    raise HTTPException(
+        status.HTTP_503_SERVICE_UNAVAILABLE, "Authentication unavailable"
+    )
+
+
+@router.post("/invitations/accept", response_model=AccessTokenResponse)
+async def accept_invitation(
+    body: AcceptInvitationInput, request: Request, response: Response
+) -> AccessTokenResponse:
+    """Accept an organization invitation by link token and establish session."""
+    token_hash = hashlib.sha256(body.token.encode()).hexdigest()
+    async for session in get_session():
+        invitation = (
+            await session.execute(
+                text(
+                    """
+                    SELECT inv.id, inv.organization_id, inv.email, inv.assigned_lens,
+                           t.name AS workspace_name, t.subscription_tier, t.stage_a_completed
+                    FROM auth.organization_invitations AS inv
+                    JOIN auth.tenants AS t ON t.id = inv.organization_id
+                    WHERE inv.token_hash = :hash
+                      AND inv.accepted_at IS NULL
+                      AND inv.expires_at > NOW()
+                    LIMIT 1
+                    """
+                ),
+                {"hash": token_hash},
+            )
+        ).mappings().one_or_none()
+        if invitation is None:
+            raise HTTPException(
+                status.HTTP_404_NOT_FOUND,
+                "This invitation is invalid, expired, or has already been used",
+            )
+
+        existing = (
+            await session.execute(
+                text("SELECT 1 FROM auth.login_identities WHERE email = :email"),
+                {"email": invitation["email"]},
+            )
+        ).scalar_one_or_none()
+        if existing is not None:
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                "An account with this email already exists",
+            )
+
+        tenant_id = invitation["organization_id"]
+        user_id = uuid4()
+        pw_hash = hash_password(body.password)
+
+        await session.execute(
+            text("SELECT set_config('app.current_tenant_id', :tenant_id, true)"),
+            {"tenant_id": str(tenant_id)},
+        )
+
+        await session.execute(
+            text(
+                """
+                INSERT INTO auth.users (
+                    id, tenant_id, email, display_name,
+                    permission_role, status, password_hash,
+                    email_verified, stage_b_completed, decision_lens
+                ) VALUES (
+                    :user_id, :tenant_id, :email, :display_name,
+                    'ADMIN', 'ACTIVE', :pw_hash,
+                    TRUE, FALSE, :assigned_lens
+                )
+                """
+            ),
+            {
+                "user_id": user_id,
+                "tenant_id": tenant_id,
+                "email": invitation["email"],
+                "display_name": body.display_name,
+                "pw_hash": pw_hash,
+                "assigned_lens": invitation["assigned_lens"],
+            },
+        )
+
+        await session.execute(
+            text(
+                """
+                INSERT INTO auth.login_identities (email, tenant_id, user_id)
+                VALUES (:email, :tenant_id, :user_id)
+                ON CONFLICT (email) DO NOTHING
+                """
+            ),
+            {"email": invitation["email"], "tenant_id": tenant_id, "user_id": user_id},
+        )
+
+        await session.execute(
+            text(
+                """
+                UPDATE auth.organization_invitations
+                SET accepted_at = NOW()
+                WHERE id = :invitation_id
+                """
+            ),
+            {"invitation_id": invitation["id"]},
+        )
+
+        user_row = {
+            "id": user_id,
+            "tenant_id": tenant_id,
+            "email": invitation["email"],
+            "display_name": body.display_name,
+            "permission_role": "ADMIN",
+            "tenant_name": invitation["workspace_name"],
+            "stage_b_completed": False,
+            "stage_a_completed": bool(invitation["stage_a_completed"]),
+            "subscription_tier": str(invitation["subscription_tier"] or "pilot"),
+            "decision_lens": invitation["assigned_lens"],
+        }
+        return await _issue_session(session, user_row, request, response)
+
+    raise HTTPException(
+        status.HTTP_503_SERVICE_UNAVAILABLE, "Authentication unavailable"
+    )
 
 
 def _access_token(
@@ -510,6 +700,12 @@ def _public_user(row: Any) -> dict[str, Any]:
         "permission_role": row["permission_role"],
         "workspace_name": row["tenant_name"],
         "onboarding_completed_at": row.get("onboarding_completed_at"),
+        "is_superuser": bool(row.get("is_superuser", False)),
+        "stage_a_completed": bool(row.get("stage_a_completed", False)),
+        "stage_b_completed": bool(row.get("stage_b_completed", False)),
+        "subscription_tier": str(row.get("subscription_tier") or "pilot"),
+        "decision_lens": row.get("decision_lens"),
+        "business_function": row.get("business_function"),
     }
 
 

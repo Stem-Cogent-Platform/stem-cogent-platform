@@ -27,7 +27,10 @@ logger = logging.getLogger(__name__)
 
 class CheckoutInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    plan_code: Literal["INDIVIDUAL", "TEAM", "COMPANY"]
+    plan_code: Literal[
+        "INDIVIDUAL", "TEAM", "COMPANY",
+        "operator_growth", "institutional_scale"
+    ]
     idempotency_key: UUID
 
 
@@ -409,6 +412,47 @@ async def _process_webhook(session: Any, event_type: str, data: Any) -> None:
             {"tenant_id": str(tenant_id)},
         )
         await _activate_checkout(session, tenant_id, reference, data)
+    elif event_type == "subscription.create":
+        subscription_code = data.get("subscription_code")
+        customer = data.get("customer") if isinstance(data.get("customer"), dict) else {}
+        customer_code = customer.get("customer_code")
+        email = customer.get("email")
+        if subscription_code and email:
+            await session.execute(
+                text(
+                    """
+                    UPDATE auth.tenants
+                    SET paystack_subscription_code = :sub_code,
+                        paystack_customer_code = COALESCE(:cust_code, paystack_customer_code),
+                        updated_at = NOW()
+                    FROM auth.users
+                    WHERE auth.users.tenant_id = auth.tenants.id
+                      AND LOWER(auth.users.email) = LOWER(:email)
+                    """
+                ),
+                {
+                    "sub_code": str(subscription_code),
+                    "cust_code": customer_code,
+                    "email": str(email),
+                },
+            )
+    elif event_type == "invoice.payment_failed":
+        customer = data.get("customer") if isinstance(data.get("customer"), dict) else {}
+        email = customer.get("email")
+        if email:
+            await session.execute(
+                text(
+                    """
+                    UPDATE billing.subscriptions
+                    SET status = 'PAST_DUE', updated_at = NOW()
+                    FROM auth.users
+                    WHERE auth.users.tenant_id = billing.subscriptions.tenant_id
+                      AND LOWER(auth.users.email) = LOWER(:email)
+                      AND billing.subscriptions.status = 'ACTIVE'
+                    """
+                ),
+                {"email": str(email)},
+            )
     elif event_type in {"subscription.disable", "subscription.not_renew"}:
         subscription_code = data.get("subscription_code")
         if subscription_code:
@@ -465,9 +509,36 @@ async def _activate_checkout(session: Any, tenant_id: UUID, reference: str, data
          "subscription_ref": provider_subscription_ref},
         )
     ).scalar_one()
+    plan_code = intent["plan_code"]
+    tier_mapping = {
+        "operator_growth": ("operator_growth", 250),
+        "institutional_scale": ("institutional_scale", 1000),
+        "TEAM": ("operator_growth", 250),
+        "COMPANY": ("institutional_scale", 1000),
+        "INDIVIDUAL": ("operator_growth", 100),
+    }
+    tier_name, query_limit = tier_mapping.get(plan_code, ("operator_growth", 250))
     await session.execute(
-        text("UPDATE auth.tenants SET status = 'ACTIVE', updated_at = NOW() WHERE id = :tenant_id"),
-        {"tenant_id": tenant_id},
+        text(
+            """
+            UPDATE auth.tenants
+            SET status = 'ACTIVE',
+                subscription_tier = :tier_name,
+                monthly_workspace_query_limit = :query_limit,
+                queries_used_this_period = 0,
+                paystack_customer_code = COALESCE(:cust_code, paystack_customer_code),
+                paystack_subscription_code = COALESCE(:sub_code, paystack_subscription_code),
+                updated_at = NOW()
+            WHERE id = :tenant_id
+            """
+        ),
+        {
+            "tenant_id": tenant_id,
+            "tier_name": tier_name,
+            "query_limit": query_limit,
+            "cust_code": customer.get("customer_code"),
+            "sub_code": provider_subscription_ref,
+        },
     )
     await session.execute(
         text(

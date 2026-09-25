@@ -28,7 +28,9 @@ locals {
       GOOGLE_OAUTH_CREDENTIALS_ARN          = module.secrets.secret_arns["google_oauth_credentials"]
       LINKEDIN_OAUTH_CREDENTIALS_ARN        = module.secrets.secret_arns["linkedin_oauth_credentials"]
       SERPAPI_API_KEY_ARN                   = module.secrets.secret_arns["serpapi_api_key"]
+      EXA_API_KEY_ARN                       = module.secrets.secret_arns["exa_api_key"]
       SYNTHESIS_ENABLED                     = "true"
+      REGULATORY_GAP_ENABLED                 = "true"
       CIL_ENABLED                           = "true"
       CLICKHOUSE_ENABLED                    = "false"
       PHASE5_PILOT_INVITES_ENABLED          = "true"

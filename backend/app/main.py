@@ -7,18 +7,24 @@ from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.v1.cil import router as cil_router
+from app.api.v1.artifacts import router as artifacts_router, intelligence_artifacts_router
 from app.api.v1.auth_sessions import router as auth_sessions_router
 from app.api.v1.billing import router as billing_router
-from app.api.v1.admin import router as admin_router
+from app.api.v1.admin import router as admin_router, admin_v1_router
 from app.api.v1.compliance import router as compliance_router
 from app.api.v1.context import router as context_router
 from app.api.v1.health import router as health_router
 from app.api.v1.invitations import router as invitations_router
+from app.api.v1.onboarding import router as onboarding_router, organizations_router
 from app.api.v1.product import router as product_router
 from app.api.v1.realtime import router as realtime_router
 from app.api.v1.reviews import router as reviews_router
 from app.api.v1.search import router as search_router
 from app.api.v1.sso import router as sso_router
+from app.api.v1.workspace import router as workspace_router
+from app.api.v1.policies import router as policies_router
+from app.api.v1.gap_audits import router as gap_audits_router
+from app.api.v1.marketing import router as marketing_router
 from app.core.config import get_settings
 from app.core.database import close_database_connection
 from app.core.logging import (
@@ -125,7 +131,12 @@ async def add_security_headers(request: Request, call_next) -> Response:
 
 app.include_router(health_router)
 app.include_router(admin_router)
+app.include_router(admin_v1_router)
+app.include_router(artifacts_router)
+app.include_router(intelligence_artifacts_router)
 app.include_router(auth_sessions_router)
+app.include_router(onboarding_router)
+app.include_router(organizations_router)
 app.include_router(invitations_router)
 app.include_router(billing_router)
 app.include_router(compliance_router)
@@ -140,3 +151,7 @@ app.include_router(cil_router)
 app.include_router(reviews_router)
 app.include_router(search_router)
 app.include_router(sso_router)
+app.include_router(workspace_router)
+app.include_router(policies_router)
+app.include_router(gap_audits_router)
+app.include_router(marketing_router)

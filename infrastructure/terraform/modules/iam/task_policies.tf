@@ -59,6 +59,7 @@ locals {
             Effect = "Allow"
             Action = [
               "s3:GetObject",
+              "s3:GetObjectVersion",
               "s3:GetObjectAttributes",
               "s3:GetObjectTagging",
             ]

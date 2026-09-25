@@ -26,6 +26,7 @@ QUEUE_SETTINGS = {
 }
 
 TASK_MODULES = (
+    "app.workers.tasks.regulatory_gap",
     "app.workers.tasks.collection",
     "app.workers.tasks.validation",
     "app.workers.tasks.normalization",
@@ -39,6 +40,9 @@ TASK_MODULES = (
     "app.workers.tasks.scheduler",
     "app.workers.tasks.incoming_ingestion",
     "app.workers.tasks.signal_processing",
+    "app.workers.tasks.context_matching",
+    "app.workers.tasks.artifact_synthesis",
+    "app.workers.tasks.bootstrap",
 )
 
 
@@ -100,7 +104,14 @@ def create_celery_app(settings: Settings | None = None) -> Celery:
         task_default_queue=default_queue,
         task_ignore_result=True,
         task_routes={
+            "app.workers.tasks.regulatory_gap.process_job": {"queue": validated_signals_queue},
+            "app.workers.tasks.regulatory_gap.extract_signal": {"queue": validated_signals_queue},
+            "app.workers.tasks.bootstrap.bootstrap_tenant_artifacts": {"queue": validated_signals_queue},
+            "app.workers.tasks.context_matching.route_signal_to_tenant_contexts": {"queue": validated_signals_queue},
             "app.workers.tasks.signal_processing.process_incoming_signals": {
+                "queue": validated_signals_queue,
+            },
+            "app.workers.tasks.artifact_synthesis.generate_intelligence_artifact": {
                 "queue": validated_signals_queue,
             },
         },

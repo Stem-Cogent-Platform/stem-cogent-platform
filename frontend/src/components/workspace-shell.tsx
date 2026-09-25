@@ -8,9 +8,10 @@ import { StemMark } from "@/components/stem-mark";
 import { apiRequest, bootstrapSession, currentUser, logout } from "@/lib/api";
 
 export const navigation = [
-  ["/briefing", "My Briefing", "briefing"],
-  ["/intelligence", "Intelligence", "intelligence"],
-  ["/company", "Company", "company"],
+  ["/radar", "Radar Feed", "briefing"],
+  ["/artifacts", "Decision Artifacts", "intelligence"],
+  ["/workspace", "Executive Copilot", "watch"],
+  ["/settings", "Company & Settings", "company"],
 ] as const;
 
 type ShellAlert = {

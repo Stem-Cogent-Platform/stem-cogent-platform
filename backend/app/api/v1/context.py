@@ -22,6 +22,10 @@ from app.context.normalization import context_label
 from app.context.personalisation import queue_company_users, queue_personalisation
 from app.compliance import require_current_legal_acceptance
 from app.core.config import get_settings
+from app.synthesis import (
+    IntelligenceArtifactListResponse,
+    IntelligenceArtifactResponse,
+)
 
 
 router = APIRouter(tags=["context"])
@@ -36,6 +40,10 @@ class CompanyProfileInput(BaseModel):
     customer_segments: list[str] = Field(default_factory=list, max_length=50)
     regulatory_categories: list[str] = Field(default_factory=list, max_length=50)
     strategic_priorities: list[str] = Field(default_factory=list, max_length=50)
+    operating_licenses: list[str] = Field(default_factory=list, max_length=50)
+    active_products: list[str] = Field(default_factory=list, max_length=50)
+    clearing_rails: list[str] = Field(default_factory=list, max_length=50)
+    compliance_thresholds: dict[str, Any] = Field(default_factory=dict)
 
 
 class CompanyObjectInput(BaseModel):
@@ -196,9 +204,10 @@ async def put_company_context(
 ) -> dict[str, Any]:
     require_permission(context, "CONFIGURE_COMPANY_CONTEXT")
     require_current_legal_acceptance(context)
-    values = body.model_dump()
+    values = body.model_dump(exclude={"compliance_thresholds"})
+    values["compliance_thresholds"] = json.dumps(body.compliance_thresholds)
     required = ("business_categories", "operating_markets", "strategic_priorities")
-    completeness = sum(bool(values[key]) for key in required) / len(required)
+    completeness = sum(bool(body.model_dump()[key]) for key in required) / len(required)
     row = (
         (
             await context.session.execute(
@@ -207,10 +216,14 @@ async def put_company_context(
                 INSERT INTO context.company_profiles (
                   tenant_id, business_categories, operating_markets,
                   customer_segments, regulatory_categories, strategic_priorities,
+                  operating_licenses, active_products, clearing_rails,
+                  compliance_thresholds,
                   profile_completeness, created_by, updated_by
                 ) VALUES (
                   :tenant_id, :business_categories, :operating_markets,
                   :customer_segments, :regulatory_categories, :strategic_priorities,
+                  :operating_licenses, :active_products, :clearing_rails,
+                  CAST(:compliance_thresholds AS JSONB),
                   :completeness, :user_id, :user_id
                 )
                 ON CONFLICT (tenant_id) DO UPDATE
@@ -219,17 +232,27 @@ async def put_company_context(
                     customer_segments = EXCLUDED.customer_segments,
                     regulatory_categories = EXCLUDED.regulatory_categories,
                     strategic_priorities = EXCLUDED.strategic_priorities,
+                    operating_licenses = EXCLUDED.operating_licenses,
+                    active_products = EXCLUDED.active_products,
+                    clearing_rails = EXCLUDED.clearing_rails,
+                    compliance_thresholds = EXCLUDED.compliance_thresholds,
                     profile_completeness = EXCLUDED.profile_completeness,
                     version = context.company_profiles.version + CASE WHEN (
                       context.company_profiles.business_categories,
                       context.company_profiles.operating_markets,
                       context.company_profiles.customer_segments,
                       context.company_profiles.regulatory_categories,
-                      context.company_profiles.strategic_priorities
+                      context.company_profiles.strategic_priorities,
+                      context.company_profiles.operating_licenses,
+                      context.company_profiles.active_products,
+                      context.company_profiles.clearing_rails,
+                      context.company_profiles.compliance_thresholds
                     ) IS DISTINCT FROM (
                       EXCLUDED.business_categories, EXCLUDED.operating_markets,
                       EXCLUDED.customer_segments, EXCLUDED.regulatory_categories,
-                      EXCLUDED.strategic_priorities
+                      EXCLUDED.strategic_priorities, EXCLUDED.operating_licenses,
+                      EXCLUDED.active_products, EXCLUDED.clearing_rails,
+                      EXCLUDED.compliance_thresholds
                     ) THEN 1 ELSE 0 END,
                     updated_by = EXCLUDED.updated_by,
                     updated_at = NOW()
@@ -799,3 +822,177 @@ async def _audit(
             "increment_context_version": increment_context_version,
         },
     )
+
+
+# ---------------------------------------------------------------------------
+# INTELLIGENCE ARTIFACTS (STEP 4)
+# ---------------------------------------------------------------------------
+
+@router.get(
+    "/context/intelligence-artifacts",
+    response_model=IntelligenceArtifactListResponse,
+)
+async def list_intelligence_artifacts(
+    artifact_type: str | None = None,
+    signal_id: UUID | None = None,
+    urgency: str | None = None,
+    include_dismissed: bool = False,
+    limit: int = 50,
+    offset: int = 0,
+    context: RequestContext = Depends(get_request_context),
+) -> dict[str, Any]:
+    """List structured intelligence artifacts for the authenticated tenant."""
+    await context.session.execute(
+        text("SELECT set_config('app.current_tenant_id', :tenant_id, true)"),
+        {"tenant_id": str(context.principal.tenant_id)},
+    )
+
+    where_clauses = ["tenant_id = :tenant_id"]
+    params: dict[str, Any] = {
+        "tenant_id": context.principal.tenant_id,
+        "limit": min(max(1, limit), 100),
+        "offset": max(0, offset),
+    }
+
+    if not include_dismissed:
+        where_clauses.append("is_dismissed = FALSE")
+    if artifact_type:
+        where_clauses.append("artifact_type = :artifact_type")
+        params["artifact_type"] = artifact_type
+    if signal_id:
+        where_clauses.append("signal_id = :signal_id")
+        params["signal_id"] = signal_id
+    if urgency:
+        where_clauses.append("urgency = :urgency")
+        params["urgency"] = urgency
+
+    where_sql = " AND ".join(where_clauses)
+
+    count_row = (
+        await context.session.execute(
+            text(f"SELECT COUNT(*) FROM pipeline.intelligence_artifacts WHERE {where_sql}"),
+            params,
+        )
+    ).scalar_one()
+
+    rows = (
+        (
+            await context.session.execute(
+                text(
+                    f"""
+                    SELECT id, tenant_id, signal_id, relevance_id, artifact_type,
+                           title, payload, urgency, is_dismissed, synthesis_provider,
+                           synthesis_model, created_at, updated_at
+                    FROM pipeline.intelligence_artifacts
+                    WHERE {where_sql}
+                    ORDER BY created_at DESC
+                    LIMIT :limit OFFSET :offset
+                    """
+                ),
+                params,
+            )
+        )
+        .mappings()
+        .all()
+    )
+
+    return {
+        "items": [dict(r) for r in rows],
+        "total": count_row,
+        "limit": params["limit"],
+        "offset": params["offset"],
+    }
+
+
+@router.get(
+    "/context/intelligence-artifacts/{artifact_id}",
+    response_model=IntelligenceArtifactResponse,
+)
+async def get_intelligence_artifact(
+    artifact_id: UUID,
+    context: RequestContext = Depends(get_request_context),
+) -> dict[str, Any]:
+    """Retrieve a single intelligence artifact by ID."""
+    await context.session.execute(
+        text("SELECT set_config('app.current_tenant_id', :tenant_id, true)"),
+        {"tenant_id": str(context.principal.tenant_id)},
+    )
+
+    row = (
+        (
+            await context.session.execute(
+                text(
+                    """
+                    SELECT id, tenant_id, signal_id, relevance_id, artifact_type,
+                           title, payload, urgency, is_dismissed, synthesis_provider,
+                           synthesis_model, created_at, updated_at
+                    FROM pipeline.intelligence_artifacts
+                    WHERE id = :artifact_id AND tenant_id = :tenant_id
+                    LIMIT 1
+                    """
+                ),
+                {
+                    "artifact_id": artifact_id,
+                    "tenant_id": context.principal.tenant_id,
+                },
+            )
+        )
+        .mappings()
+        .one_or_none()
+    )
+
+    if not row:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Intelligence artifact not found",
+        )
+
+    return dict(row)
+
+
+@router.patch(
+    "/context/intelligence-artifacts/{artifact_id}/dismiss",
+    response_model=IntelligenceArtifactResponse,
+)
+async def dismiss_intelligence_artifact(
+    artifact_id: UUID,
+    context: RequestContext = Depends(get_request_context),
+) -> dict[str, Any]:
+    """Dismiss an intelligence artifact."""
+    await context.session.execute(
+        text("SELECT set_config('app.current_tenant_id', :tenant_id, true)"),
+        {"tenant_id": str(context.principal.tenant_id)},
+    )
+
+    row = (
+        (
+            await context.session.execute(
+                text(
+                    """
+                    UPDATE pipeline.intelligence_artifacts
+                    SET is_dismissed = TRUE, updated_at = NOW()
+                    WHERE id = :artifact_id AND tenant_id = :tenant_id
+                    RETURNING id, tenant_id, signal_id, relevance_id, artifact_type,
+                              title, payload, urgency, is_dismissed, synthesis_provider,
+                              synthesis_model, created_at, updated_at
+                    """
+                ),
+                {
+                    "artifact_id": artifact_id,
+                    "tenant_id": context.principal.tenant_id,
+                },
+            )
+        )
+        .mappings()
+        .one_or_none()
+    )
+
+    if not row:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Intelligence artifact not found",
+        )
+
+    await context.session.commit()
+    return dict(row)
+

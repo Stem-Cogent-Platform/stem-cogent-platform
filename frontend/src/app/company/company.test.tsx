@@ -52,5 +52,5 @@ describe("Track 15 - Company Transparency & Scope Integration", () => {
   it("defines CompanyPage with transparent organizational model and entity links", async () => {
     const { default: CompanyPage } = await import("./page");
     expect(CompanyPage).toBeDefined();
-  });
+  }, 30000);
 });

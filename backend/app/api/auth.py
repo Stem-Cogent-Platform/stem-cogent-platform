@@ -28,6 +28,8 @@ _BILLING_EXEMPT_PREFIXES = (
     "/api/v1/billing",
     "/api/v1/compliance",
     "/api/v1/internal/admin",
+    "/api/v1/admin",
+    "/api/v1/onboarding",
 )
 
 
@@ -49,6 +51,7 @@ class Principal:
     plan_code: str = "TRIAL"
     billing_status: str = "TRIALING"
     entitlements: dict[str, Any] = field(default_factory=dict)
+    is_superuser: bool = False
 
 
 @dataclass(slots=True)
@@ -79,6 +82,7 @@ async def get_request_context(
                 text(
                     """
                     SELECT users.id, users.tenant_id, users.permission_role,
+                           users.is_superuser,
                            roles.permissions, users.tos_accepted_at, users.tos_version,
                            users.privacy_policy_accepted_at, users.privacy_policy_version,
                            users.ndpa_consent_accepted_at, users.ndpa_consent_version,
@@ -141,9 +145,11 @@ async def get_request_context(
             plan_code=row["plan_code"],
             billing_status=row["billing_status"],
             entitlements=dict(row["entitlements"]),
+            is_superuser=bool(row.get("is_superuser", False)),
         )
         if (
-            principal.permission_role != "SYSTEM_ADMIN"
+            not principal.is_superuser
+            and principal.permission_role != "SYSTEM_ADMIN"
             and principal.billing_status not in _ACTIVE_BILLING_STATES
             and not request.url.path.startswith(_BILLING_EXEMPT_PREFIXES)
         ):
