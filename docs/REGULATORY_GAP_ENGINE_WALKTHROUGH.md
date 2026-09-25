@@ -21,7 +21,15 @@ Target: staging account `437040615141`, region `eu-west-1`. Discovery confirmed 
 
 Scoped staging S3/KMS/SQS permissions were applied; IAM simulation confirmed API uploads/versioned downloads and worker versioned reads are allowed. Feature-enabled task definitions were registered for API, normalization worker, and scheduler. GitHub Application CD uses the latest task definitions, builds immutable images, runs `alembic upgrade head`, and rolls out staging services.
 
-Per your requested stopping point, deployment completion, migration 0043 on staging, live ECS processing, and populated live assessment SQL are pending verification after the deployment turns green. These are not claimed as passed yet. Production was not deployed or modified in AWS.
+Final staging closeout (2026-09-25):
+
+- [Application CD run 36147690738](https://github.com/Stem-Cogent-Platform/stem-cogent-platform/actions/runs/36147690738) completed successfully for application commit `403d5d5`.
+- API and frontend each have 2/2 running tasks; normalization worker and scheduler each have 1/1. All four rollouts are completed with no pending tasks.
+- API `/health/ready` returns HTTP 200; PostgreSQL and Redis are healthy.
+- A read-only verification task inside the deployed ECS image confirmed migration `0043`, all five core tables, forced tenant row-level security on policy/chunk/assessment/history tables, the enabled feature flag, and both regulatory task registrations.
+- Verification task: `fd989664065943f6a67294c17520a24c`; local evidence: `scratch/regulatory-gap-closeout.json`.
+
+The implementation is deployed and service health is verified. Live end-to-end policy ingestion and populated assessment verification remain unproven: the closeout query found zero extracted obligations. The 12 integration tests verify those workflows locally with mocked external providers; task registration in ECS does not establish successful live processing. Production was not deployed or modified in AWS.
 
 ## Staging build correction
 
