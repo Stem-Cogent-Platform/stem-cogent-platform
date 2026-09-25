@@ -22,3 +22,7 @@ Target: staging account `437040615141`, region `eu-west-1`. Discovery confirmed 
 Scoped staging S3/KMS/SQS permissions were applied; IAM simulation confirmed API uploads/versioned downloads and worker versioned reads are allowed. Feature-enabled task definitions were registered for API, normalization worker, and scheduler. GitHub Application CD uses the latest task definitions, builds immutable images, runs `alembic upgrade head`, and rolls out staging services.
 
 Per your requested stopping point, deployment completion, migration 0043 on staging, live ECS processing, and populated live assessment SQL are pending verification after the deployment turns green. These are not claimed as passed yet. Production was not deployed or modified in AWS.
+
+## Staging build correction
+
+The first Application CD run failed during worker task imports because the clean container lacked `greenlet`, required by SQLAlchemy async sessions. API and frontend images built successfully; staging migrations and deployment were skipped. The shared requirements now install `SQLAlchemy[asyncio]`, covering both API and worker images. The workflow registry check also explicitly requires both regulatory tasks.
