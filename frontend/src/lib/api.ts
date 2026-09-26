@@ -488,10 +488,11 @@ export async function getWorkspaceSessionHistory(sessionId: string) {
   }>(`/api/v1/workspace/sessions/${sessionId}/messages`);
 }
 
-export async function postWorkspaceMessage(sessionId: string, content: string) {
+export async function postWorkspaceMessage(sessionId: string, content: string, mode: "auto" | "competitive" | "general" = "auto") {
   return apiRequest<WorkspaceTurnResponse>(`/api/v1/workspace/sessions/${sessionId}/messages`, {
     method: "POST",
-    body: JSON.stringify({ content }),
+    body: JSON.stringify({ content, mode }),
+    signal: AbortSignal.timeout(120_000),
   });
 }
 

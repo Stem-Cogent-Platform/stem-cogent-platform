@@ -3,6 +3,8 @@
 import { Suspense, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
+import { CompetitiveResearchResult } from "@/components/competitive/evidence";
+import type { ResearchResult } from "@/lib/competitors";
 import { LocalErrorBoundary } from "@/components/error-boundary";
 import { WorkspaceShell } from "@/components/workspace-shell";
 import {
@@ -14,10 +16,17 @@ import {
 } from "@/lib/api";
 import type {
   DepartmentActionItem,
-  IntelligenceArtifact,
   WorkspaceMessage,
   WorkspaceSession,
 } from "@/lib/types";
+
+function displayMessage(content: string) {
+  try {
+    const value = JSON.parse(content);
+    if (value.operational_exposure && value.context_and_precedents) return `${value.operational_exposure}\n\n${value.context_and_precedents}`;
+  } catch { /* Plain conversation text. */ }
+  return content;
+}
 
 export default function WorkspacePage() {
   return (
@@ -33,23 +42,28 @@ export default function WorkspacePage() {
 
 function WorkspaceContent() {
   const searchParams = useSearchParams();
-  const initialArtifactId = searchParams.get("artifact_id");
-  const initialQuery = searchParams.get("query") || searchParams.get("prompt");
+  return <WorkspaceConversation key={searchParams.toString()}
+    initialArtifactId={searchParams.get("artifact_id")}
+    initialQuery={searchParams.get("query") || searchParams.get("prompt")}
+    initialCompetitiveMode={searchParams.get("mode") === "competitive"} />;
+}
 
+function WorkspaceConversation({ initialArtifactId, initialQuery, initialCompetitiveMode }: {
+  initialArtifactId: string | null; initialQuery: string | null; initialCompetitiveMode: boolean;
+}) {
   // Session & conversation state
-  const [sessions, setSessions] = useState<WorkspaceSession[]>([]);
   const [activeSession, setActiveSession] = useState<WorkspaceSession | null>(null);
   const [messages, setMessages] = useState<WorkspaceMessage[]>([]);
-  const [inputText, setInputText] = useState("");
+  const [inputText, setInputText] = useState(initialQuery || "");
+  const [competitiveMode, setCompetitiveMode] = useState(initialCompetitiveMode);
+  const [research, setResearch] = useState<ResearchResult | null>(null);
   const [isSending, setIsSending] = useState(false);
   const [streamProgress, setStreamProgress] = useState<number>(0);
 
   // Thought Feed Items
-  const thoughtSteps = [
-    "🔍 Searching CBN circulars & verified gazettes...",
-    "⚡ Cross-referencing Providus settlement dependencies...",
-    "📋 Generating role-delineated action plan...",
-  ];
+  const thoughtSteps = competitiveMode
+    ? ["Reading tenant field reports and selected scope...", "Calculating reported win/loss metrics...", "Preparing an evidence-backed playbook..."]
+    : ["Reviewing your question and workspace context...", "Retrieving relevant evidence...", "Preparing the investigation response..."];
 
   // Working Canvas State
   const [canvasTitle, setCanvasTitle] = useState("Executive Working Canvas · Strategy Draft");
@@ -67,13 +81,11 @@ function WorkspaceContent() {
       try {
         const res = await listWorkspaceSessions(10);
         if (!active) return;
-        setSessions(res.sessions || []);
 
         let sessionToLoad = res.sessions?.[0] || null;
         if (!sessionToLoad) {
           sessionToLoad = await createWorkspaceSession("Executive Strategy War Room");
           if (!active) return;
-          setSessions([sessionToLoad]);
         }
         setActiveSession(sessionToLoad);
 
@@ -82,6 +94,8 @@ function WorkspaceContent() {
           const detail = await getWorkspaceSessionHistory(sessionToLoad.id);
           if (active && detail.messages?.length) {
             setMessages(detail.messages);
+            const previousResearch = [...detail.messages].reverse().find(message => message.tool_provenance?.competitive_research)?.tool_provenance?.competitive_research;
+            if (previousResearch) setResearch(previousResearch as ResearchResult);
           } else if (active) {
             // Seed welcome turn
             setMessages([
@@ -107,24 +121,17 @@ function WorkspaceContent() {
     };
   }, []);
 
-  // Handle incoming query or artifact param
-  useEffect(() => {
-    if (initialArtifactId) {
-      void loadArtifactIntoCanvas(initialArtifactId);
-    }
-    if (initialQuery && !isSending) {
-      setInputText(initialQuery);
-    }
-  }, [initialArtifactId, initialQuery]);
-
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, isSending, streamProgress]);
 
-  async function loadArtifactIntoCanvas(id: string) {
+  useEffect(() => {
+    if (!initialArtifactId) return;
+    let active = true;
+    async function loadArtifactIntoCanvas(id: string) {
     try {
       const art = await getArtifact(id);
-      if (art) {
+      if (art && active) {
         setCanvasTitle(`Working Canvas · ${art.title}`);
         const p = art.payload || {};
         const memo = `# ${art.title}
@@ -153,7 +160,10 @@ ${
     } catch (err) {
       console.error("Failed to load artifact into canvas:", err);
     }
-  }
+    }
+    void loadArtifactIntoCanvas(initialArtifactId);
+    return () => { active = false; };
+  }, [initialArtifactId]);
 
   async function handleSendMessage(e: React.FormEvent) {
     e.preventDefault();
@@ -179,7 +189,8 @@ ${
     setMessages((prev) => [...prev, userMsg]);
 
     try {
-      const turn = await postWorkspaceMessage(activeSession.id, query);
+      const turn = await postWorkspaceMessage(activeSession.id, query, competitiveMode ? "competitive" : "auto");
+      setResearch(turn.competitive_research ?? null);
       clearTimeout(p1);
       clearTimeout(p2);
 
@@ -237,17 +248,12 @@ ${(turn.synthesis.role_action_items || [])
           session_id: activeSession.id,
           organization_id: activeSession.organization_id,
           role: "assistant",
-          content: `Decision Agent completed analysis for: "${query}".
-
-**Direct Exposure:**
-Based on your tenant licenses (PSSP / MFB) and Providus Bank settlement dependencies, this regulatory requirement imposes strict overnight float segregation. Non-compliance exposes the organization to statutory penalties under Section 42 of BOFIA 2020.
-
-**Next Validation Step:**
-I have loaded the role-delineated action plan into your Working Canvas on the left for review and multi-format export.`,
+          content: "The investigation could not be completed. No new findings were generated. Please retry.",
           created_at: new Date().toISOString(),
         },
       ]);
     } finally {
+      clearTimeout(p1); clearTimeout(p2);
       setIsSending(false);
       setStreamProgress(0);
     }
@@ -334,6 +340,7 @@ I have loaded the role-delineated action plan into your Working Canvas on the le
 
         {/* Canvas Body */}
         <div className="flex-1 overflow-y-auto p-6 sm:p-8 space-y-6">
+          {research && <CompetitiveResearchResult result={research} />}
           {/* Markdown Content Surface */}
           <div className="prose prose-slate max-w-none text-slate-800 leading-relaxed font-sans">
             <div className="rounded-xl border border-slate-200 bg-slate-50/50 p-6 whitespace-pre-line text-xs font-mono text-slate-800 leading-relaxed shadow-2xs">
@@ -381,7 +388,7 @@ I have loaded the role-delineated action plan into your Working Canvas on the le
               Decision Agent Feed
             </span>
             <span className="inline-flex items-center px-1.5 py-0.2 rounded text-[10px] font-bold bg-emerald-100 text-emerald-800 uppercase">
-              Exa / SerpApi Live
+              Evidence research
             </span>
           </div>
           <span className="text-[11px] text-slate-400 font-mono">
@@ -389,6 +396,7 @@ I have loaded the role-delineated action plan into your Working Canvas on the le
           </span>
         </div>
 
+        <label className="flex items-center gap-2 border-b border-slate-200 bg-white px-5 py-3 text-xs font-semibold text-slate-700"><input type="checkbox" checked={competitiveMode} onChange={event => setCompetitiveMode(event.target.checked)} />Deep competitive research</label>
         {/* Message Stream */}
         <div className="flex-1 overflow-y-auto p-4 space-y-4">
           {messages.map((msg) => {
@@ -405,7 +413,7 @@ I have loaded the role-delineated action plan into your Working Canvas on the le
                       : "bg-white text-slate-800 border border-slate-200 font-sans"
                   }`}
                 >
-                  <div className="whitespace-pre-line">{msg.content}</div>
+                  <div className="whitespace-pre-line">{displayMessage(msg.content)}</div>
                 </div>
                 <span className="mt-1 px-1 text-[10px] text-slate-400 font-mono">
                   {isUser ? "Executive Query" : "Decision Agent"}

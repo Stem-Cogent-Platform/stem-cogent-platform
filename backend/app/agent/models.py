@@ -126,6 +126,7 @@ class SessionListResponse(BaseModel):
 
 
 class MessageCreateRequest(BaseModel):
+    mode: Literal["auto", "competitive", "general"] = "auto"
     model_config = ConfigDict(extra="forbid")
 
     content: str = Field(
@@ -168,3 +169,4 @@ class TurnResponse(BaseModel):
     user_message: MessageResponse
     assistant_message: MessageResponse
     synthesis: ExecutiveSynthesisPayload
+    competitive_research: dict[str, Any] | None = None

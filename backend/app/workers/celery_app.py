@@ -26,6 +26,7 @@ QUEUE_SETTINGS = {
 }
 
 TASK_MODULES = (
+    "app.workers.tasks.competitive",
     "app.workers.tasks.regulatory_gap",
     "app.workers.tasks.collection",
     "app.workers.tasks.validation",
@@ -104,6 +105,7 @@ def create_celery_app(settings: Settings | None = None) -> Celery:
         task_default_queue=default_queue,
         task_ignore_result=True,
         task_routes={
+            "app.workers.tasks.competitive.process_job": {"queue": validated_signals_queue},
             "app.workers.tasks.regulatory_gap.process_job": {"queue": validated_signals_queue},
             "app.workers.tasks.regulatory_gap.extract_signal": {"queue": validated_signals_queue},
             "app.workers.tasks.bootstrap.bootstrap_tenant_artifacts": {"queue": validated_signals_queue},

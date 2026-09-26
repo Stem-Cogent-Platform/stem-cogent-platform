@@ -146,6 +146,16 @@ async def run_artifact_synthesis(
             if audit:
                 dispatch('audit', parsed_tenant_id, audit['id'])
 
+        if signal_type == 'competitor_move' and get_settings().COMPETITIVE_INTELLIGENCE_ENABLED:
+            from app.context.competitor_service import queue_known_dossier_refresh
+            from app.workers.tasks.competitive import dispatch as dispatch_competitive
+            await tenant_scope(session, parsed_tenant_id)
+            payload = result.payload.model_dump() if hasattr(result.payload, 'model_dump') else result.payload
+            dossier_id = await queue_known_dossier_refresh(session, parsed_tenant_id, payload.get('competitor_name', ''))
+            await session.commit()
+            if dossier_id:
+                dispatch_competitive('dossier', parsed_tenant_id, dossier_id)
+
         logger.info(
             "Artifact generated: %s for signal %s → tenant %s (fallback=%s)",
             result.artifact_type,

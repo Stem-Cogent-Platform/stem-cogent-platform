@@ -23,6 +23,7 @@ from app.api.v1.search import router as search_router
 from app.api.v1.sso import router as sso_router
 from app.api.v1.workspace import router as workspace_router
 from app.api.v1.policies import router as policies_router
+from app.api.v1.competitors import router as competitors_router
 from app.api.v1.gap_audits import router as gap_audits_router
 from app.api.v1.marketing import router as marketing_router
 from app.core.config import get_settings
@@ -153,5 +154,6 @@ app.include_router(search_router)
 app.include_router(sso_router)
 app.include_router(workspace_router)
 app.include_router(policies_router)
+app.include_router(competitors_router)
 app.include_router(gap_audits_router)
 app.include_router(marketing_router)

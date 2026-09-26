@@ -63,6 +63,7 @@ class Settings(BaseSettings):
 
     EMBEDDING_PROVIDER: str = "openai"
     REGULATORY_GAP_ENABLED: bool = False
+    COMPETITIVE_INTELLIGENCE_ENABLED: bool = False
     POLICY_MAX_UPLOAD_BYTES: int = 20 * 1024 * 1024
     EMBEDDING_MODEL: str = "text-embedding-3-small"
     EMBEDDING_INPUT_VERSION: str = "v1"

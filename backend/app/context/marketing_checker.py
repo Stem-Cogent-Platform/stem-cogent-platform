@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import re
 
-RULES_VERSION = '2026-09-25-v1'
+RULES_VERSION = '2026-09-25-v2'
 CBN_SOURCE = 'https://www.cbn.gov.ng/out/2019/ccd/cbn%20consumer%20protection%20regulations.pdf'
 SEC_SOURCE = 'https://sec.gov.ng/for-investors/keep-track-of-circulars/public-notice-unregistered-online-investment-schemes/'
 
@@ -13,9 +13,11 @@ def check_copy(copy: str, channel: str, licenses: list[str]) -> dict:
     bank_licensed = any(value.lower().replace(' ', '_') in {
         'commercial_bank','microfinance_bank','mfb','payment_service_bank','psb','banking_license'
     } for value in licenses)
-    sentences = list(re.finditer(r'[^.!?\n]+(?:[.!?]+|$)', copy))
+    # Keep decimal points inside percentages and line-wrapped sentences intact.
+    sentences = list(re.finditer(r'(?:[^.!?]|(?<=\d)\.(?=\d))+(?:[.!?]+|$)', copy))
     for sentence in sentences:
-        value = sentence.group()
+        excerpt = sentence.group()
+        value = re.sub(r'\s+', ' ', excerpt)
         rules = []
         if re.search(r'\b(?:guaranteed?\s+(?:(?:\d+(?:\.\d+)?\s*%|daily|monthly|annual|investment|high|fixed)\s*)*(?:returns?|profits?|yields?)|risk[ -]?free\s+(?:investment|returns?|profits?)|double\s+your\s+money)\b',value,re.I):
             rules.append(('investment_promises','high','Return and risk claims need substantiation and registration checks.',
@@ -35,7 +37,7 @@ def check_copy(copy: str, channel: str, licenses: list[str]) -> dict:
                 'Check the applicable fees and estimated processing time before confirming your transaction.'))
         for code,severity,reason,url,reference,alternative in rules:
             findings.append({'rule_id': code,'severity': severity,'start': sentence.start(),'end': sentence.end(),
-                'excerpt': value,'reason': reason,'source_url': url,'reference': reference,
+                'excerpt': excerpt,'reason': reason,'source_url': url,'reference': reference,
                 'suggested_alternative': alternative,'requires_human_review': True})
     if channel in {'sms','email'} and not re.search(r'\b(?:unsubscribe|opt[ -]?out|stop)\b',copy,re.I):
         findings.append({'rule_id':'opt_out','severity':'medium','start':0,'end':len(copy),'excerpt':copy,

@@ -305,6 +305,7 @@ export type WorkspaceMessage = {
 };
 
 export type WorkspaceTurnResponse = {
+  competitive_research?: import("./competitors").ResearchResult | null;
   session_id: string;
   user_message: WorkspaceMessage;
   assistant_message: WorkspaceMessage;

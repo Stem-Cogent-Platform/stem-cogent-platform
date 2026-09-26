@@ -58,6 +58,8 @@ test("campaign checker highlights claims and keeps alternative wording subject t
   await page.getByRole("button", {name: "Check campaign"}).click();
   await eventually(page.locator("mark")).toContainText("guaranteed 25%");
   await eventually(page.getByText("Suggested wording — human review required")).toBeVisible();
+  await page.getByLabel("Channel").selectOption("sms");
+  await eventually(page.getByText(/Copy or channel has changed/)).toBeVisible();
   await page.getByLabel("Campaign copy").fill("Revised campaign copy for review.");
-  await eventually(page.getByText(/Copy has changed/)).toBeVisible();
+  await eventually(page.getByText(/Copy or channel has changed/)).toBeVisible();
 });

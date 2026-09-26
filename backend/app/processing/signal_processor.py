@@ -12,6 +12,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_session
+from app.ingestion.incoming_sources import resolve_feed_link
 from app.processing.extractor import ExtractionError, SignalExtractor
 from app.processing.models import NormalizedSignalPayload
 
@@ -62,7 +63,7 @@ async def process_incoming_signals_batch(
         for row in rows:
             signal_id: UUID = row["id"]
             source_name: str = row["source_name"]
-            source_url: str = row["source_url"]
+            source_url: str = resolve_feed_link(row["source_url"], source_name)
             title: str | None = row["raw_title"]
             content: str | None = row["raw_content"]
             published_at = row["published_at"]

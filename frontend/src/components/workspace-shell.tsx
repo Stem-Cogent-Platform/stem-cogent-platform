@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { FormEvent, ReactNode, useCallback, useEffect, useState } from "react";
 
+import { DealSignalIntake } from "@/components/competitive/deal-signal-modal";
 import { StemMark } from "@/components/stem-mark";
 import { apiRequest, bootstrapSession, currentUser, logout } from "@/lib/api";
 
@@ -149,6 +150,7 @@ export function WorkspaceShell({ children }: { children: ReactNode }) {
           <button aria-label="Open navigation" className="mobile-menu" onClick={() => setMobileOpen(true)} type="button">☰</button>
           <form className="global-search" onSubmit={search} role="search"><span aria-hidden="true">⌕</span><input aria-label="Search intelligence or ask Cogent" onChange={(event) => setQuery(event.target.value)} placeholder="Search intelligence or ask Cogent…" type="search" value={query} /><button className="sr-only" type="submit">Search</button></form>
           <div className="topnav-actions">
+            {["ADMIN", "ANALYST"].includes(String(user.permission_role)) && <DealSignalIntake />}
             <button aria-expanded={notificationsOpen} aria-label={unreadAlerts ? `View ${unreadAlerts} unread alerts` : "View alerts"} className="topnav-icon" onClick={() => setNotificationsOpen((value) => !value)} type="button"><NavIcon name="alerts" />{unreadAlerts > 0 && <i />}</button>
             <span className="company-switcher"><small>Company</small><strong>{workspaceName}</strong></span>
             <span className="user-avatar compact">{initials || "SC"}</span>

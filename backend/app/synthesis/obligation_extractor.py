@@ -16,6 +16,7 @@ from sqlalchemy import text
 from app.context.gap_models import ObligationExtraction
 from app.context.policy_service import extract_sections, PDF
 from app.intelligence.synthesis.router import build_generation_client
+from app.ingestion.incoming_sources import resolve_feed_link
 
 VERSION = 'obligations-v1'
 AUTHORITIES = ('cbn.gov.ng', 'sec.gov.ng', 'ndpc.gov.ng', 'nfiu.gov.ng')
@@ -118,6 +119,14 @@ async def hydrate_source(signal: dict) -> dict:
 
 
 async def extract_obligations(session, signal: dict, *, client=None) -> tuple:
+    # Legacy promoted rows kept relative links. Resolve from their actual landing
+    # record, never from a guessed authority or an LLM-assigned entity name.
+    if not urlsplit(signal.get('source_url') or '').scheme and signal.get('incoming_signal_id'):
+        source_name = (await session.execute(text('''SELECT source_name FROM pipeline.incoming_signals
+            WHERE id=:id AND source_url=:url'''),
+            {'id': signal['incoming_signal_id'], 'url': signal.get('source_url')})).scalar_one_or_none()
+        if source_name:
+            signal = {**signal, 'source_url': resolve_feed_link(signal['source_url'], source_name)}
     signal = await hydrate_source(signal)
     source = validate_source(signal)
     source_hash = hashlib.sha256(source.encode()).hexdigest()
@@ -132,6 +141,8 @@ async def extract_obligations(session, signal: dict, *, client=None) -> tuple:
         raw = await client.generate(instructions=PROMPT,
             context={'title': signal.get('title'), 'source_url': signal['source_url'], 'source': source},
             schema=ObligationExtraction.model_json_schema(), max_output_tokens=6000)
+        if isinstance(raw, dict) and isinstance(raw.get('obligations'), list) and len(raw['obligations']) < 3:
+            raise SourceRequired('INSUFFICIENT_BINDING_OBLIGATIONS')
         extraction = ObligationExtraction.model_validate(raw)
         references = set()
         for obligation in extraction.obligations:

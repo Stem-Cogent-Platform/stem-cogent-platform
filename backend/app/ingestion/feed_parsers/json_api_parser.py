@@ -7,6 +7,7 @@ import logging
 from datetime import datetime, timezone
 
 from app.ingestion.feed_parsers.models import IncomingSignal
+from app.ingestion.incoming_sources import resolve_feed_link
 
 logger = logging.getLogger(__name__)
 
@@ -134,7 +135,7 @@ def parse_cbn_api(raw_json: bytes, source_name: str) -> list[IncomingSignal]:
             signals.append(
                 IncomingSignal(
                     source_name=source_name,
-                    source_url=link,
+                    source_url=resolve_feed_link(link, source_name),
                     published_at=published_at,
                     raw_title=title,
                     raw_content=description,

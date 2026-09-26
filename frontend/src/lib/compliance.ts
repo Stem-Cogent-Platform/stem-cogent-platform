@@ -9,7 +9,7 @@ export type Policy = {
   policy_category: string; processing_status: string; error_code: string | null;
   embedded_chunks_count: number; active: boolean; created_at: string;
 };
-export type PolicyList = {items: Policy[]; health: {assessed_obligations: number; policy_evidence_score: number | null}};
+export type PolicyList = {items: Policy[]; health: {assessed_obligations: number; policy_evidence_score: number | null; stale_obligations?: number}};
 export type Evidence = {chunk_id: string; policy_id: string; matched_policy_title: string;
   policy_version: string; excerpt: string; similarity_score: number;
   location: {sources?: Array<{page?: number; paragraph?: number; table?: number}>}};

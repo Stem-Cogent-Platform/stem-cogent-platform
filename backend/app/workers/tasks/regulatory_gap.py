@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import logging
-from uuid import UUID, uuid4
+from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 
 from sqlalchemy import text
 
@@ -34,6 +34,10 @@ async def enqueue_audit(session, organization_id, signal_id, *, key=None, user_i
         ORDER BY created_at DESC LIMIT 1'''), {'signal': signal_id})).mappings().one_or_none()
     if not signal:
         return None
+    # The same lock is used by assessment and review. Concurrent requests with
+    # the same key must observe the committed run instead of racing its insert.
+    await session.execute(text('SELECT pg_advisory_xact_lock(hashtextextended(:key,0))'),
+                          {'key': f'{organization_id}:{signal_id}'})
     key = key or uuid4()
     existing = (await session.execute(text('SELECT * FROM pipeline.compliance_gap_runs WHERE organization_id=:org AND idempotency_key=:key'),
         {'org': organization_id, 'key': key})).mappings().one_or_none()
@@ -42,10 +46,17 @@ async def enqueue_audit(session, organization_id, signal_id, *, key=None, user_i
             raise ValueError('IDEMPOTENCY_KEY_REUSED')
         return dict(existing)
     row = (await session.execute(text('''INSERT INTO pipeline.compliance_gap_runs
-        (organization_id,signal_id,signal_created_at,idempotency_key,requested_by)
-        VALUES(:org,:signal,:created,:key,:user) RETURNING *'''),
+        (organization_id,signal_id,signal_created_at,idempotency_key,requested_by,created_at)
+        VALUES(:org,:signal,:created,:key,:user,clock_timestamp())
+        ON CONFLICT(organization_id,idempotency_key) DO NOTHING RETURNING *'''),
         {'org': organization_id, 'signal': signal_id, 'created': signal['created_at'],
-         'key': key, 'user': user_id})).mappings().one()
+         'key': key, 'user': user_id})).mappings().one_or_none()
+    if row is None:
+        row = (await session.execute(text('''SELECT * FROM pipeline.compliance_gap_runs
+            WHERE organization_id=:org AND idempotency_key=:key'''),
+            {'org': organization_id, 'key': key})).mappings().one()
+        if row['signal_id'] != signal_id:
+            raise ValueError('IDEMPOTENCY_KEY_REUSED')
     return dict(row)
 
 
@@ -68,6 +79,7 @@ async def run_job(kind: str, organization_id: str, job_id: str):
         if row is None:
             return {'status': 'already_claimed_or_finished'}
         job = dict(row)
+        jobs = []
         try:
             await tenant_scope(session, org)
             # Serialize audits per tenant/signal (and policy ingestion per family).
@@ -76,23 +88,34 @@ async def run_job(kind: str, organization_id: str, job_id: str):
                                   {'key': f'{org}:{lock}'})
             if kind == 'policy':
                 count = await index_policy(session, job)
+                # Activation and its dependent jobs form one durable transaction.
+                # A crash after commit is repaired by the regular job dispatcher.
+                signals = (await session.execute(text('''SELECT DISTINCT signal_id
+                    FROM pipeline.compliance_gap_runs WHERE organization_id=:org
+                    AND processing_status='completed' ORDER BY signal_id'''), {'org': org})).scalars().all()
+                for signal_id in signals:
+                    audit = await enqueue_audit(session, org, signal_id,
+                        key=uuid5(NAMESPACE_URL, f'policy-audit:{org}:{identifier}:{signal_id}'))
+                    if audit:
+                        jobs.append(audit)
             else:
+                superseded = (await session.execute(text('''SELECT EXISTS(
+                    SELECT 1 FROM pipeline.compliance_gap_runs WHERE organization_id=:org
+                    AND signal_id=:signal AND processing_status='completed'
+                    AND (created_at,id)>(:created,:id))'''),
+                    {'org': org, 'signal': job['signal_id'], 'created': job['created_at'],
+                     'id': identifier})).scalar_one()
+                if superseded:
+                    await session.execute(text('''UPDATE pipeline.compliance_gap_runs
+                        SET processing_status='failed',error_code='SUPERSEDED_BY_NEWER_RUN',lease_until=NULL
+                        WHERE id=:id AND organization_id=:org'''), {'id': identifier, 'org': org})
+                    await session.commit()
+                    return {'status': 'superseded'}
                 signal = (await session.execute(text('''SELECT * FROM pipeline.signals
                     WHERE id=:id AND created_at=:created AND NOT is_proprietary'''),
                     {'id': job['signal_id'], 'created': job['signal_created_at']})).mappings().one()
                 count = await audit_signal(session, job, dict(signal))
             await session.commit()
-            if kind == 'policy':
-                # New versions require fresh assessments. Previous runs remain in history.
-                await tenant_scope(session, org)
-                signals = (await session.execute(text('''SELECT DISTINCT signal_id FROM pipeline.compliance_gap_runs
-                    WHERE organization_id=:org AND processing_status='completed' LIMIT 100'''), {'org': org})).scalars().all()
-                jobs = [await enqueue_audit(session, org, signal) for signal in signals]
-                await session.commit()
-                for audit in jobs:
-                    if audit:
-                        dispatch('audit', org, audit['id'])
-            return {'status': 'completed', 'count': count}
         except Exception as exc:
             await session.rollback()
             await tenant_scope(session, org)
@@ -107,6 +130,9 @@ async def run_job(kind: str, organization_id: str, job_id: str):
             await session.commit()
             logger.warning('Regulatory job failed', extra={'job_id': job_id, 'error_type': type(exc).__name__})
             return {'status': state, 'error_code': error_code}
+        for audit in jobs:
+            dispatch('audit', org, audit['id'])
+        return {'status': 'completed', 'count': count}
     return {'status': 'database_unavailable'}
 
 

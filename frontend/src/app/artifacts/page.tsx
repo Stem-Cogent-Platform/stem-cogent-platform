@@ -5,6 +5,7 @@ import { useSearchParams } from "next/navigation";
 import { LocalErrorBoundary } from "@/components/error-boundary";
 import { GapMatrixSkeleton } from "@/components/skeletons";
 import { ComplianceGapMatrix } from "@/components/decision-units/compliance-gap-matrix";
+import { DossierExplorer } from "@/components/competitive/dossier-explorer";
 import { EvidenceReviewer } from "@/components/decision-units/evidence-reviewer";
 import { CompetitiveBattlecard } from "@/components/decision-units/competitive-battlecard";
 import { RailStressMonitor } from "@/components/decision-units/rail-stress-monitor";
@@ -151,7 +152,7 @@ function ArtifactsContent() {
           {[
             { id: "ALL", label: "All Decision Units" },
             { id: "gap_matrix", label: "Compliance Gap Matrices" },
-            { id: "battlecard", label: "Competitive Battlecards" },
+            { id: "battlecard", label: "Battlecards & Competitors" },
             { id: "rail_stress", label: "Rail Stress Monitors" },
           ].map((tab) => {
             const isActive = activeTab === tab.id;
@@ -195,6 +196,7 @@ function ArtifactsContent() {
       </div>
 
       {/* Decision Units Feed */}
+      {activeTab === "battlecard" && <DossierExplorer />}
       {(activeTab === "ALL" || activeTab === "gap_matrix") && <EvidenceReviewer initialSignalId={searchParams.get("signal_id")} />}
       {errorNotice && <p role="alert" className="rounded-lg bg-red-50 p-3 text-sm text-red-800">{errorNotice}</p>}
       {loading ? (

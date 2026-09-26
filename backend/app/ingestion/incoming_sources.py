@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from urllib.parse import urljoin, urlsplit
 
 
 @dataclass(frozen=True)
@@ -12,6 +13,19 @@ class IncomingFeedSource:
     source_name: str
     url: str
     parser: str  # "rss", "cbn_api", "status_api"
+
+
+def resolve_feed_link(url: str, source_name: str) -> str:
+    """Resolve relative links only against an explicitly configured feed origin."""
+    url = url.strip()
+    parsed = urlsplit(url)
+    if not url or parsed.scheme or parsed.netloc or url.startswith('//') or '\\' in url:
+        return url
+    source = next((item for item in INCOMING_FEED_SOURCES if item.source_name == source_name), None)
+    if source is None:
+        return url
+    origin = urlsplit(source.url)
+    return urljoin(f'{origin.scheme}://{origin.netloc}/', url)
 
 
 # Sources are ordered by priority tier to ensure critical regulatory

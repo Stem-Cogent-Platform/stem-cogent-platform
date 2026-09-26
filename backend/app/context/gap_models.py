@@ -21,7 +21,8 @@ class Obligation(BaseModel):
 
 class ObligationExtraction(BaseModel):
     model_config = ConfigDict(extra='forbid')
-    obligations: list[Obligation] = Field(min_length=3, max_length=10)
+    # Empty is a deliberate abstention; the extractor requires 3?10 before saving.
+    obligations: list[Obligation] = Field(max_length=10)
 
 
 class EvidenceQuote(BaseModel):

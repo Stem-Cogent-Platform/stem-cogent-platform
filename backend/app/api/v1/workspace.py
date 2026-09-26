@@ -67,6 +67,7 @@ async def create_session(
         )
     ).mappings().one()
 
+    await context.session.commit()
     return SessionResponse(**dict(row))
 
 
@@ -193,6 +194,11 @@ async def post_session_message(
     require_permission(context, "READ_INTELLIGENCE")
     await enforce_workspace_access(context)
 
+    from app.agent.tools.competitive_research import is_competitive_query
+    if payload.mode == 'competitive' or (payload.mode == 'auto' and is_competitive_query(payload.content)):
+        from app.api.v1.competitors import enabled
+        await enabled(context)
+        require_permission(context, 'USE_CIL')
     agent = DecisionAgent()
     try:
         turn = await agent.run_investigation_turn(
@@ -200,8 +206,10 @@ async def post_session_message(
             organization_id=context.principal.tenant_id,
             user_id=context.principal.user_id,
             user_query=payload.content,
+            mode=payload.mode,
             session=context.session,
         )
+        await context.session.commit()
         return turn
     except DecisionAgentError as exc:
         raise HTTPException(
@@ -211,5 +219,5 @@ async def post_session_message(
     except Exception as exc:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Agent investigation failed: {exc}",
+            detail="Agent investigation could not be completed. Please retry.",
         ) from exc

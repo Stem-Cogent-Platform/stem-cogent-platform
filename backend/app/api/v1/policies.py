@@ -36,11 +36,21 @@ async def list_policies(context: RequestContext = Depends(get_request_context)):
         FROM organizations.tenant_policies WHERE organization_id=:org ORDER BY created_at DESC LIMIT 200'''),
         {'org': context.principal.tenant_id})).mappings().all()
     health = (await context.session.execute(text('''SELECT count(*) assessed_obligations,
-        round(avg(a.compliance_score),2) policy_evidence_score
+        round(avg(a.compliance_score),2) policy_evidence_score,
+        count(*) FILTER (WHERE EXISTS (
+            (SELECT p.id::text FROM organizations.tenant_policies p
+                WHERE p.organization_id=:org AND p.active
+             EXCEPT SELECT s->>'id' FROM jsonb_array_elements(r.policy_snapshot) s)
+            UNION ALL
+            (SELECT s->>'id' FROM jsonb_array_elements(r.policy_snapshot) s
+             EXCEPT SELECT p.id::text FROM organizations.tenant_policies p
+                WHERE p.organization_id=:org AND p.active)
+        )) stale_obligations
         FROM pipeline.compliance_gap_audits a JOIN pipeline.compliance_gap_runs r ON r.id=a.run_id
         WHERE a.organization_id=:org AND r.processing_status='completed'
         AND NOT EXISTS (SELECT 1 FROM pipeline.compliance_gap_runs newer
-            WHERE newer.organization_id=:org AND newer.signal_id=r.signal_id AND newer.created_at>r.created_at)'''),
+            WHERE newer.organization_id=:org AND newer.signal_id=r.signal_id
+            AND newer.processing_status='completed' AND (newer.created_at,newer.id)>(r.created_at,r.id))'''),
         {'org': context.principal.tenant_id})).mappings().one()
     return {'items': [dict(row) for row in rows], 'health': dict(health)}
 

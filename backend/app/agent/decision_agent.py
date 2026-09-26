@@ -31,6 +31,8 @@ from app.agent.prompts import (
     should_trigger_live_search,
 )
 from app.agent.tools.web_search import search_live_intelligence
+from app.agent.tools.competitive_research import competitive_research, is_competitive_query
+from app.core.config import get_settings
 from app.intelligence.synthesis.router import build_generation_client
 
 logger = logging.getLogger(__name__)
@@ -72,6 +74,7 @@ class DecisionAgent:
         user_id: UUID,
         user_query: str,
         session: AsyncSession,
+        mode: str = "auto",
     ) -> TurnResponse:
         """Execute one complete investigation turn for an authenticated tenant session."""
 
@@ -148,7 +151,15 @@ class DecisionAgent:
         tool_provenance: dict[str, Any] | None = None
         web_results: list[dict[str, Any]] = []
 
-        if should_trigger_live_search(user_query, len(internal_artifacts)):
+        research = None
+        competitive = mode == 'competitive' or (mode == 'auto' and is_competitive_query(user_query))
+        if competitive and not get_settings().COMPETITIVE_INTELLIGENCE_ENABLED:
+            raise DecisionAgentError('Competitive intelligence is not enabled')
+        if competitive:
+            research = await competitive_research(session, organization_id, user_query,
+                client=self._generation_client, search_fn=self._search_fn)
+            tool_provenance = {'competitive_research': research}
+        if not competitive and should_trigger_live_search(user_query, len(internal_artifacts)):
             try:
                 search_res = await self._search_fn(
                     query=user_query,
@@ -175,7 +186,7 @@ class DecisionAgent:
                 }
 
         # 6. Structured Response Synthesis
-        synthesis = await self._synthesize_response(
+        synthesis = self._competitive_synthesis(research) if research is not None else await self._synthesize_response(
             user_query=user_query,
             company_profile=company_profile,
             internal_artifacts=internal_artifacts,
@@ -227,7 +238,7 @@ class DecisionAgent:
                 "session_id": session_id,
                 "org_id": organization_id,
                 "content": serialized_synthesis,
-                "provenance": json.dumps(tool_provenance) if tool_provenance else None,
+                "provenance": json.dumps(tool_provenance, default=str) if tool_provenance else None,
                 "cited_ids": cited_ids if cited_ids else None,
             },
         )
@@ -285,6 +296,22 @@ class DecisionAgent:
             user_message=user_msg,
             assistant_message=assistant_msg,
             synthesis=synthesis,
+            competitive_research=research,
+        )
+
+    @staticmethod
+    def _competitive_synthesis(research):
+        metrics = research['metrics']
+        rate = 'Not established' if metrics['win_rate'] is None else f"{metrics['win_rate']}%"
+        findings = research['playbook']['findings']
+        evidence = '\n'.join(item['value'] + ' [' + ', '.join(q['source_id'] for q in item['citations']) + ']' for item in findings)
+        limitations = ' '.join(research['scope_notes'] + research['playbook']['limitations'])
+        return ExecutiveSynthesisPayload(
+            operational_exposure=f"Reported deals: {metrics['won']} won, {metrics['lost']} lost, {metrics['churned']} churned. Win rate: {rate}. " + research['metric_definition'],
+            context_and_precedents=(evidence + '\n' + limitations or 'No supported narrative findings are available in the selected scope.')[:2500],
+            role_action_items=[DepartmentActionItem(department='commercial_ops', action=item['value'][:600], urgency='this_week') for item in research['playbook']['recommended_actions']] or [DepartmentActionItem(department='commercial_ops', action='Review cited field reports and record missing deal evidence before changing sales positioning.', urgency='monitor')],
+            cited_artifact_ids=[],
+            web_sources=[WebSearchResultItem(title=item['title'], url=item['url'], text=item['text'][:1000]) for item in research['sources'] if item.get('url')],
         )
 
     async def _synthesize_response(

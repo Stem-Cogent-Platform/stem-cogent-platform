@@ -280,3 +280,104 @@ async def test_expired_trial_cannot_use_evidence_endpoints(ctx):
     with pytest.raises(HTTPException) as expired:
         await policies.list_policies(ctx)
     assert expired.value.status_code==402
+
+
+async def test_empty_extraction_requests_source_review_without_inventing_obligations(ctx):
+    class AbstainingModel(Model):
+        async def generate(self, **kwargs):
+            return {'obligations': []}
+    signal = await source_signal(ctx)
+    with pytest.raises(SourceRequired, match='INSUFFICIENT_BINDING_OBLIGATIONS'):
+        await extract_obligations(ctx.session, signal, client=AbstainingModel())
+    assert (await ctx.session.execute(text('SELECT count(*) FROM pipeline.regulatory_obligations WHERE signal_id=:id'),
+        {'id': signal['id']})).scalar_one() == 0
+
+
+async def test_pending_run_keeps_completed_health_and_blocks_stale_review(ctx):
+    signal, result = await assessed(ctx)
+    before = (await policies.list_policies(ctx))['health']
+    assert before['assessed_obligations'] == 3 and before['stale_obligations'] == 0
+    await gap_audits.create_run(RunRequest(signal_id=signal['id'], idempotency_key=uuid4()), ctx)
+    assert (await policies.list_policies(ctx))['health'] == before
+    audit = result['items'][0]
+    for action in ('override', 'addendum', 'sign_off'):
+        payload = ReviewRequest(reason='Reviewer attempts to change an earlier assessment.',
+            expected_revision=audit['revision'], idempotency_key=uuid4(),
+            status='adequately_met' if action == 'override' else None)
+        with pytest.raises(HTTPException) as stale:
+            await gap_audits.review(audit['id'], payload, action, ctx)
+        assert stale.value.status_code == 409
+    await ready_policy(ctx)
+    health = (await policies.list_policies(ctx))['health']
+    assert health['stale_obligations'] == 3 and health['assessed_obligations'] == 3
+
+
+async def test_late_old_job_cannot_overwrite_a_newer_completed_audit(ctx, monkeypatch):
+    from app.workers.tasks import regulatory_gap
+    signal, result = await assessed(ctx)
+    older = result['run']['id']
+    newer = await gap_audits.create_run(RunRequest(signal_id=signal['id'], idempotency_key=uuid4()), ctx)
+    await audit_signal(ctx.session, newer, signal, embedder=Embedder(), verifier=Model())
+    await ctx.session.execute(text("UPDATE pipeline.compliance_gap_runs SET processing_status='queued' WHERE id=:id"), {'id': older})
+    await ctx.session.commit()
+    async def sessions():
+        yield ctx.session
+    monkeypatch.setattr(regulatory_gap, 'get_session', sessions)
+    result = await regulatory_gap.run_job('audit', str(ctx.principal.tenant_id), str(older))
+    assert result['status'] == 'superseded'
+    assert set((await ctx.session.execute(text('SELECT run_id FROM pipeline.compliance_gap_audits'))).scalars()) == {newer['id']}
+
+
+@pytest.mark.parametrize('enqueue_fails', [False, True])
+async def test_policy_activation_and_dependent_runs_are_atomic(ctx, monkeypatch, enqueue_fails):
+    from app.workers.tasks import regulatory_gap
+    signal, _ = await assessed(ctx)
+    body = policy_document()
+    uploaded = await policies.upload_policy(UploadFile(filename='new.docx', file=io.BytesIO(body)),
+        'New controls', 'aml_kyc', '1.0', None, ctx)
+    async def sessions():
+        yield ctx.session
+    async def index(session, policy):
+        return await index_policy(session, policy, client=Embedder(), body=body)
+    monkeypatch.setattr(regulatory_gap, 'get_session', sessions)
+    monkeypatch.setattr(regulatory_gap, 'index_policy', index)
+    monkeypatch.setattr(regulatory_gap, 'dispatch', lambda *args: False)
+    if enqueue_fails:
+        monkeypatch.setattr(regulatory_gap, 'enqueue_audit', AsyncMock(side_effect=RuntimeError('enqueue unavailable')))
+    result = await regulatory_gap.run_job('policy', str(ctx.principal.tenant_id), str(uploaded['id']))
+    policy = (await ctx.session.execute(text('SELECT active,processing_status FROM organizations.tenant_policies WHERE id=:id'),
+        {'id': uploaded['id']})).mappings().one()
+    runs = (await ctx.session.execute(text('SELECT count(*) FROM pipeline.compliance_gap_runs WHERE signal_id=:signal'),
+        {'signal': signal['id']})).scalar_one()
+    assert policy['active'] is (not enqueue_fails)
+    assert policy['processing_status'] == ('failed' if enqueue_fails else 'ready')
+    assert result['status'] == ('failed' if enqueue_fails else 'completed')
+    assert runs == (1 if enqueue_fails else 2)
+
+
+@pytest.mark.parametrize('copy', [
+    'Earn guaranteed 25.5% returns.',
+    'Earn guaranteed 25.5%\nreturns.',
+    '🚀 Earn guaranteed\n25% returns. Terms apply.',
+])
+async def test_marketing_decimal_and_multiline_claims_preserve_offsets(copy):
+    findings = check_copy(copy, 'social', [])['findings']
+    assert any(item['rule_id'] == 'investment_promises' for item in findings)
+    assert all(copy[item['start']:item['end']] == item['excerpt'] for item in findings)
+
+
+async def test_legacy_relative_circular_is_resolved_using_its_incoming_feed(ctx, monkeypatch):
+    from app.synthesis import obligation_extractor
+    incoming = uuid4()
+    relative = '/Out/2026/CCD/fixture.pdf'
+    await ctx.session.execute(text('''INSERT INTO pipeline.incoming_signals
+        (id,source_name,source_url,content_hash,status) VALUES(:id,'CBN Circulars',:url,:hash,'promoted')'''),
+        {'id': incoming, 'url': relative, 'hash': str(uuid4())})
+    signal = await source_signal(ctx)
+    signal.update({'incoming_signal_id': incoming, 'source_url': relative})
+    async def hydrate(value):
+        assert value['source_url'] == 'https://www.cbn.gov.ng' + relative
+        return value
+    monkeypatch.setattr(obligation_extractor, 'hydrate_source', hydrate)
+    _, obligations = await extract_obligations(ctx.session, signal, client=Model())
+    assert len(obligations) == 3

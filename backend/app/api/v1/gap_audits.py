@@ -86,6 +86,13 @@ async def review(audit_id: UUID, payload: ReviewRequest, event_type: str, contex
         raise HTTPException(422, 'A meaningful reviewer justification is required')
     org = context.principal.tenant_id
     params = {'id': audit_id,'org': org}
+    signal_id = (await context.session.execute(text('''SELECT r.signal_id
+        FROM pipeline.compliance_gap_audits a JOIN pipeline.compliance_gap_runs r ON r.id=a.run_id
+        WHERE a.id=:id AND a.organization_id=:org'''), params)).scalar_one_or_none()
+    if signal_id is None:
+        raise HTTPException(404,'Assessment not found')
+    await context.session.execute(text('SELECT pg_advisory_xact_lock(hashtextextended(:key,0))'),
+                                  {'key': f'{org}:{signal_id}'})
     current = (await context.session.execute(text('''SELECT * FROM pipeline.compliance_gap_audits
         WHERE id=:id AND organization_id=:org FOR UPDATE'''),params)).mappings().one_or_none()
     if current is None:
@@ -101,6 +108,11 @@ async def review(audit_id: UUID, payload: ReviewRequest, event_type: str, contex
         if snapshot.get('review_request') != expected_request or previous_event['event_type'] != event_type:
             raise HTTPException(409,'Idempotency key was used for a different reviewer action')
         return dict(current)
+    latest_run = (await context.session.execute(text('''SELECT id FROM pipeline.compliance_gap_runs
+        WHERE organization_id=:org AND signal_id=:signal ORDER BY created_at DESC,id DESC LIMIT 1'''),
+        {'org': org, 'signal': signal_id})).scalar_one()
+    if current['run_id'] != latest_run:
+        raise HTTPException(409,'A newer audit was requested. Review its completed results before making changes.')
     if current['revision'] != payload.expected_revision:
         raise HTTPException(409,'This assessment changed. Refresh the evidence before reviewing.')
     if event_type == 'override' and payload.status is None:
