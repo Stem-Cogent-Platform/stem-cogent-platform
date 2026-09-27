@@ -25,6 +25,14 @@ from app.intelligence.live_search.rate_limiter import LiveSearchRateLimiter
 from app.intelligence.live_search.service import LiveSearchService
 
 
+@pytest.fixture(autouse=True)
+def use_in_memory_rate_limiter(monkeypatch):
+    """These unit cases exercise the in-memory limiter, not a shared Redis pool."""
+    monkeypatch.setattr(
+        "app.intelligence.live_search.rate_limiter.get_redis_client", lambda: None
+    )
+
+
 def test_privacy_boundary_sanitizes_confidential_terms_and_preserves_public_entities() -> None:
     """Ensure confidential company context, tenant IDs, and internal role metrics never leave Stem."""
     raw_query = (

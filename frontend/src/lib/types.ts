@@ -131,6 +131,7 @@ export type ActionItem = {
 };
 
 export type ComplianceGapPayload = {
+  checklist?: ActionItem[];
   regulatory_body: string;
   circular_reference: string;
   statutory_mandate: string;
@@ -231,7 +232,7 @@ export type IntelligenceArtifact = {
   artifact_type: "compliance_gap_matrix" | "compliance_gap" | "competitor_strategic_battlecard" | "competitive_battlecard" | "rail_degradation_stress_index" | "rail_stress" | string;
   title: string;
   urgency: "CRITICAL" | "HIGH" | "MEDIUM" | "LOW" | string;
-  payload: (Partial<ComplianceGapPayload> & Partial<CompetitorStrategicPayload> & Partial<RailDegradationPayload> & Record<string, any>);
+  payload: (Partial<ComplianceGapPayload> & Partial<CompetitorStrategicPayload> & Partial<RailDegradationPayload> & Record<string, unknown>);
   is_dismissed: boolean;
   created_at: string;
   updated_at: string;
@@ -332,7 +333,7 @@ export type TelemetryData = {
   total_verified_signals: number;
   latest_signal_at: string | null;
   signals_by_type?: Record<string, number>;
-  feeds_active: number;
+  feeds_active: number | null;
   nodes?: Array<{
     name: string;
     status: "OPTIMAL" | "OPERATIONAL" | "DEGRADED" | "OUTAGE";
@@ -352,5 +353,36 @@ export type AdminTenant = {
   stage_a_completed: boolean;
   seat_count: number;
   created_at: string | null;
+};
+
+export type MarketPlayerCategory = "Leader" | "Challenger" | "Niche Specialist";
+
+export type MarketPlayer = {
+  name: string;
+  category: MarketPlayerCategory | string;
+  core_offering: string;
+  licensing_moat: string;
+  known_rails: string[];
+};
+
+export type MarketReportPayload = {
+  vertical_name: string;
+  primary_regulators: string[];
+  players: MarketPlayer[];
+  commercial_economics: string;
+  regulatory_headwinds: string[];
+  strategic_outlook: string;
+};
+
+export type MarketReportRecord = {
+  id: string | null;
+  sector_slug: string;
+  sector_title: string;
+  primary_jurisdiction: string;
+  report_payload: MarketReportPayload | null;
+  monitored_entities_count: number;
+  last_generated_at: string | null;
+  created_at: string | null;
+  description?: string;
 };
 

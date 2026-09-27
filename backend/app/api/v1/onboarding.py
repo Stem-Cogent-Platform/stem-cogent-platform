@@ -14,13 +14,13 @@ import logging
 import secrets
 from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
-from uuid import UUID, uuid4
+from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy import text
 
-from app.api.auth import RequestContext, get_request_context
+from app.api.auth import RequestContext, get_request_context, require_permission
 from app.api.v1.auth_sessions import AccessTokenResponse, _issue_session
 from app.authn.passwords import hash_password
 from app.core.database import get_session
@@ -128,6 +128,7 @@ async def submit_stage_a_company(
     context: RequestContext = Depends(get_request_context),
 ) -> dict[str, Any]:
     """Stage A: Save company operational context and trigger intelligence bootstrap."""
+    require_permission(context, "CONFIGURE_COMPANY_CONTEXT")
     tenant_id = context.principal.tenant_id
 
     # 1. Update auth.tenants
@@ -248,11 +249,13 @@ async def submit_stage_b_lens(
                 :tenant_id, :user_id, :role_code, ARRAY[:domain]::TEXT[],
                 ARRAY[]::TEXT[], :threshold, TRUE
             )
-            ON CONFLICT (tenant_id, user_id) WHERE active DO UPDATE SET
+            ON CONFLICT (user_id) DO UPDATE SET
                 role_code = EXCLUDED.role_code,
                 priority_domains = EXCLUDED.priority_domains,
                 delivery_preference = EXCLUDED.delivery_preference,
+                active = TRUE,
                 updated_at = NOW()
+            WHERE context.user_decision_lenses.tenant_id = EXCLUDED.tenant_id
             """
         ),
         {
@@ -262,6 +265,26 @@ async def submit_stage_b_lens(
             "domain": body.priority_focus or body.decision_lens,
             "threshold": body.alert_sensitivity,
         },
+    )
+
+    # Persist the setting consumed by the delivery worker, not only the lens UI.
+    critical_only = body.alert_sensitivity == "CRITICAL_ONLY"
+    await context.session.execute(
+        text("""
+            INSERT INTO delivery.user_alert_preferences (
+                tenant_id, user_id, domain_codes, urgency_bands, delivery_channels,
+                minimum_relevance_band, digest_frequency, enabled
+            ) VALUES (:tenant, :user, ARRAY[]::TEXT[], :bands, ARRAY['IN_APP']::TEXT[],
+                      :minimum, 'DAILY', TRUE)
+            ON CONFLICT (user_id) DO UPDATE SET
+                urgency_bands=EXCLUDED.urgency_bands,
+                minimum_relevance_band=EXCLUDED.minimum_relevance_band,
+                enabled=TRUE, updated_at=NOW()
+            WHERE delivery.user_alert_preferences.tenant_id=EXCLUDED.tenant_id
+        """),
+        {"tenant": tenant_id, "user": user_id,
+         "bands": ["CRITICAL"] if critical_only else ["HIGH", "CRITICAL"],
+         "minimum": "CRITICAL" if critical_only else "HIGH"},
     )
 
     await context.session.commit()

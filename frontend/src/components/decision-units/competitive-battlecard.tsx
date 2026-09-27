@@ -84,7 +84,7 @@ export function CompetitiveBattlecard({ artifact, onUpdate }: Props) {
           ...artifact,
           payload: {
             ...artifact.payload,
-            executive_stance: res.executive_stance as any,
+            executive_stance: res.executive_stance as IntelligenceArtifact["payload"]["executive_stance"],
           },
         });
       }
@@ -243,7 +243,7 @@ export function CompetitiveBattlecard({ artifact, onUpdate }: Props) {
           <div className="space-y-4">
             <div className="flex items-center justify-between">
               <span className="text-xs font-bold uppercase tracking-wider text-slate-500">
-                Scripted Commercial Objection Handling ("Say")
+                Scripted Commercial Objection Handling (&quot;Say&quot;)
               </span>
               <span className="text-[11px] text-slate-400">
                 Ready to paste into WhatsApp / Slack / Email

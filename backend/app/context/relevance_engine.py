@@ -111,30 +111,53 @@ def compute_exposure(
 
     urgency = _normalise(signal_data.get("urgency", "low"))
 
-    # Direct infrastructure or license match → critical_direct
+    # Extract tenant relevance suppression weights from learning loop
+    suppression_weights: dict[str, float] = {}
+    for item in company_profile.get("relevance_suppression_tags", []):
+        if isinstance(item, dict):
+            tag_name = _normalise(str(item.get("tag", "")))
+            if tag_name:
+                suppression_weights[tag_name] = float(item.get("penalty_weight", 0.5))
+        elif isinstance(item, str):
+            tag_name = _normalise(item)
+            if tag_name:
+                suppression_weights[tag_name] = 0.5
+
+    matched_suppressions = {
+        tag: suppression_weights[tag]
+        for tag in signal_surface
+        if tag in suppression_weights
+    }
+    total_penalty = sum(matched_suppressions.values())
+    if matched_suppressions:
+        matched_nodes["suppressed_tags"] = sorted(matched_suppressions.keys())
+
+    # Determine baseline candidate tier
     if matched_rails or matched_licenses:
-        return ExposureResult(
-            exposure_tier="critical_direct",
-            matched_nodes=matched_nodes,
-        )
+        candidate_tier = "critical_direct"
+    elif matched_products and urgency in ("critical", "high"):
+        candidate_tier = "critical_direct"
+    elif matched_products:
+        candidate_tier = "moderate_indirect"
+    else:
+        candidate_tier = "low_observation"
 
-    # Product match with high/critical urgency → critical_direct
-    if matched_products and urgency in ("critical", "high"):
-        return ExposureResult(
-            exposure_tier="critical_direct",
-            matched_nodes=matched_nodes,
-        )
+    # Automated Relevance Learning Loop: down-rank matching notices based on feedback penalties
+    final_tier = candidate_tier
+    if total_penalty >= 1.0:
+        final_tier = "irrelevant"
+    elif total_penalty >= 0.5:
+        if candidate_tier == "critical_direct":
+            final_tier = "moderate_indirect"
+        elif candidate_tier == "moderate_indirect":
+            final_tier = "low_observation"
+        else:
+            final_tier = "irrelevant"
+    elif total_penalty >= 0.25 and candidate_tier == "low_observation":
+        final_tier = "irrelevant"
 
-    # Product match with lower urgency → moderate_indirect
-    if matched_products:
-        return ExposureResult(
-            exposure_tier="moderate_indirect",
-            matched_nodes=matched_nodes,
-        )
-
-    # Shouldn't reach here given the guard above, but defensive
     return ExposureResult(
-        exposure_tier="low_observation",
+        exposure_tier=final_tier,
         matched_nodes=matched_nodes,
     )
 

@@ -26,6 +26,7 @@ from app.api.v1.policies import router as policies_router
 from app.api.v1.competitors import router as competitors_router
 from app.api.v1.gap_audits import router as gap_audits_router
 from app.api.v1.marketing import router as marketing_router
+from app.api.v1.market_reports import router as market_reports_router
 from app.core.config import get_settings
 from app.core.database import close_database_connection
 from app.core.logging import (
@@ -157,3 +158,4 @@ app.include_router(policies_router)
 app.include_router(competitors_router)
 app.include_router(gap_audits_router)
 app.include_router(marketing_router)
+app.include_router(market_reports_router)

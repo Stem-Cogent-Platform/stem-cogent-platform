@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from typing import Any
-from uuid import UUID, uuid4
+from uuid import uuid4
 
 import pytest
 from pydantic import ValidationError
@@ -22,7 +22,6 @@ from app.synthesis.models import (
     ARTIFACT_TYPE_MAP,
     ELIGIBLE_SIGNAL_TYPES,
     ActionItem,
-    BusinessFunction,
     CompetitiveBattlecardPayload,
     CompetitorStrategicPayload,
     ComplianceGapMatrixPayload,
@@ -32,13 +31,10 @@ from app.synthesis.models import (
     MultiDimensionalImpact,
     RailDegradationPayload,
     RailStressPayload,
-    Severity,
     StrategicOption,
-    Urgency,
 )
 from app.synthesis.synthesizer import (
     ArtifactSynthesisError,
-    ArtifactSynthesisResult,
     ArtifactSynthesizer,
 )
 

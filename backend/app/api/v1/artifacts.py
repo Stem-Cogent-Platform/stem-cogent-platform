@@ -396,34 +396,8 @@ async def simulate_failover_routing(
     if row is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Artifact not found")
 
-    payload = row["payload"] if isinstance(row["payload"], dict) else json.loads(row["payload"] or "{}")
-
-    # Calculate dynamic simulation metrics
-    pre_latency = payload.get("latency_ms", 3420)
-    post_latency = 420  # Wema ALAT or backup node latency
-    recovery_pct = round(((pre_latency - post_latency) / max(pre_latency, 1)) * 100, 1)
-
-    at_risk_naira = payload.get("at_risk_volume_naira", 42500000)
-    protected_naira = round(at_risk_naira * (body.traffic_pct / 100.0))
-
-    simulation_result = {
-        "timestamp": datetime.now(UTC).isoformat(),
-        "target_node": body.target_node,
-        "traffic_rerouted_pct": body.traffic_pct,
-        "latency_baseline_ms": pre_latency,
-        "latency_recovered_ms": post_latency,
-        "latency_reduction_pct": recovery_pct,
-        "at_risk_volume_protected_naira": protected_naira,
-        "node_health_status": "OPTIMAL",
-        "routing_steps": [
-            {"step": 1, "action": "Health check probe to target node", "status": "VERIFIED", "latency_ms": 42},
-            {"step": 2, "action": "Traffic weight migration to secondary rail", "status": "SWITCHED", "traffic_shifted_pct": body.traffic_pct},
-            {"step": 3, "action": "Settlement telemetry stabilization", "status": "ACTIVE", "success_rate_pct": 99.4},
-        ],
-    }
-
-    return {
-        "success": True,
-        "artifact_id": str(artifact_id),
-        "simulation": simulation_result,
-    }
+    raise HTTPException(
+        status.HTTP_501_NOT_IMPLEMENTED,
+        "No failover simulator or payment routing connector is configured. "
+        "No health probe or routing change has been performed.",
+    )

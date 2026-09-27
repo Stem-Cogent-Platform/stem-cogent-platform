@@ -14,6 +14,10 @@ const field = "w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text
 const button = "rounded-lg bg-slate-900 px-3 py-2 text-sm font-semibold text-white disabled:opacity-40";
 
 export function EvidenceReviewer({ initialSignalId }: {initialSignalId?: string | null}) {
+  return <EvidenceReviewerContent key={initialSignalId ?? ""} initialSignalId={initialSignalId} />;
+}
+
+function EvidenceReviewerContent({ initialSignalId }: {initialSignalId?: string | null}) {
   const [signals, setSignals] = useState<Array<{id: string; title: string}>>([]);
   const [signal, setSignal] = useState(initialSignalId ?? "");
   const [data, setData] = useState<AuditList>({run: null, items: []});
@@ -28,7 +32,7 @@ export function EvidenceReviewer({ initialSignalId }: {initialSignalId?: string 
   const [policy, setPolicy] = useState("");
   const audit = data.items.find(item => item.id === selected) ?? data.items[0];
   const running = data.run?.processing_status === "queued" || data.run?.processing_status === "processing";
-  const load = useCallback(async () => { if (signal) setData(await getAudits(signal)); }, [signal]);
+  const load = useCallback(async () => { if (signal) { const result = await getAudits(signal); setData(result); } }, [signal]);
 
   useEffect(() => {
     let active = true;
@@ -39,27 +43,33 @@ export function EvidenceReviewer({ initialSignalId }: {initialSignalId?: string 
     }).catch(err => { if (active) setError(err.message); });
     return () => { active = false; };
   }, []);
-  useEffect(() => { if (initialSignalId) setSignal(initialSignalId); }, [initialSignalId]);
   useEffect(() => {
     if (!signal) return;
     let active = true;
-    setLoading(true); setData({run: null, items: []}); setSelected(""); setError("");
-    void getAudits(signal).then(value => { if (active) setData(value); })
-      .catch(err => { if (active) setError(err.message); }).finally(() => { if (active) setLoading(false); });
-    return () => { active = false; };
+    const timer = setTimeout(() => {
+      setLoading(true); setData({run: null, items: []}); setSelected(""); setError("");
+      void getAudits(signal).then(value => { if (active) setData(value); })
+        .catch(err => { if (active) setError(err.message); }).finally(() => { if (active) setLoading(false); });
+    }, 0);
+    return () => { active = false; clearTimeout(timer); };
   }, [signal]);
   useEffect(() => {
     if (!running) return;
     const timer = setInterval(() => { void load().catch(err => setError(err.message)); }, 4000);
     return () => clearInterval(timer);
   }, [running, load]);
+  const auditId = audit?.id;
+  const revision = audit?.revision;
+  const signedOffAt = audit?.signed_off_at;
   useEffect(() => {
-    setHistory([]); setReason("");
-    if (!audit) return;
     let active = true;
-    void getAuditHistory(audit.id).then(result => { if (active) setHistory(result.items); }).catch(err => { if (active) setError(err.message); });
-    return () => { active = false; };
-  }, [audit?.id, audit?.revision, audit?.signed_off_at]);
+    const timer = setTimeout(() => {
+      setHistory([]); setReason("");
+      if (!auditId) return;
+      void getAuditHistory(auditId).then(result => { if (active) setHistory(result.items); }).catch(err => { if (active) setError(err.message); });
+    }, 0);
+    return () => { active = false; clearTimeout(timer); };
+  }, [auditId, revision, signedOffAt]);
 
   async function run() {
     setBusy(true); setError("");

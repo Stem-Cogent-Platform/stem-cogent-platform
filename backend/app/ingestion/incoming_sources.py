@@ -12,7 +12,7 @@ class IncomingFeedSource:
 
     source_name: str
     url: str
-    parser: str  # "rss", "cbn_api", "status_api"
+    parser: str  # "rss", "cbn_api", "status_api", "cbk_portal", "gazette_portal"
 
 
 def resolve_feed_link(url: str, source_name: str) -> str:
@@ -31,7 +31,7 @@ def resolve_feed_link(url: str, source_name: str) -> str:
 # Sources are ordered by priority tier to ensure critical regulatory
 # feeds are attempted first in each ingestion cycle.
 INCOMING_FEED_SOURCES: tuple[IncomingFeedSource, ...] = (
-    # Tier 1: Regulatory (CRITICAL / HIGH)
+    # Tier 1: Regulatory — Primary Nigerian Authorities & Pan-African Corridors (CRITICAL / HIGH)
     IncomingFeedSource(
         source_name="CBN Circulars",
         url="https://www.cbn.gov.ng/api/GetAllCirculars",
@@ -41,6 +41,36 @@ INCOMING_FEED_SOURCES: tuple[IncomingFeedSource, ...] = (
         source_name="CBN News",
         url="https://www.cbn.gov.ng/api/GetAllNews",
         parser="cbn_api",
+    ),
+    IncomingFeedSource(
+        source_name="SEC Nigeria Circulars",
+        url="https://sec.gov.ng/feeds/circulars.rss",
+        parser="rss",
+    ),
+    IncomingFeedSource(
+        source_name="SEC Nigeria Enforcement",
+        url="https://home.sec.gov.ng/feeds/enforcement-updates.rss",
+        parser="rss",
+    ),
+    IncomingFeedSource(
+        source_name="NDPC Nigeria",
+        url="https://ndpc.gov.ng/feed/",
+        parser="rss",
+    ),
+    IncomingFeedSource(
+        source_name="NFIU AML/CFT Gazette",
+        url="https://nfiu.gov.ng/",
+        parser="gazette_portal",
+    ),
+    IncomingFeedSource(
+        source_name="Bank of Ghana Payment Systems",
+        url="https://www.bog.gov.gh/payment-systems/feed/",
+        parser="rss",
+    ),
+    IncomingFeedSource(
+        source_name="Central Bank of Kenya Circulars",
+        url="https://www.centralbank.go.ke/policy-procedures/legislation-and-guidelines/circulars/",
+        parser="cbk_portal",
     ),
     # Tier 1: Infrastructure Monitoring (CRITICAL)
     IncomingFeedSource(
@@ -76,17 +106,7 @@ INCOMING_FEED_SOURCES: tuple[IncomingFeedSource, ...] = (
     ),
     IncomingFeedSource(
         source_name="Techpoint Africa",
-        url="https://techpoint.africa",
-        parser="rss",
-    ),
-    IncomingFeedSource(
-        source_name="SEC Nigeria Circulars",
-        url="https://sec.gov.ng/feeds/circulars.rss",
-        parser="rss",
-    ),
-    IncomingFeedSource(
-        source_name="SEC Nigeria Enforcement",
-        url="https://home.sec.gov.ng/feeds/enforcement-updates.rss",
+        url="https://techpoint.africa/feed/",
         parser="rss",
     ),
 )

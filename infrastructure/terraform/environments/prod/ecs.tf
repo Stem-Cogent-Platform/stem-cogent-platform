@@ -21,6 +21,7 @@ locals {
       SYSTEM_ADMIN_MFA_SECRET_ARN           = module.secrets.secret_arns["system_admin_mfa_secret"]
       OPENAI_API_KEY_ARN                    = module.secrets.secret_arns["openai_api_key"]
       GROQ_API_KEY_ARN                      = module.secrets.secret_arns["groq_api_key"]
+      AUTH_EMAIL_FROM                       = var.auth_email_from
       RESEND_API_KEY_ARN                    = module.secrets.secret_arns["resend_api_key"]
       PAYSTACK_SECRET_KEY_ARN               = module.secrets.secret_arns["paystack_secret_key"]
       PAYSTACK_PUBLIC_KEY_ARN               = module.secrets.secret_arns["paystack_public_key"]
@@ -28,6 +29,7 @@ locals {
       GOOGLE_OAUTH_CREDENTIALS_ARN          = module.secrets.secret_arns["google_oauth_credentials"]
       LINKEDIN_OAUTH_CREDENTIALS_ARN        = module.secrets.secret_arns["linkedin_oauth_credentials"]
       SERPAPI_API_KEY_ARN                   = module.secrets.secret_arns["serpapi_api_key"]
+      EXA_API_KEY_ARN                       = module.secrets.secret_arns["exa_api_key"]
       SYNTHESIS_ENABLED                     = "true"
       CIL_ENABLED                           = "true"
       CLICKHOUSE_ENABLED                    = "false"

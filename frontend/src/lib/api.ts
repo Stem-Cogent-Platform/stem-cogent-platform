@@ -88,6 +88,38 @@ export async function acceptInvitation(input: { token: string; display_name: str
   return response;
 }
 
+export async function requestOtp(email: string) {
+  return rawRequest<{ success: boolean; message: string; email: string }>(
+    "/api/v1/auth/otp/request",
+    {
+      method: "POST",
+      body: JSON.stringify({ email }),
+    }
+  );
+}
+
+export async function verifyOtp(email: string, otpCode: string) {
+  const response = await rawRequest<AuthResponse>("/api/v1/auth/otp/verify", {
+    method: "POST",
+    body: JSON.stringify({ email, otp_code: otpCode }),
+  });
+  storeSession(response, "");
+  return response;
+}
+
+export async function dismissSignal(signalId: string) {
+  return apiRequest<{
+    success: boolean;
+    signal_id: string;
+    dismissed: boolean;
+    penalized_tags: string[];
+    total_suppressed_tags: number;
+  }>(`/api/v1/signals/${signalId}/dismiss`, {
+    method: "POST",
+  });
+}
+
+
 export type ProductEventName =
   | "SESSION_STARTED" | "BRIEFING_VIEWED" | "BRIEF_OPENED" | "BRIEF_UPDATED_VIEWED"
   | "EVIDENCE_PANEL_OPENED" | "CIL_OPENED" | "CIL_QUERY_SUBMITTED"
@@ -444,26 +476,7 @@ export async function getRadarSignals(params: SignalFilterParams = {}) {
 }
 
 export async function getTelemetry(): Promise<TelemetryData> {
-  try {
-    return await apiRequest<TelemetryData>("/api/v1/telemetry");
-  } catch {
-    try {
-      return await apiRequest<TelemetryData>("/api/v1/admin/pipeline-health");
-    } catch {
-      return {
-        status: "HEALTHY",
-        total_verified_signals: 142,
-        latest_signal_at: new Date().toISOString(),
-        feeds_active: 11,
-        nodes: [
-          { name: "Providus Bank Core", status: "DEGRADED", latency_ms: 3420, success_rate_pct: 68.2, volume_at_risk_naira: 42500000 },
-          { name: "NIBSS Instant Payment (NIP)", status: "OPERATIONAL", latency_ms: 280, success_rate_pct: 98.4 },
-          { name: "Wema ALAT Direct Rail", status: "OPTIMAL", latency_ms: 120, success_rate_pct: 99.8 },
-          { name: "Interswitch Core Switch", status: "OPERATIONAL", latency_ms: 195, success_rate_pct: 99.1 }
-        ]
-      };
-    }
-  }
+  return apiRequest<TelemetryData>("/api/v1/telemetry");
 }
 
 /* Workspace Copilot War Room */
@@ -561,7 +574,7 @@ export async function getAdminPipelineHealth() {
     total_verified_signals: number;
     latest_signal_at: string | null;
     signals_by_type: Record<string, number>;
-    feeds_active: number;
+    feeds_active: number | null;
   }>("/api/v1/admin/pipeline-health");
 }
 

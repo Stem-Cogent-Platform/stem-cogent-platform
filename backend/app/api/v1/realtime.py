@@ -3,12 +3,13 @@ from __future__ import annotations
 import asyncio
 import json
 import time
+from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect, status
+from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect, status
 from sqlalchemy import text
 
-from app.api.auth import _verify_hs256_token
+from app.api.auth import RequestContext, _verify_hs256_token, get_request_context, require_permission
 from app.core.config import get_settings
 from app.core.database import get_session
 from app.core.redis import get_redis_client
@@ -17,75 +18,27 @@ router = APIRouter(tags=["realtime"])
 
 
 @router.get("/api/v1/telemetry")
-async def get_live_telemetry() -> dict[str, Any]:
-    """Return live infrastructure telemetry for payment switches, settlement cores, and signals."""
-    total_signals = 142
-    latest_at = None
-    signals_by_type = {"regulatory_mandate": 48, "rail_degradation": 38, "competitor_move": 56}
-
-    try:
-        async for session in get_session():
-            await session.execute(text("SELECT set_config('app.system_admin', 'true', true)"))
-            row = (await session.execute(text("SELECT COUNT(*) FROM pipeline.signals"))).scalar_one_or_none()
-            if row is not None and row > 0:
-                total_signals = row
-            latest_row = (await session.execute(text("SELECT MAX(created_at) FROM pipeline.signals"))).scalar_one_or_none()
-            if latest_row:
-                latest_at = latest_row.isoformat() if hasattr(latest_row, "isoformat") else str(latest_row)
-            break
-    except Exception:
-        pass
-
+async def get_live_telemetry(
+    context: RequestContext = Depends(get_request_context),
+) -> dict[str, Any]:
+    """Return observed signal counts; rail measurements require a connected source."""
+    require_permission(context, "READ_INTELLIGENCE")
+    rows = (await context.session.execute(text("""
+        SELECT signal_type, count(*) AS count, max(created_at) AS latest
+        FROM pipeline.signals
+        WHERE tenant_id IS NULL OR tenant_id=:tenant
+        GROUP BY signal_type
+    """), {"tenant": context.principal.tenant_id})).mappings().all()
+    latest = max((row["latest"] for row in rows if row["latest"]), default=None)
     return {
-        "status": "HEALTHY",
-        "total_verified_signals": total_signals,
-        "latest_signal_at": latest_at or "2026-09-24T18:00:00Z",
-        "feeds_active": 11,
-        "signals_by_type": signals_by_type,
-        "nodes": [
-            {
-                "name": "Providus Bank Core",
-                "type": "Commercial Settlement Core",
-                "status": "DEGRADED",
-                "latency_ms": 3420,
-                "latency_baseline_ms": 420,
-                "success_rate_pct": 68.2,
-                "volume_at_risk_naira": 42500000,
-                "affected_corridors": ["NIP Inward Collections", "Virtual Accounts"],
-            },
-            {
-                "name": "NIBSS Instant Payment (NIP)",
-                "type": "National Clearing Rail",
-                "status": "OPERATIONAL",
-                "latency_ms": 280,
-                "latency_baseline_ms": 250,
-                "success_rate_pct": 98.4,
-                "volume_at_risk_naira": 0,
-                "affected_corridors": ["Direct Interbank Settlement"],
-            },
-            {
-                "name": "Wema ALAT Direct Rail",
-                "type": "Failover Virtual Account Corridor",
-                "status": "OPTIMAL",
-                "latency_ms": 120,
-                "latency_baseline_ms": 150,
-                "success_rate_pct": 99.8,
-                "volume_at_risk_naira": 0,
-                "affected_corridors": ["Instant Dynamic Accounts"],
-            },
-            {
-                "name": "Interswitch Switch Hub",
-                "type": "Card Acquiring & Switching",
-                "status": "OPERATIONAL",
-                "latency_ms": 195,
-                "latency_baseline_ms": 180,
-                "success_rate_pct": 99.1,
-                "volume_at_risk_naira": 0,
-                "affected_corridors": ["3D-Secure 2.0 Webpay"],
-            },
-        ],
+        "status": "UNAVAILABLE",
+        "total_verified_signals": sum(row["count"] for row in rows),
+        "latest_signal_at": latest.isoformat() if latest else None,
+        "signals_by_type": {row["signal_type"]: row["count"] for row in rows},
+        "feeds_active": None,
+        "nodes": [],
+        "message": "No measured rail telemetry source is connected.",
     }
-
 
 @router.websocket("/api/v1/realtime/briefing")
 async def briefing_updates(websocket: WebSocket) -> None:

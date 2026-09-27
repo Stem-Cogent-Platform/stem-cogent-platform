@@ -36,3 +36,5 @@ alb_deletion_protection = false
 # ecs_bootstrap_image_tag is supplied through TF_VAR_ecs_bootstrap_image_tag
 # from the protected staging-plan/production environment variable. It must be
 # the exact full SHA proven present in ECR by the Task 1.3.12 build-only run.
+
+auth_email_from = "Stem Cogent <noreply@login.stem-cogent.com>"

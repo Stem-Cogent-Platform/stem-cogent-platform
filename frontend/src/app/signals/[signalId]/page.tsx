@@ -47,7 +47,7 @@ export default function SignalPage() {
   return (
     <WorkspaceShell>
       <LocalErrorBoundary fallbackTitle="Signal Telemetry Unavailable">
-        <SignalDetailContent signalId={signalId} />
+        <SignalDetailContent key={signalId} signalId={signalId} />
       </LocalErrorBoundary>
     </WorkspaceShell>
   );
@@ -59,7 +59,6 @@ function SignalDetailContent({ signalId }: { signalId: string }) {
 
   const loadSignal = useCallback(async () => {
     try {
-      setState({ status: "loading" });
       const data = await apiRequest<SignalDetailResponse>(`/api/v1/signals/${signalId}`);
       setState({ status: "ready", data });
     } catch (err) {
@@ -71,7 +70,8 @@ function SignalDetailContent({ signalId }: { signalId: string }) {
   }, [signalId]);
 
   useEffect(() => {
-    void loadSignal();
+    const timer = setTimeout(() => void loadSignal(), 0);
+    return () => clearTimeout(timer);
   }, [loadSignal]);
 
   if (state.status === "loading") {
@@ -153,8 +153,8 @@ function SignalDetailContent({ signalId }: { signalId: string }) {
         )}
 
         <div className="pt-4 border-t border-slate-100 flex flex-wrap items-center justify-between gap-3 text-xs text-slate-500 font-mono">
-          <span>Source: {signal.source_name || "Central Bank of Nigeria / Regulatory Gazette"}</span>
-          <span>Verified: {signal.published_at ? new Date(signal.published_at).toLocaleDateString() : "Live Telemetry"}</span>
+          <span>Source: {signal.source_name || "Not recorded"}</span>
+          <span>Published: {signal.published_at ? new Date(signal.published_at).toLocaleDateString() : "Not recorded"}</span>
         </div>
       </div>
 
@@ -166,7 +166,7 @@ function SignalDetailContent({ signalId }: { signalId: string }) {
               Direct Tenant Exposure Assessment
             </span>
             <span className="text-xs font-bold font-mono text-blue-700">
-              Relevance: {tenant_interpretation.relevance_band || "HIGH"}
+              Relevance: {tenant_interpretation.relevance_band || "Not assessed"}
             </span>
           </div>
           <p className="text-xs text-slate-700 leading-relaxed font-medium">

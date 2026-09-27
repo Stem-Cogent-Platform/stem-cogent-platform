@@ -13,10 +13,9 @@ from __future__ import annotations
 
 import hashlib
 import hmac
-import json
 from datetime import UTC, datetime, timedelta
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 from uuid import UUID, uuid4
 
 import pytest
@@ -25,7 +24,6 @@ from fastapi import HTTPException
 from app.api.auth import Principal, RequestContext
 from app.api.v1 import admin, auth_sessions, billing, onboarding
 from app.billing.gates import enforce_workspace_access
-from app.billing.paystack import PaystackClient
 
 
 # ---------------------------------------------------------------------------
@@ -241,7 +239,6 @@ async def test_verify_invite_creates_account_and_requires_stage_b() -> None:
     """Invited user verifying OTP receives access token and starts with stage_b_completed=False."""
     org_id = uuid4()
     otp_code = "729481"
-    otp_hash = hashlib.sha256(otp_code.encode()).hexdigest()
     future_time = datetime.now(UTC) + timedelta(minutes=10)
 
     mock_otp_row = {
@@ -307,7 +304,6 @@ async def test_validate_and_accept_invitation_by_token() -> None:
     """Invited user clicking email link validates token and accepts invitation creating account."""
     org_id = uuid4()
     token = "test-secure-invitation-token-12345678"
-    token_hash = hashlib.sha256(token.encode()).hexdigest()
     future_time = datetime.now(UTC) + timedelta(days=5)
 
     mock_inv_row = {
@@ -618,7 +614,7 @@ async def test_admin_pipeline_health_reports_verified_signal_telemetry() -> None
     ctx = make_context(is_superuser=True, db_session=session)
 
     health = await admin.pipeline_health(ctx)
-    assert health["status"] == "HEALTHY"
+    assert health["status"] == "UNVERIFIED"
     assert health["total_verified_signals"] == 4131
-    assert health["feeds_active"] == 11
+    assert health["feeds_active"] is None
     assert health["signals_by_type"]["regulatory_mandate"] == 1500

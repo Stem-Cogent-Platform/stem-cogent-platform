@@ -18,8 +18,13 @@ export default function PolicyVaultPage() {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
-  const load = useCallback(async () => { setData(await getPolicies()); }, []);
-  useEffect(() => { void load().catch(err => setError(err.message)); }, [load]);
+  const load = useCallback(async () => { const result = await getPolicies(); setData(result); }, []);
+  useEffect(() => {
+    let active = true;
+    void getPolicies().then(result => { if (active) setData(result); })
+      .catch(err => { if (active) setError(err.message); });
+    return () => { active = false; };
+  }, []);
   const pending = data.items.some(item => ["queued", "processing"].includes(item.processing_status));
   const staleObligations = data.health.stale_obligations ?? 0;
   useEffect(() => { if (!pending) return; const timer = setInterval(() => void load().catch(err => setError(err.message)), 4000); return () => clearInterval(timer); }, [pending, load]);

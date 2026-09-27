@@ -198,6 +198,7 @@ async def query_cil(
     ]
 
     new_findings = list(thread.working_findings if thread else [])
+    new_questions = list(thread.unresolved_questions if thread else [])
     if generated:
         for f in generated.answer.working_findings:
             if f not in new_findings:
@@ -205,7 +206,7 @@ async def query_cil(
         new_questions = (
             list(generated.answer.unresolved_questions)
             if generated.answer.unresolved_questions
-            else (thread.unresolved_questions if thread else [])
+            else new_questions
         )
     # Collect attached evidence from live search or existing thread
     attached_evidence_list = list(thread.attached_evidence if thread else [])

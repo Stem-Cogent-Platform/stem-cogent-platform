@@ -44,14 +44,11 @@ export function CILPanel({
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
-  const [query, setQuery] = useState(initialPrompt);
+  const [draft, setDraft] = useState({prompt: initialPrompt, value: initialPrompt});
+  const query = draft.prompt === initialPrompt ? draft.value : initialPrompt;
+  function setQuery(value: string) { setDraft({prompt: initialPrompt, value}); }
   const [mobileOpen, setMobileOpen] = useState(false);
 
-  useEffect(() => {
-    if (initialPrompt) {
-      setQuery(initialPrompt);
-    }
-  }, [initialPrompt]);
 
   const defaultSuggested =
     suggestedInquiries && suggestedInquiries.length > 0

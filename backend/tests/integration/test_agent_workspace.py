@@ -72,6 +72,10 @@ class MockAsyncSession:
         self.results_queue = [MockDbResult(r) for r in (query_results or [])]
         self.executed_statements: list[str] = []
         self.executed_parameters: list[dict[str, Any]] = []
+        self.commits = 0
+
+    async def commit(self) -> None:
+        self.commits += 1
 
     async def execute(self, statement: Any, parameters: dict[str, Any] | None = None) -> MockDbResult:
         self.executed_statements.append(str(statement))
@@ -555,4 +559,3 @@ def test_migration_0041_relational_integrity_contracts() -> None:
     assert "NULLIF(current_setting('app.current_tenant_id', true), '')::UUID" in content
     assert "CREATE POLICY agent_sessions_tenant_isolation" in content
     assert "CREATE POLICY agent_messages_tenant_isolation" in content
-

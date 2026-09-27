@@ -69,7 +69,8 @@ async def _load_active_tenant_profiles(
                         profile.operating_licenses,
                         profile.active_products,
                         profile.clearing_rails,
-                        profile.compliance_thresholds
+                        profile.compliance_thresholds,
+                        profile.relevance_suppression_tags
                     FROM auth.tenants AS tenant
                     JOIN context.company_profiles AS profile
                         ON profile.tenant_id = tenant.id
@@ -114,7 +115,8 @@ async def _persist_relevance(
                     CAST(:matched_nodes AS JSONB), CAST(:lens_impact AS JSONB)
                 )
                 ON CONFLICT (tenant_id, signal_id) DO UPDATE SET
-                    exposure_tier = EXCLUDED.exposure_tier,
+                    exposure_tier = CASE WHEN pipeline.tenant_signal_relevance.is_dismissed
+                        THEN 'irrelevant' ELSE EXCLUDED.exposure_tier END,
                     matched_nodes = EXCLUDED.matched_nodes,
                     lens_impact = EXCLUDED.lens_impact,
                     created_at = NOW()

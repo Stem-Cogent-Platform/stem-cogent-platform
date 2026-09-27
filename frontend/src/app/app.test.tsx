@@ -15,9 +15,10 @@ describe("HomePage", () => {
   it("renders public account creation rather than legal consent", () => {
     const markup = renderToStaticMarkup(<HomePage />);
 
-    expect(markup).toContain("Start your workspace");
-    expect(markup).toContain("Create workspace");
-    expect(markup).toContain("No invitation or card is required");
+    expect(markup).toContain("Create an enterprise workspace");
+    expect(markup).toContain("Send Verification Code");
+    expect(markup).toContain('type="email"');
+    expect(markup).not.toContain('type="password"');
     expect(markup).not.toContain("Legal consent");
   });
 });

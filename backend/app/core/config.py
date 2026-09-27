@@ -95,6 +95,7 @@ class Settings(BaseSettings):
     OPENAI_API_KEY_ARN: str | None = None
     GROQ_API_KEY_ARN: str | None = None
     RESEND_API_KEY_ARN: str | None = None
+    AUTH_EMAIL_FROM: str | None = None
     PAYSTACK_SECRET_KEY_ARN: str | None = None
     PAYSTACK_PUBLIC_KEY_ARN: str | None = None
     PAYSTACK_WEBHOOK_SECRET_ARN: str | None = None

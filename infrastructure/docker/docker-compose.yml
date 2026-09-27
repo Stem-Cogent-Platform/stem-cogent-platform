@@ -47,6 +47,23 @@ services:
     ports:
       - "8000:8000"
 
+  backend:
+    image: stemcogent-backend:staging-verify
+    build:
+      context: ../../backend
+      dockerfile: ../infrastructure/docker/backend.Dockerfile
+      target: staging-verify
+    environment:
+      ENVIRONMENT: test
+      DATABASE_URL: postgresql://sc_local:sc_local_password@127.0.0.1:5432/sc_test
+      REDIS_URL: redis://redis:6379/0
+    network_mode: "service:postgres"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
   frontend:
     build:
       context: ../../frontend

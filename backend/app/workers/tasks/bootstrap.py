@@ -15,7 +15,6 @@ from typing import Any
 from uuid import UUID
 
 from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.context.relevance_engine import compute_exposure, synthesize_lens_impact
 from app.core.database import get_session
@@ -42,7 +41,7 @@ async def run_tenant_bootstrap(organization_id_str: str) -> dict[str, Any]:
                 text(
                     """
                     SELECT operating_licenses, active_products, clearing_rails,
-                           compliance_thresholds
+                           compliance_thresholds, relevance_suppression_tags
                     FROM context.company_profiles
                     WHERE tenant_id = :tenant_id
                     LIMIT 1
@@ -61,6 +60,7 @@ async def run_tenant_bootstrap(organization_id_str: str) -> dict[str, Any]:
             "active_products": list(profile_row.get("active_products") or []),
             "clearing_rails": list(profile_row.get("clearing_rails") or []),
             "compliance_thresholds": profile_row.get("compliance_thresholds") or {},
+            "relevance_suppression_tags": profile_row.get("relevance_suppression_tags") or [],
         }
 
         # 2. Query promoted signals from pipeline.signals
@@ -111,7 +111,8 @@ async def run_tenant_bootstrap(organization_id_str: str) -> dict[str, Any]:
                             CAST(:lens_impact AS JSONB)
                         )
                         ON CONFLICT (tenant_id, signal_id) DO UPDATE SET
-                            exposure_tier = EXCLUDED.exposure_tier,
+                            exposure_tier = CASE WHEN pipeline.tenant_signal_relevance.is_dismissed
+                                THEN 'irrelevant' ELSE EXCLUDED.exposure_tier END,
                             matched_nodes = EXCLUDED.matched_nodes,
                             lens_impact = EXCLUDED.lens_impact
                         RETURNING id

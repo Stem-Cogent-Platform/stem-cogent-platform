@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+
 import hashlib
 import re
 import secrets
@@ -21,6 +23,8 @@ from app.context.normalization import context_list
 from app.context.readiness import invitation_readiness
 from app.core.config import get_settings
 from app.workers.celery_app import celery_app
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1/internal/admin", tags=["internal-admin"])
 
@@ -1171,10 +1175,10 @@ async def pipeline_health(
     ).mappings().all()
 
     return {
-        "status": "HEALTHY",
+        "status": "UNVERIFIED",
         "total_verified_signals": total_signals,
         "latest_signal_at": latest_signal_row.isoformat() if latest_signal_row else None,
         "signals_by_type": {r["signal_type"]: r["cnt"] for r in signal_type_rows},
-        "feeds_active": 11,
+        "feeds_active": None,
     }
 

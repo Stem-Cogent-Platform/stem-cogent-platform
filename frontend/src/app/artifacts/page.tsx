@@ -9,6 +9,7 @@ import { DossierExplorer } from "@/components/competitive/dossier-explorer";
 import { EvidenceReviewer } from "@/components/decision-units/evidence-reviewer";
 import { CompetitiveBattlecard } from "@/components/decision-units/competitive-battlecard";
 import { RailStressMonitor } from "@/components/decision-units/rail-stress-monitor";
+import { MarketReportsExplorer } from "@/components/decision-units/market-reports-explorer";
 import { WorkspaceShell } from "@/components/workspace-shell";
 import { listArtifacts } from "@/lib/api";
 import type { IntelligenceArtifact } from "@/lib/types";
@@ -25,7 +26,7 @@ export default function ArtifactsPage() {
   );
 }
 
-type TabKey = "ALL" | "gap_matrix" | "battlecard" | "rail_stress";
+type TabKey = "ALL" | "gap_matrix" | "battlecard" | "rail_stress" | "market_reports";
 
 function ArtifactsContent() {
   const searchParams = useSearchParams();
@@ -154,6 +155,7 @@ function ArtifactsContent() {
             { id: "gap_matrix", label: "Compliance Gap Matrices" },
             { id: "battlecard", label: "Battlecards & Competitors" },
             { id: "rail_stress", label: "Rail Stress Monitors" },
+            { id: "market_reports", label: "Market Reports" },
           ].map((tab) => {
             const isActive = activeTab === tab.id;
             return (
@@ -195,10 +197,20 @@ function ArtifactsContent() {
         </div>
       </div>
 
-      {/* Decision Units Feed */}
-      {activeTab === "battlecard" && <DossierExplorer />}
-      {(activeTab === "ALL" || activeTab === "gap_matrix") && <EvidenceReviewer initialSignalId={searchParams.get("signal_id")} />}
-      {errorNotice && <p role="alert" className="rounded-lg bg-red-50 p-3 text-sm text-red-800">{errorNotice}</p>}
+      {/* Decision Units Feed / Market Reports */}
+      {activeTab === "market_reports" ? (
+        <MarketReportsExplorer />
+      ) : (
+        <>
+          {activeTab === "battlecard" && <DossierExplorer />}
+          {(activeTab === "ALL" || activeTab === "gap_matrix") && (
+            <EvidenceReviewer initialSignalId={searchParams.get("signal_id")} />
+          )}
+          {errorNotice && (
+            <p role="alert" className="rounded-lg bg-red-50 p-3 text-sm text-red-800">
+              {errorNotice}
+            </p>
+          )}
       {loading ? (
         <div className="space-y-6">
           <GapMatrixSkeleton />
@@ -274,6 +286,8 @@ function ArtifactsContent() {
             );
           })}
         </div>
+      )}
+        </>
       )}
     </div>
   );

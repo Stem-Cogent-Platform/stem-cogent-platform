@@ -40,7 +40,7 @@ def test_offline_sql_uses_nonblocking_indexes_and_public_or_tenant_rls() -> None
     environment = os.environ.copy()
     environment["DATABASE_URL"] = "postgresql://user:password@localhost/stemcogent"
     result = subprocess.run(
-        [sys.executable, "-m", "alembic", "upgrade", "head", "--sql"],
+        [sys.executable, "-m", "alembic", "upgrade", "0012:0013", "--sql"],
         cwd=BACKEND_ROOT,
         capture_output=True,
         check=False,

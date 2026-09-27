@@ -83,6 +83,13 @@ class GroundedAnswer(BaseModel):
             raise ValueError("Generated text contains an unsupported NUL character")
         return value
 
+    @classmethod
+    def model_json_schema(cls, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        schema = super().model_json_schema(*args, **kwargs)
+        if "properties" in schema:
+            schema["required"] = list(schema["properties"].keys())
+        return schema
+
 
 @dataclass(frozen=True, slots=True)
 class AnswerGeneration:

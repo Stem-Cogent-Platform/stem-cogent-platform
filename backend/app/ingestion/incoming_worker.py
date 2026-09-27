@@ -23,6 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_session
 from app.ingestion.feed_parsers.json_api_parser import parse_cbn_api, parse_status_api
 from app.ingestion.feed_parsers.models import IncomingSignal
+from app.ingestion.feed_parsers.portal_parser import parse_cbk_portal, parse_gazette_portal
 from app.ingestion.feed_parsers.rss_parser import parse_rss_feed
 from app.ingestion.incoming_sources import INCOMING_FEED_SOURCES, IncomingFeedSource
 
@@ -38,6 +39,8 @@ _PARSERS: dict[str, Any] = {
     "rss": parse_rss_feed,
     "cbn_api": parse_cbn_api,
     "status_api": parse_status_api,
+    "cbk_portal": parse_cbk_portal,
+    "gazette_portal": parse_gazette_portal,
 }
 
 
@@ -176,6 +179,8 @@ async def _process_source(
         if parser is None:
             raise ValueError(f"Unknown parser type: {source.parser}")
         signals = parser(raw_data, source.source_name)
+        if not signals and source.parser in {"gazette_portal", "cbk_portal"}:
+            raise ValueError("No regulatory notices parsed; source coverage is unverified")
     except Exception as exc:
         result.error = f"Parse error: {exc!s}"[:500]
         result.duration_ms = (time.monotonic() - start) * 1000
@@ -206,6 +211,8 @@ async def _process_source(
         result.skipped = skipped
     except Exception as exc:
         result.error = f"Persist error: {exc!s}"[:500]
+        if session is not None:
+            await session.rollback()
         logger.error(
             "Failed to persist %s: %s",
             source.source_name,
@@ -270,6 +277,8 @@ async def _run_cycle(
 async def run_incoming_ingestion(
     session: AsyncSession | None = None,
     seen_hashes: set[str] | None = None,
+    *,
+    dry_run: bool = False,
 ) -> dict[str, Any]:
     """Execute a full ingestion cycle across all configured sources.
 
@@ -278,19 +287,17 @@ async def run_incoming_ingestion(
     cycle_start = time.monotonic()
     cycle = IngestionCycleResult()
 
+    if dry_run:
+        result = await _run_cycle(None, cycle, cycle_start, seen_hashes)
+        result["dry_run"] = True
+        result["would_insert"] = result.pop("inserted")
+        return result
+
     if session is not None:
         return await _run_cycle(session, cycle, cycle_start, seen_hashes)
 
-    try:
-        async for db_session in get_session():
-            return await _run_cycle(db_session, cycle, cycle_start, seen_hashes)
-    except RuntimeError as exc:
-        if "Database is not configured" in str(exc):
-            logger.warning(
-                "Database is not configured. Running ingestion in standalone mode with in-memory deduplication."
-            )
-            return await _run_cycle(None, cycle, cycle_start, seen_hashes)
-        raise
+    async for db_session in get_session():
+        return await _run_cycle(db_session, cycle, cycle_start, seen_hashes)
 
     raise RuntimeError("Database session was not available")
 
@@ -304,7 +311,7 @@ if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, stream=sys.stdout)
 
     async def main() -> None:
-        print("Executing Pass 1: Ingestion across all 11 feed sources...")
+        print(f"Executing Pass 1: Ingestion across {len(INCOMING_FEED_SOURCES)} feed sources...")
         res1 = await run_incoming_ingestion()
         print(json_mod.dumps(res1, indent=2))
 
@@ -312,8 +319,10 @@ if __name__ == "__main__":
         res2 = await run_incoming_ingestion()
         print(json_mod.dumps(res2, indent=2))
         print(
-            f"\nDeduplication verified: Pass 1 inserted {res1['inserted']} signals; "
+            f"\nIngestion results: Pass 1 inserted {res1['inserted']} signals; "
             f"Pass 2 inserted {res2['inserted']} signals ({res2['skipped']} skipped as duplicates)."
         )
+        if res1["errors"] or res2["errors"]:
+            raise SystemExit(1)
 
     asyncio.run(main())

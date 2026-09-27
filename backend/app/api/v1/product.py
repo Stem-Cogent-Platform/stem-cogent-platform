@@ -663,10 +663,13 @@ async def wider_intelligence(
           JOIN config.sources source ON source.id=signal.source_id
           LEFT JOIN decision.assessments assessment ON assessment.global_output_id=output.id
             AND assessment.tenant_id=:tenant_id
+          LEFT JOIN pipeline.tenant_signal_relevance tsr ON tsr.signal_id=signal.id
+            AND tsr.tenant_id=:tenant_id
           WHERE output.synthesis_status='COMPLETED'
             AND (output.tenant_id IS NULL OR output.tenant_id=:tenant_id)
             AND (signal.tenant_id IS NULL OR signal.tenant_id=:tenant_id)
             AND signal.dedup_status NOT IN ('EXACT_DUPLICATE','SEMANTIC_DUPLICATE')
+            AND COALESCE(tsr.is_dismissed, FALSE) = FALSE
             AND jsonb_array_length(output.citations)>0 AND {filters[freshness]}
             AND (:q='' OR signal.title ILIKE :pattern OR output.summary ILIKE :pattern)
             AND {tab_filter_sql}
@@ -861,6 +864,179 @@ async def signal_detail(
             ],
         }
     )
+
+
+@router.post("/signals/{signal_id}/dismiss", status_code=status.HTTP_200_OK)
+async def dismiss_signal(
+    signal_id: UUID,
+    context: RequestContext = Depends(get_request_context),
+) -> dict[str, Any]:
+    """Dismiss a signal for the tenant and update relevance learning loop weights.
+
+    Extracts taxonomy terms (primary_entity, secondary_entities, affected_sectors)
+    and updates relevance_suppression_tags with an increased penalty weight so
+    future notices are automatically down-ranked for this tenant.
+    """
+    require_permission(context, "READ_INTELLIGENCE")
+    tenant_id = context.principal.tenant_id
+    await context.session.execute(
+        text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
+        {"key": f"signal-dismissal:{tenant_id}"},
+    )
+
+    # 1. Look up signal taxonomy
+    signal_row = (
+        await context.session.execute(
+            text(
+                """
+                SELECT primary_entity, affected_sectors, secondary_entities
+                FROM pipeline.signals
+                WHERE id = :signal_id
+                  AND (tenant_id IS NULL OR tenant_id = :tenant_id)
+                LIMIT 1
+                """
+            ),
+            {"signal_id": signal_id, "tenant_id": tenant_id},
+        )
+    ).mappings().one_or_none()
+
+    if signal_row is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Signal not found")
+
+    already_dismissed = await context.session.scalar(
+        text("SELECT is_dismissed FROM pipeline.tenant_signal_relevance "
+             "WHERE tenant_id=:tenant_id AND signal_id=:signal_id"),
+        {"tenant_id": tenant_id, "signal_id": signal_id},
+    )
+    if already_dismissed:
+        tag_count = await context.session.scalar(
+            text("SELECT jsonb_array_length(relevance_suppression_tags) "
+                 "FROM organizations.company_context WHERE organization_id=:tenant_id"),
+            {"tenant_id": tenant_id},
+        )
+        await context.session.commit()
+        return {"success": True, "signal_id": str(signal_id), "dismissed": True,
+                "penalized_tags": [], "total_suppressed_tags": tag_count or 0}
+
+    # 2. Mark signal as dismissed in pipeline.tenant_signal_relevance
+    await context.session.execute(
+        text(
+            """
+            INSERT INTO pipeline.tenant_signal_relevance (
+                tenant_id, signal_id, exposure_tier, is_dismissed
+            ) VALUES (
+                :tenant_id, :signal_id, 'irrelevant', TRUE
+            )
+            ON CONFLICT (tenant_id, signal_id) DO UPDATE SET
+                is_dismissed = TRUE,
+                exposure_tier = 'irrelevant'
+            """
+        ),
+        {"tenant_id": tenant_id, "signal_id": signal_id},
+    )
+
+    # 3. Extract taxonomy tags to suppress
+    tags_to_penalize: set[str] = set()
+    primary_entity = (signal_row.get("primary_entity") or "").strip()
+    if primary_entity:
+        tags_to_penalize.add(primary_entity)
+    for sector in signal_row.get("affected_sectors") or []:
+        if sector and sector.strip():
+            tags_to_penalize.add(sector.strip())
+    for entity in signal_row.get("secondary_entities") or []:
+        if entity and entity.strip():
+            tags_to_penalize.add(entity.strip())
+
+    # 4. Fetch existing suppression tags from organizations.company_context
+    ctx_row = (
+        await context.session.execute(
+            text(
+                """
+                SELECT relevance_suppression_tags, dismissed_signal_count
+                FROM organizations.company_context
+                WHERE organization_id = :tenant_id
+                LIMIT 1
+                """
+            ),
+            {"tenant_id": tenant_id},
+        )
+    ).mappings().one_or_none()
+
+    existing_tags: list[dict[str, Any]] = []
+    dismissed_count = 0
+    if ctx_row:
+        raw_tags = ctx_row.get("relevance_suppression_tags")
+        if isinstance(raw_tags, list):
+            existing_tags = list(raw_tags)
+        dismissed_count = int(ctx_row.get("dismissed_signal_count") or 0)
+
+    # Map existing tags for efficient update
+    tag_map: dict[str, dict[str, Any]] = {}
+    for item in existing_tags:
+        if isinstance(item, dict) and "tag" in item:
+            tag_map[str(item["tag"]).lower()] = dict(item)
+
+    now_iso = datetime.now(UTC).isoformat()
+    for tag in tags_to_penalize:
+        key = tag.lower()
+        if key in tag_map:
+            current_weight = float(tag_map[key].get("penalty_weight", 0.5))
+            tag_map[key]["penalty_weight"] = min(1.0, current_weight + 0.25)
+            tag_map[key]["dismissed_count"] = int(tag_map[key].get("dismissed_count", 1)) + 1
+            tag_map[key]["last_dismissed_at"] = now_iso
+        else:
+            tag_map[key] = {
+                "tag": tag,
+                "penalty_weight": 0.5,
+                "dismissed_count": 1,
+                "last_dismissed_at": now_iso,
+            }
+
+    updated_tags = list(tag_map.values())
+    dismissed_count += 1
+
+    # 5. Upsert organizations.company_context
+    tags_json = json.dumps(updated_tags)
+    await context.session.execute(
+        text(
+            """
+            INSERT INTO organizations.company_context (
+                organization_id, relevance_suppression_tags, dismissed_signal_count, updated_at
+            ) VALUES (
+                :tenant_id, CAST(:tags AS JSONB), :count, NOW()
+            )
+            ON CONFLICT (organization_id) DO UPDATE SET
+                relevance_suppression_tags = CAST(:tags AS JSONB),
+                dismissed_signal_count = :count,
+                updated_at = NOW()
+            """
+        ),
+        {"tenant_id": tenant_id, "tags": tags_json, "count": dismissed_count},
+    )
+
+    # Also update context.company_profiles for dual compatibility
+    await context.session.execute(
+        text(
+            """
+            INSERT INTO context.company_profiles (tenant_id, relevance_suppression_tags)
+            VALUES (:tenant_id, CAST(:tags AS JSONB))
+            ON CONFLICT (tenant_id) DO UPDATE SET
+                relevance_suppression_tags = EXCLUDED.relevance_suppression_tags,
+                updated_at = NOW()
+            """
+        ),
+        {"tenant_id": tenant_id, "tags": tags_json},
+    )
+
+    await context.session.commit()
+
+    return {
+        "success": True,
+        "signal_id": str(signal_id),
+        "dismissed": True,
+        "penalized_tags": sorted(tags_to_penalize),
+        "total_suppressed_tags": len(updated_tags),
+    }
 
 
 @router.get("/entities/{entity_id}")

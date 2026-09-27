@@ -460,3 +460,8 @@ import {
   to = module.iam.aws_iam_role.execution["collector-worker"]
   id = "sc-collector-worker-staging-execution"
 }
+
+import {
+  to = module.secrets.aws_secretsmanager_secret.this["serpapi_api_key"]
+  id = "arn:aws:secretsmanager:eu-west-1:437040615141:secret:sc/staging/search/serpapi/api-key-mHCjip"
+}

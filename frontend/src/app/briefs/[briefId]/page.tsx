@@ -41,7 +41,7 @@ export default function BriefDetailPage() {
   const [showCil, setShowCil] = useState(false);
   const [selectedPrompt, setSelectedPrompt] = useState<string>("");
   const [showEvidence, setShowEvidence] = useState(false);
-  const [phase5Ui, setPhase5Ui] = useState(false);
+  const [, setPhase5Ui] = useState(false);
 
   const load = useCallback(async () => {
     if (!UUID.test(id)) return;

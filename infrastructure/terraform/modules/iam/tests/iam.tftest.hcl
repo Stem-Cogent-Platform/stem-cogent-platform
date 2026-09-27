@@ -70,6 +70,8 @@ variables {
     openai_api_key             = "arn:aws:secretsmanager:eu-west-1:123456789012:secret:sc/staging/llm/openai/api-key-a"
     groq_api_key               = "arn:aws:secretsmanager:eu-west-1:123456789012:secret:sc/staging/llm/groq/api-key-a"
     resend_api_key             = "arn:aws:secretsmanager:eu-west-1:123456789012:secret:sc/staging/email/resend/api-key-a"
+    serpapi_api_key            = "arn:aws:secretsmanager:eu-west-1:123456789012:secret:sc/staging/search/serpapi/api-key-a"
+    exa_api_key                = "arn:aws:secretsmanager:eu-west-1:123456789012:secret:sc/staging/search/exa/api-key-a"
     paystack_secret_key        = "arn:aws:secretsmanager:eu-west-1:123456789012:secret:sc/staging/paystack/secret-key-a"
     paystack_public_key        = "arn:aws:secretsmanager:eu-west-1:123456789012:secret:sc/staging/paystack/public-key-a"
     paystack_webhook_secret    = "arn:aws:secretsmanager:eu-west-1:123456789012:secret:sc/staging/paystack/webhook-secret-a"
@@ -90,6 +92,27 @@ variables {
   github_repository_owner_id = "289108209"
   github_environment_name    = "staging"
   github_deployment_ref      = "refs/heads/staging"
+}
+
+run "allows_authentication_email_secret_only_to_email_services" {
+  command = plan
+
+  assert {
+    condition = contains(one([
+      for statement in jsondecode(aws_iam_role_policy.task["api-service"].policy).Statement :
+      statement if statement.Sid == "ReadAssignedSecrets"
+    ]).Resource, var.secret_arns["resend_api_key"])
+    error_message = "The API task must be able to read the Resend key to send login emails."
+  }
+
+  assert {
+    condition = alltrue([
+      for service, policy in aws_iam_role_policy.task :
+      contains(["api-service", "delivery-worker", "digest-worker"], service) ||
+      !strcontains(policy.policy, var.secret_arns["resend_api_key"])
+    ])
+    error_message = "Resend access must remain limited to the API and existing email workers."
+  }
 }
 
 run "creates_dedicated_roles_for_complete_service_catalogue" {
@@ -179,6 +202,7 @@ run "maps_pipeline_permissions_to_real_transitions" {
       for statement in jsondecode(aws_iam_role_policy.task["api-service"].policy).Statement :
       toset(statement.Resource) == toset([
         "arn:aws:sqs:eu-west-1:123456789012:sc-ingestion-priority-staging",
+        "arn:aws:sqs:eu-west-1:123456789012:sc-pipeline-validated-staging",
         "arn:aws:sqs:eu-west-1:123456789012:sc-pipeline-synthesized-staging",
         "arn:aws:sqs:eu-west-1:123456789012:sc-feedback-events-staging",
         ]) && toset(statement.Action) == toset([

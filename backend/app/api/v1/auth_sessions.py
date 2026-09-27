@@ -18,6 +18,7 @@ from sqlalchemy import text
 
 from app.api.auth import RequestContext, get_request_context
 from app.authn import hash_password, verify_password, verify_totp
+from app.authn.email import send_login_code
 from app.core.config import get_settings
 from app.core.database import get_session
 from app.core.redis import get_redis_client
@@ -47,6 +48,35 @@ class LoginInput(BaseModel):
 
 class AdminMfaLoginInput(LoginInput):
     totp_code: str = Field(min_length=6, max_length=8)
+
+
+class OtpRequestInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    email: str = Field(min_length=3, max_length=320)
+
+    @field_validator("email")
+    @classmethod
+    def normalise_email(cls, value: str) -> str:
+        return LoginInput.normalise_email(value)
+
+
+class OtpVerifyInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    email: str = Field(min_length=3, max_length=320)
+    otp_code: str = Field(min_length=6, max_length=6)
+
+    @field_validator("email")
+    @classmethod
+    def normalise_email(cls, value: str) -> str:
+        return LoginInput.normalise_email(value)
+
+    @field_validator("otp_code")
+    @classmethod
+    def validate_code(cls, value: str) -> str:
+        cleaned = "".join(value.split())
+        if not cleaned.isdigit() or len(cleaned) != 6:
+            raise ValueError("OTP code must be a 6-digit numeric code")
+        return cleaned
 
 
 class RegisterInput(BaseModel):
@@ -251,6 +281,264 @@ async def login(
     raise HTTPException(
         status.HTTP_503_SERVICE_UNAVAILABLE, "Sign-in is temporarily unavailable"
     )
+
+
+@router.post("/otp/request", status_code=status.HTTP_200_OK)
+async def request_otp(body: OtpRequestInput, request: Request) -> dict[str, Any]:
+    """Request a 6-digit passwordless OTP for email verification and login."""
+    await _enforce_rate_limit(request, body.email, required=True)
+    otp_code = f"{secrets.randbelow(1_000_000):06d}"
+    otp_hash = hashlib.sha256(otp_code.encode()).hexdigest()
+
+    async for session in get_session():
+        await session.execute(
+            text("SELECT pg_advisory_xact_lock(hashtextextended(:email, 0))"),
+            {"email": body.email},
+        )
+        await session.execute(
+            text("UPDATE auth.otp_verifications SET is_used = TRUE "
+                 "WHERE LOWER(email) = :email AND purpose = 'LOGIN' AND NOT is_used"),
+            {"email": body.email},
+        )
+        await session.execute(
+            text(
+                """
+                INSERT INTO auth.otp_verifications (
+                    email, otp_code_hash, purpose, expires_at
+                ) VALUES (
+                    :email, :otp_hash, 'LOGIN', NOW() + INTERVAL '15 minutes'
+                )
+                """
+            ),
+            {"email": body.email, "otp_hash": otp_hash},
+        )
+        try:
+            await send_login_code(body.email, otp_code)
+        except Exception:
+            await session.rollback()
+            logger.warning("Login code email delivery failed")
+            raise HTTPException(
+                status.HTTP_503_SERVICE_UNAVAILABLE,
+                "Unable to send a sign-in code. Please try again later.",
+            ) from None
+        await session.commit()
+        return {
+            "success": True,
+            "message": "A 6-digit verification code has been dispatched to your email address.",
+            "email": body.email,
+        }
+    raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "Auth service temporarily unavailable")
+
+
+@router.post("/otp/verify", response_model=AccessTokenResponse)
+async def verify_otp(
+    body: OtpVerifyInput, request: Request, response: Response
+) -> AccessTokenResponse:
+    """Verify 6-digit OTP; signs in existing user or auto-creates workspace for new user."""
+    await _enforce_rate_limit(request, body.email, required=True)
+    async for session in get_session():
+        await session.execute(
+            text("SELECT pg_advisory_xact_lock(hashtextextended(:email, 0))"),
+            {"email": body.email},
+        )
+        otp_row = (
+            await session.execute(
+                text(
+                    """
+                    SELECT id, otp_code_hash, attempts, expires_at, is_used
+                    FROM auth.otp_verifications
+                    WHERE LOWER(email) = :email
+                      AND purpose = 'LOGIN'
+                    ORDER BY created_at DESC
+                    LIMIT 1
+                    FOR UPDATE
+                    """
+                ),
+                {"email": body.email},
+            )
+        ).mappings().one_or_none()
+
+        if otp_row is None or otp_row["is_used"]:
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                "No active OTP request found for this email. Request a new code.",
+            )
+
+        if otp_row["attempts"] >= 5:
+            raise HTTPException(
+                status.HTTP_429_TOO_MANY_REQUESTS,
+                "Too many failed OTP verification attempts. Request a new code.",
+            )
+
+        if otp_row["expires_at"] <= datetime.now(UTC):
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                "Verification code has expired. Request a new code.",
+            )
+
+        # Increment attempts counter
+        await session.execute(
+            text("UPDATE auth.otp_verifications SET attempts = attempts + 1 WHERE id = :id"),
+            {"id": otp_row["id"]},
+        )
+
+        expected_hash = hashlib.sha256(body.otp_code.encode()).hexdigest()
+        if not hmac.compare_digest(expected_hash, otp_row["otp_code_hash"]):
+            await session.commit()
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Invalid 6-digit verification code")
+
+        # Mark OTP as used
+        await session.execute(
+            text("UPDATE auth.otp_verifications SET is_used = TRUE WHERE id = :id"),
+            {"id": otp_row["id"]},
+        )
+
+        # Check if user already exists
+        tenant_id = (
+            await session.execute(
+                text("SELECT tenant_id FROM auth.login_identities WHERE LOWER(email) = :email"),
+                {"email": body.email},
+            )
+        ).scalar_one_or_none()
+
+        if tenant_id is not None:
+            # Existing user login
+            await session.execute(
+                text("SELECT set_config('app.current_tenant_id', :tenant_id, true)"),
+                {"tenant_id": str(tenant_id)},
+            )
+            row = (
+                await session.execute(
+                    text(
+                        """
+                        SELECT users.id, users.tenant_id, users.email, users.display_name,
+                               users.permission_role, users.password_hash,
+                               users.onboarding_completed_at, users.is_superuser,
+                               users.stage_b_completed, users.decision_lens,
+                               users.business_function,
+                               tenants.name AS tenant_name,
+                               tenants.subscription_tier, tenants.stage_a_completed
+                        FROM auth.users AS users
+                        JOIN auth.tenants AS tenants ON tenants.id = users.tenant_id
+                        WHERE users.tenant_id = :tenant_id
+                          AND LOWER(users.email) = :email
+                          AND users.status = 'ACTIVE'
+                        """
+                    ),
+                    {"tenant_id": tenant_id, "email": body.email},
+                )
+            ).mappings().one_or_none()
+
+            if row is not None:
+                return await _issue_session(session, row, request, response)
+            raise HTTPException(status.HTTP_403_FORBIDDEN, "Account is unavailable")
+
+        # New user auto-provisioning
+        tenant_id = uuid4()
+        user_id = uuid4()
+        started_at = datetime.now(UTC)
+        pilot_expires = started_at + timedelta(days=14)
+        domain_name = body.email.split("@")[0].replace(".", " ").title()
+        company_name = f"{domain_name} Org"
+        slug = _workspace_slug(company_name, tenant_id)
+
+        await session.execute(
+            text("SELECT set_config('app.current_tenant_id', :tenant_id, true)"),
+            {"tenant_id": str(tenant_id)},
+        )
+        await session.execute(
+            text(
+                """
+                INSERT INTO auth.tenants (
+                    id, name, slug, plan_tier, status,
+                    subscription_tier, pilot_expires_at,
+                    monthly_workspace_query_limit, queries_used_this_period,
+                    stage_a_completed
+                ) VALUES (
+                    :tenant_id, :company_name, :slug, 'TRIAL', 'TRIAL',
+                    'pilot', :pilot_expires, 30, 0, FALSE
+                )
+                """
+            ),
+            {
+                "tenant_id": tenant_id,
+                "company_name": company_name,
+                "slug": slug,
+                "pilot_expires": pilot_expires,
+            },
+        )
+        await session.execute(
+            text(
+                """
+                INSERT INTO auth.users (
+                    id, tenant_id, email, display_name,
+                    permission_role, status, password_hash,
+                    is_superuser, stage_b_completed, email_verified
+                ) VALUES (
+                    :user_id, :tenant_id, :email, :display_name,
+                    'ADMIN', 'ACTIVE', 'OTP_AUTHENTICATED',
+                    FALSE, FALSE, TRUE
+                )
+                """
+            ),
+            {
+                "user_id": user_id,
+                "tenant_id": tenant_id,
+                "email": body.email,
+                "display_name": domain_name,
+            },
+        )
+        await session.execute(
+            text(
+                """
+                INSERT INTO auth.login_identities (email, tenant_id, user_id)
+                VALUES (:email, :tenant_id, :user_id)
+                """
+            ),
+            {"email": body.email, "tenant_id": tenant_id, "user_id": user_id},
+        )
+        await session.execute(
+            text(
+                """
+                INSERT INTO billing.subscriptions (
+                    tenant_id, plan_code, status, trial_started_at, trial_ends_at
+                ) VALUES (
+                    :tenant_id, 'pilot', 'TRIALING', :started_at, :trial_ends_at
+                )
+                """
+            ),
+            {
+                "tenant_id": tenant_id,
+                "started_at": started_at,
+                "trial_ends_at": pilot_expires,
+            },
+        )
+        await session.execute(
+            text(
+                """
+                INSERT INTO organizations.company_context (organization_id)
+                VALUES (:tenant_id)
+                ON CONFLICT (organization_id) DO NOTHING
+                """
+            ),
+            {"tenant_id": tenant_id},
+        )
+
+        user_row = {
+            "id": user_id,
+            "tenant_id": tenant_id,
+            "email": body.email,
+            "display_name": domain_name,
+            "permission_role": "ADMIN",
+            "tenant_name": company_name,
+            "is_superuser": False,
+            "stage_a_completed": False,
+            "stage_b_completed": False,
+            "subscription_tier": "pilot",
+        }
+        return await _issue_session(session, user_row, request, response)
+
+    raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "Auth service temporarily unavailable")
 
 
 @router.post("/admin/mfa", response_model=AccessTokenResponse)
@@ -789,9 +1077,11 @@ def _encode(value: bytes) -> str:
     return base64.urlsafe_b64encode(value).rstrip(b"=").decode()
 
 
-async def _enforce_rate_limit(request: Request, email: str) -> None:
+async def _enforce_rate_limit(request: Request, email: str, *, required: bool = False) -> None:
     client = get_redis_client()
     if client is None:
+        if required:
+            raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "Sign-in is temporarily unavailable")
         return
     source = request.client.host if request.client else "unknown"
     key = "auth:login:" + hashlib.sha256(f"{source}:{email}".encode()).hexdigest()
@@ -808,3 +1098,5 @@ async def _enforce_rate_limit(request: Request, email: str) -> None:
         raise
     except Exception:
         logger.exception("Authentication rate limiter is unavailable")
+        if required:
+            raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "Sign-in is temporarily unavailable") from None

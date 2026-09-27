@@ -28,12 +28,12 @@ async def test_signal_detail_collapses_duplicate_evidence_and_returns_metrics(pi
             id, tenant_id, source_id, title, body_text, body_text_hash,
             source_url, canonical_url, published_at, detected_at,
             primary_domain, subcategory_tags, confidence_band, urgency_band,
-            pipeline_stage, dedup_status
+            pipeline_stage, dedup_status, signal_type
         )
         SELECT :dup_id, tenant_id, source_id, 'Duplicate Story Title', body_text, body_text_hash,
                source_url, canonical_url, published_at, detected_at,
                primary_domain, subcategory_tags, confidence_band, urgency_band,
-               'SCORED', 'ORIGINAL'
+               'SCORED', 'ORIGINAL', signal_type
         FROM pipeline.signals
         WHERE id = :signal_id
         """),
@@ -45,8 +45,8 @@ async def test_signal_detail_collapses_duplicate_evidence_and_returns_metrics(pi
         text("""
         UPDATE intelligence.global_outputs
         SET citations = jsonb_build_array(
-            jsonb_build_object('source_signal_id', :sig1, 'claim_index', 0),
-            jsonb_build_object('source_signal_id', :sig2, 'claim_index', 1)
+            jsonb_build_object('source_signal_id', CAST(:sig1 AS text), 'claim_index', 0),
+            jsonb_build_object('source_signal_id', CAST(:sig2 AS text), 'claim_index', 1)
         )
         WHERE id = :output_id
         """),

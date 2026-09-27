@@ -52,69 +52,47 @@ function RadarContent() {
   const [artifacts, setArtifacts] = useState<IntelligenceArtifact[]>([]);
   const [onboarding, setOnboarding] = useState<OnboardingStatus | null>(null);
   const [domainFilter, setDomainFilter] = useState<string>("ALL");
-  const [lastRefreshed, setLastRefreshed] = useState<Date>(new Date());
-
-  // Urgent action checklist state (optimistic)
-  const [urgentTasks, setUrgentTasks] = useState([
-    {
-      id: "tsk-1",
-      title: "File updated operational SOP with CBN Consumer Protection Dept",
-      deadline: "Day 7",
-      owner: "Compliance Director",
-      completed: false,
-    },
-    {
-      id: "tsk-2",
-      title: "Enforce dual-approval threshold for batch virtual account settlements",
-      deadline: "Day 14",
-      owner: "Head of Settlement",
-      completed: false,
-    },
-    {
-      id: "tsk-3",
-      title: "Activate failover routing probe to Wema ALAT Secondary Rail",
-      deadline: "Immediate",
-      owner: "Lead Platform Engineer",
-      completed: true,
-    },
-  ]);
+  const [lastRefreshed, setLastRefreshed] = useState<Date | null>(null);
+  const [loadError, setLoadError] = useState("");
+  const [telemetryError, setTelemetryError] = useState("");
 
   async function loadData() {
     try {
       const [telemRes, signalsRes, artifactsRes, statusRes] = await Promise.all([
-        getTelemetry(),
+        getTelemetry().then((result) => {
+          setTelemetryError("");
+          return result;
+        }).catch((error: unknown) => {
+          setTelemetryError(error instanceof Error ? error.message : "Telemetry is unavailable.");
+          return null;
+        }),
         getRadarSignals({ limit: 20 }),
         listArtifacts({ limit: 10 }),
         getOnboardingStatus().catch(() => null),
       ]);
 
       setTelemetry(telemRes);
+      setLoadError("");
       const rawSignals = (signalsRes.signals || signalsRes.items || []) as SignalItem[];
       setSignals(rawSignals);
       setArtifacts(artifactsRes.items || []);
       if (statusRes) setOnboarding(statusRes);
       setLastRefreshed(new Date());
     } catch (err) {
-      console.error("Failed to load radar intelligence:", err);
+      setLoadError(err instanceof Error ? err.message : "Radar intelligence is unavailable.");
     } finally {
       setLoading(false);
     }
   }
 
   useEffect(() => {
-    void loadData();
+    const initial = setTimeout(() => void loadData(), 0);
     // Auto refresh pulse every 30 seconds
     const timer = setInterval(() => {
       void loadData();
     }, 30000);
-    return () => clearInterval(timer);
+    return () => { clearTimeout(initial); clearInterval(timer); };
   }, []);
-
-  function toggleTask(id: string) {
-    setUrgentTasks((prev) =>
-      prev.map((t) => (t.id === id ? { ...t, completed: !t.completed } : t))
-    );
-  }
 
   const filteredSignals = signals.filter((sig) => {
     if (domainFilter === "ALL") return true;
@@ -128,14 +106,13 @@ function RadarContent() {
         <div>
           <div className="flex items-center gap-2.5">
             <span className="relative flex h-3 w-3">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
-              <span className="relative inline-flex rounded-full h-3 w-3 bg-emerald-500" />
+              <span className="relative inline-flex rounded-full h-3 w-3 bg-slate-400" />
             </span>
             <span className="text-xs font-bold uppercase tracking-wider text-slate-500">
-              Live Ecosystem Radar · Pulse Active
+              {loadError ? "Radar refresh unavailable" : "Ecosystem Radar"}
             </span>
             <span className="text-[11px] font-mono text-slate-400">
-              Updated {lastRefreshed.toLocaleTimeString()}
+              {lastRefreshed ? `Last loaded ${lastRefreshed.toLocaleTimeString()}` : "Awaiting data"}
             </span>
           </div>
           <h1 className="mt-2 text-2xl sm:text-3xl font-black tracking-tight text-slate-900">
@@ -144,7 +121,7 @@ function RadarContent() {
               : "Executive Radar & Threat Monitor"}
           </h1>
           <p className="mt-1 text-xs sm:text-sm text-slate-600 max-w-3xl">
-            Real-time multi-node rail health, promoted CBN circulars, and prioritized commercial counter-measures grounded in tenant license dependencies.
+            Recorded intelligence and company-specific assessments. Live rail health is available only when a measurement source is connected.
           </p>
         </div>
 
@@ -167,6 +144,9 @@ function RadarContent() {
       </div>
 
       {/* Real-Time Telemetry Node Row */}
+      {loadError && <p role="alert" className="text-sm text-red-700">{loadError} <button onClick={() => void loadData()} type="button">Retry</button></p>}
+      {telemetryError && <p role="status" className="text-sm text-slate-600">Telemetry unavailable: {telemetryError}</p>}
+      {!loading && !telemetryError && !telemetry?.nodes?.length && <p className="text-sm text-slate-600">No measured rail telemetry is available.</p>}
       {loading ? (
         <TelemetrySkeleton />
       ) : (
@@ -312,7 +292,7 @@ function RadarContent() {
 
                     <div className="mt-3.5 pt-3 border-t border-slate-100 flex items-center justify-between text-xs">
                       <span className="text-slate-500 text-[11px]">
-                        Corroboration: <strong className="text-slate-700">{signal.corroboration_strength || "VERIFIED"}</strong>
+                        Corroboration: <strong className="text-slate-700">{signal.corroboration_strength || "Not assessed"}</strong>
                       </span>
                       <button
                         type="button"
@@ -335,58 +315,7 @@ function RadarContent() {
 
         {/* Right Column (1 Col): Urgent Executive Action Checklist & Top Decision Units */}
         <div className="space-y-6">
-          {/* Urgent Checklist Card */}
-          <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-[0_1px_2px_rgba(0,0,0,0.05)] space-y-4">
-            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-              <h3 className="text-sm font-bold text-slate-900 tracking-tight">
-                Urgent Remediation Checklist
-              </h3>
-              <span className="text-[11px] font-semibold text-slate-500">
-                {urgentTasks.filter((t) => t.completed).length} of {urgentTasks.length} Done
-              </span>
-            </div>
-
-            <div className="space-y-2.5">
-              {urgentTasks.map((task) => (
-                <label
-                  key={task.id}
-                  className={`flex items-start gap-3 p-3 rounded-xl border transition cursor-pointer ${
-                    task.completed
-                      ? "border-emerald-200 bg-emerald-50/40"
-                      : "border-slate-200 bg-white hover:bg-slate-50/50"
-                  }`}
-                >
-                  <input
-                    type="checkbox"
-                    checked={task.completed}
-                    onChange={() => toggleTask(task.id)}
-                    className="mt-0.5 h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
-                  />
-                  <div className="flex-1 min-w-0">
-                    <div
-                      className={`text-xs font-semibold leading-snug ${
-                        task.completed ? "line-through text-slate-400" : "text-slate-800"
-                      }`}
-                    >
-                      {task.title}
-                    </div>
-                    <div className="mt-1 flex items-center justify-between text-[10px] text-slate-500">
-                      <span>Owner: {task.owner}</span>
-                      <span className="font-mono font-semibold text-red-600">Due: {task.deadline}</span>
-                    </div>
-                  </div>
-                </label>
-              ))}
-            </div>
-
-            <Link
-              href="/artifacts?type=gap_matrix"
-              className="mt-2 block text-center rounded-xl bg-slate-50 py-2.5 text-xs font-bold text-slate-700 hover:bg-slate-100 border border-slate-200 transition"
-            >
-              Open Full Compliance Matrix Audit →
-            </Link>
-          </div>
-
+          <div className="rounded-2xl border border-slate-200 bg-white p-6"><h3 className="text-sm font-bold text-slate-900">Compliance actions</h3><p className="mt-2 text-sm text-slate-600">Review the actions and evidence recorded in your company&apos;s compliance assessments.</p><Link className="mt-3 block text-sm text-blue-700" href="/artifacts?type=gap_matrix">Open compliance assessments</Link></div>
           {/* Quick Decision Units Hub */}
           <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-[0_1px_2px_rgba(0,0,0,0.05)] space-y-4">
             <h3 className="text-sm font-bold text-slate-900 tracking-tight">
@@ -407,7 +336,7 @@ function RadarContent() {
                   </span>
                 </div>
                 <p className="mt-1 text-[11px] text-slate-500 leading-snug">
-                  Zango model: Split-pane circular comparison, live action checks, statutory fine ticker.
+                  Review circulars, policy evidence, and recorded remediation actions.
                 </p>
               </Link>
 
@@ -424,7 +353,7 @@ function RadarContent() {
                   </span>
                 </div>
                 <p className="mt-1 text-[11px] text-slate-500 leading-snug">
-                  Klue model: One-click sales talk track copier, stance toggle, trap-setting accordions.
+                  Review competitor assessments, commercial responses, and supporting evidence.
                 </p>
               </Link>
 
@@ -441,7 +370,7 @@ function RadarContent() {
                   </span>
                 </div>
                 <p className="mt-1 text-[11px] text-slate-500 leading-snug">
-                  CB Insights model: Pulsing degraded heartbeat, failover routing simulator, merchant notices.
+                  Review recorded rail assessments. Live routing and failover are not connected.
                 </p>
               </Link>
             </div>

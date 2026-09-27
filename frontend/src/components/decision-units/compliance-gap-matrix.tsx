@@ -1,29 +1,32 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { updateActionItemStatus } from "@/lib/api";
 import type { ActionItem, IntelligenceArtifact } from "@/lib/types";
 
 export function ComplianceGapMatrix({artifact, onUpdate}: {artifact: IntelligenceArtifact; onUpdate?: (value: IntelligenceArtifact) => void}) {
   const payload = artifact.payload;
-  const [actions, setActions] = useState<ActionItem[]>([]);
+  const [savedPayload, setSavedPayload] = useState(payload);
+  const [overrides, setOverrides] = useState<Record<string, boolean>>({});
+  if (savedPayload !== payload) {
+    setSavedPayload(payload);
+    setOverrides({});
+  }
   const [error, setError] = useState("");
   const [busy, setBusy] = useState("");
-  useEffect(() => {
-    const state = payload.remediation_state || {};
-    setActions((payload.corrective_actions || payload.action_plan || payload.checklist || []).map((item: ActionItem, index: number) => {
+  const state = payload.remediation_state || {};
+  const actions = (payload.corrective_actions || payload.action_plan || payload.checklist || []).map((item: ActionItem, index: number) => {
       const id = item.id || item.action_id || `act-${index}`;
-      return {...item, id, completed: state[id]?.completed ?? Boolean(item.completed)};
-    }));
-  }, [payload]);
+      return {...item, id, completed: overrides[id] ?? state[id]?.completed ?? Boolean(item.completed)};
+    });
   async function toggle(item: ActionItem) {
     const id = item.id || "";
     setBusy(id); setError("");
     try {
       const updated = await updateActionItemStatus(artifact.id, id, !item.completed);
       if (updated?.payload) onUpdate?.({...artifact, payload: updated.payload});
-      setActions(previous => previous.map(action => action.id === id ? {...action, completed: !item.completed} : action));
+      setOverrides(previous => ({...previous, [id]: !item.completed}));
     } catch (err) { setError(err instanceof Error ? err.message : "Could not update action"); }
     finally { setBusy(""); }
   }

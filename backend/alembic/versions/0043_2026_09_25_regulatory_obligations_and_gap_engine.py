@@ -210,3 +210,4 @@ def downgrade():
     for table in ("pipeline.marketing_checks", "audit.compliance_gap_events", "pipeline.compliance_gap_audits", "pipeline.compliance_gap_runs", "organizations.policy_chunks", "organizations.tenant_policies", "pipeline.regulatory_obligations", "pipeline.regulatory_extractions"):
         op.execute(f"DROP TABLE {table}")
     # The vector extension is shared with signal_embeddings; never remove it here.
+    op.execute("REVOKE USAGE ON SCHEMA organizations FROM sc_app_runtime")

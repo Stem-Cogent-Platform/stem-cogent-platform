@@ -33,9 +33,13 @@ type SearchResults = {
 };
 
 function Results() {
-  const router = useRouter();
   const params = useSearchParams();
   const initialQuery = params.get("q")?.trim() ?? "";
+  return <SearchResultsContent key={initialQuery} initialQuery={initialQuery} />;
+}
+
+function SearchResultsContent({initialQuery}: {initialQuery: string}) {
+  const router = useRouter();
 
   const [inputQuery, setInputQuery] = useState(initialQuery);
   const [state, setState] = useState<LoadState<SearchResults>>({ status: "loading" });
@@ -44,9 +48,6 @@ function Results() {
     suggested?: string[];
   } | null>(null);
 
-  useEffect(() => {
-    setInputQuery(initialQuery);
-  }, [initialQuery]);
 
   const load = useCallback(async () => {
     if (initialQuery.length < 2) {

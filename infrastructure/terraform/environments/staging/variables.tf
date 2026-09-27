@@ -222,3 +222,9 @@ variable "ecs_bootstrap_image_tag" {
     error_message = "ecs_bootstrap_image_tag must be a full lowercase 40-character Git commit SHA."
   }
 }
+
+variable "auth_email_from" {
+  description = "Login email From address on a domain verified in Resend. Empty disables OTP delivery."
+  type        = string
+  default     = ""
+}

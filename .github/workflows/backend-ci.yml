@@ -72,11 +72,19 @@ jobs:
       - name: Verify database migrations
         working-directory: backend
         run: |
+          # 0047 deliberately blocks downgrade: tenant-private reports must
+          # never become a shared cache. Exercise reversible history first.
+          alembic upgrade 0046
+          alembic downgrade base
           alembic upgrade head
           alembic current
           alembic history --verbose
-          alembic downgrade base
-          alembic upgrade head
+          if alembic downgrade 0046 > downgrade-guard.log 2>&1; then
+            echo "Tenant-isolation downgrade unexpectedly succeeded." >&2
+            exit 1
+          fi
+          grep -F 'Tenant-scoped reports cannot safely be reverted to a shared cache' downgrade-guard.log
+          alembic current | grep -E '^0047 \(head\)'
         env:
           DATABASE_URL: postgresql://sc_test:sc_test@127.0.0.1:${{ job.services.postgres.ports[5432] }}/sc_test
           ENVIRONMENT: test
