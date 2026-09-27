@@ -63,6 +63,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+    volumes:
+      - ../../backend:/app
 
   frontend:
     build:

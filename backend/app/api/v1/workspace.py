@@ -7,9 +7,11 @@ conversational history, and grounded agent synthesis endpoints.
 from __future__ import annotations
 
 import json
+from typing import Any, Literal
 from uuid import UUID, uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response as FastApiResponse, status
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import text
 
 from app.agent.decision_agent import DecisionAgent, DecisionAgentError
@@ -207,6 +209,7 @@ async def post_session_message(
             user_id=context.principal.user_id,
             user_query=payload.content,
             mode=payload.mode,
+            search_live_web=payload.search_live_web or payload.live_search,
             session=context.session,
         )
         await context.session.commit()
@@ -221,3 +224,70 @@ async def post_session_message(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Agent investigation could not be completed. Please retry.",
         ) from exc
+
+
+class ExportRequest(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    format: Literal["md", "txt", "pdf"]
+    title: str = "Executive Decision Brief"
+    operational_exposure: str = ""
+    context_and_precedents: str = ""
+    role_action_items: list[dict[str, Any]] = Field(default_factory=list)
+    citations: list[dict[str, Any]] = Field(default_factory=list)
+
+
+@router.post("/export", summary="Export working canvas brief in md, txt, or pdf format")
+async def export_brief(
+    payload: ExportRequest,
+    context: RequestContext = Depends(get_request_context),
+) -> FastApiResponse:
+    """Export Working Canvas into Markdown, Plain Text, or styled Executive PDF."""
+    from app.decision.exporter import (
+        export_executive_pdf,
+        export_markdown,
+        export_plaintext,
+    )
+
+    require_permission(context, "READ_INTELLIGENCE")
+
+    tenant_name = "PayBridge Sim Ltd"
+    try:
+        t_row = (await context.session.execute(
+            text("SELECT name FROM auth.tenants WHERE id = :id"),
+            {"id": context.principal.tenant_id}
+        )).scalar_one_or_none()
+        if t_row:
+            tenant_name = t_row
+    except Exception:
+        pass
+
+    if payload.format == "md":
+        content = export_markdown(
+            title=payload.title,
+            operational_exposure=payload.operational_exposure,
+            context_and_precedents=payload.context_and_precedents,
+            role_action_items=payload.role_action_items,
+            citations=payload.citations,
+            organization_name=tenant_name,
+        )
+        return FastApiResponse(content=content, media_type="text/markdown; charset=utf-8")
+    elif payload.format == "txt":
+        content = export_plaintext(
+            title=payload.title,
+            operational_exposure=payload.operational_exposure,
+            context_and_precedents=payload.context_and_precedents,
+            role_action_items=payload.role_action_items,
+            citations=payload.citations,
+            organization_name=tenant_name,
+        )
+        return FastApiResponse(content=content, media_type="text/plain; charset=utf-8")
+    else:
+        pdf_bytes = export_executive_pdf(
+            title=payload.title,
+            operational_exposure=payload.operational_exposure,
+            context_and_precedents=payload.context_and_precedents,
+            role_action_items=payload.role_action_items,
+            citations=payload.citations,
+            organization_name=tenant_name,
+        )
+        return FastApiResponse(content=pdf_bytes, media_type="application/pdf")

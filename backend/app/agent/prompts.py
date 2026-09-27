@@ -61,7 +61,7 @@ REGIONAL_INDICATOR_PATTERN = re.compile(
 # Triggers for live web search lookup
 SEARCH_TRIGGER_PATTERN = re.compile(
     r"\b(search|look\s*up|find\s*out|latest|recent|news|today|yesterday|current\s*event|"
-    r"market\s*move|rumou?r|announced|launch(ed)?|breaking|update|circular|status)\b",
+    r"market\s*move|rumou?r|announced|launch(ed)?|breaking|update|circular|status|latency|outage|downtime)\b",
     re.IGNORECASE,
 )
 

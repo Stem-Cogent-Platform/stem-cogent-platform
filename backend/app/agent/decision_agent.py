@@ -75,6 +75,7 @@ class DecisionAgent:
         user_query: str,
         session: AsyncSession,
         mode: str = "auto",
+        search_live_web: bool = False,
     ) -> TurnResponse:
         """Execute one complete investigation turn for an authenticated tenant session."""
 
@@ -159,7 +160,8 @@ class DecisionAgent:
             research = await competitive_research(session, organization_id, user_query,
                 client=self._generation_client, search_fn=self._search_fn)
             tool_provenance = {'competitive_research': research}
-        if not competitive and should_trigger_live_search(user_query, len(internal_artifacts)):
+        should_search = search_live_web or (not competitive and should_trigger_live_search(user_query, len(internal_artifacts)))
+        if should_search:
             try:
                 search_res = await self._search_fn(
                     query=user_query,

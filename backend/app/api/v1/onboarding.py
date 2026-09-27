@@ -176,6 +176,24 @@ async def submit_stage_a_company(
         },
     )
 
+    # 2b. Upsert organizations.company_context with custom tags
+    custom_tags = [t for t in (body.operating_licenses + body.clearing_rails) if t.startswith("CUSTOM:")]
+    await context.session.execute(
+        text(
+            """
+            INSERT INTO organizations.company_context (
+                organization_id, relevance_suppression_tags
+            ) VALUES (
+                :tenant_id, CAST(:tags AS JSONB)
+            )
+            ON CONFLICT (organization_id) DO UPDATE SET
+                relevance_suppression_tags = EXCLUDED.relevance_suppression_tags,
+                updated_at = NOW()
+            """
+        ),
+        {"tenant_id": tenant_id, "tags": __import__("json").dumps(custom_tags)},
+    )
+
     await context.session.commit()
 
     # 3. Asynchronously dispatch Celery bootstrap task

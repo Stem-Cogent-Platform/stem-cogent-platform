@@ -127,6 +127,8 @@ class SessionListResponse(BaseModel):
 
 class MessageCreateRequest(BaseModel):
     mode: Literal["auto", "competitive", "general"] = "auto"
+    search_live_web: bool = False
+    live_search: bool = False
     model_config = ConfigDict(extra="forbid")
 
     content: str = Field(

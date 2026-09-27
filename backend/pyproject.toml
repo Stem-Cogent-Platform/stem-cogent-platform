@@ -2,6 +2,7 @@
 pythonpath = ["."]
 markers = [
   "integration: tests that require the local PostgreSQL and Redis services",
+  "e2e: end-to-end full pilot user journey simulation tests",
 ]
 
 [tool.ruff]

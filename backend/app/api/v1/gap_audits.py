@@ -158,6 +158,7 @@ async def review(audit_id: UUID, payload: ReviewRequest, event_type: str, contex
     return dict(updated)
 
 
+@router.post('/{audit_id}/override')
 @router.patch('/{audit_id}/override')
 async def override(audit_id: UUID,payload: ReviewRequest,context: RequestContext=Depends(get_request_context)):
     return await review(audit_id,payload,'override',context)
