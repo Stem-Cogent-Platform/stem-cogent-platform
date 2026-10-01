@@ -46,10 +46,14 @@ export async function login(input: { email: string; password: string; workspace_
 }
 
 export async function register(input: {
-  company_name: string;
-  display_name: string;
+  company_name?: string;
+  display_name?: string;
+  full_name?: string;
+  username?: string;
   email: string;
   password: string;
+  confirm_password?: string;
+  terms_accepted?: boolean;
 }) {
   const response = await rawRequest<AuthResponse>("/api/v1/auth/register", {
     method: "POST",
@@ -57,6 +61,26 @@ export async function register(input: {
   });
   storeSession(response, "");
   return response;
+}
+
+export async function forgotPassword(input: { email: string }) {
+  return rawRequest<{ success: boolean; message: string; reset_token?: string }>(
+    "/api/v1/auth/forgot-password",
+    {
+      method: "POST",
+      body: JSON.stringify(input)
+    }
+  );
+}
+
+export async function resetPassword(input: { token: string; password: string }) {
+  return rawRequest<{ success: boolean; message: string }>(
+    "/api/v1/auth/reset-password",
+    {
+      method: "POST",
+      body: JSON.stringify(input)
+    }
+  );
 }
 
 export async function adminMfaLogin(input: {

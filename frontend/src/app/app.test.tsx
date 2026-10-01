@@ -12,14 +12,17 @@ import RootLayout, { metadata } from "./layout";
 import HomePage from "./page";
 
 describe("HomePage", () => {
-  it("renders public account creation rather than legal consent", () => {
+  it("renders public account creation with full-viewport split layout and password auth", () => {
     const markup = renderToStaticMarkup(<HomePage />);
 
-    expect(markup).toContain("Create an enterprise workspace");
-    expect(markup).toContain("Send Verification Code");
+    expect(markup).toContain("Get Started Now");
+    expect(markup).toContain("Create Account");
     expect(markup).toContain('type="email"');
-    expect(markup).not.toContain('type="password"');
-    expect(markup).not.toContain("Legal consent");
+    expect(markup).toContain('type="password"');
+    expect(markup).toContain("Real-Time Decision Intelligence for African Fintechs");
+    expect(markup).toContain("Providus Latency");
+    expect(markup).not.toContain("4,131+ Indexed");
+    expect(markup).not.toContain("Passwordless Verification");
   });
 });
 

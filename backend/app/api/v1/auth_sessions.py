@@ -13,11 +13,11 @@ from typing import Any
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, Response, status
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from sqlalchemy import text
 
 from app.api.auth import RequestContext, get_request_context
-from app.authn import hash_password, verify_password, verify_totp
+from app.authn import hash_password, validate_password_complexity, verify_password, verify_totp
 from app.authn.email import send_login_code
 from app.core.config import get_settings
 from app.core.database import get_session
@@ -80,21 +80,49 @@ class OtpVerifyInput(BaseModel):
 
 
 class RegisterInput(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    company_name: str = Field(min_length=2, max_length=255)
-    display_name: str = Field(min_length=2, max_length=255)
+    model_config = ConfigDict(extra="ignore")
+    full_name: str | None = None
+    username: str | None = None
+    company_name: str | None = None
+    display_name: str | None = None
     email: str = Field(min_length=3, max_length=320)
-    password: str = Field(min_length=12, max_length=256)
-
-    @field_validator("company_name", "display_name")
-    @classmethod
-    def normalise_name(cls, value: str) -> str:
-        return " ".join(value.strip().split())
+    password: str = Field(min_length=8, max_length=256)
+    confirm_password: str | None = None
+    terms_accepted: bool = False
 
     @field_validator("email")
     @classmethod
     def normalise_email(cls, value: str) -> str:
         return LoginInput.normalise_email(value)
+
+    @field_validator("username")
+    @classmethod
+    def validate_username_field(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        cleaned = value.strip().lstrip("@")
+        if not cleaned:
+            return None
+        if len(cleaned) < 2:
+            raise ValueError("Username must be at least 2 characters long")
+        return cleaned
+
+    @field_validator("password")
+    @classmethod
+    def validate_password_field(cls, value: str) -> str:
+        if len(value) < 8:
+            raise ValueError("Password must be at least 8 characters long")
+        if not any(c.isupper() for c in value):
+            raise ValueError("Password must contain at least 1 uppercase letter")
+        if not any(c.isdigit() for c in value):
+            raise ValueError("Password must contain at least 1 number")
+        return value
+
+    @model_validator(mode="after")
+    def validate_password_confirmation(self) -> Any:
+        if self.confirm_password is not None and self.confirm_password != self.password:
+            raise ValueError("Passwords do not match")
+        return self
 
 
 class AccessTokenResponse(BaseModel):
@@ -113,11 +141,39 @@ async def register(
     """Create a public trial workspace and sign its first administrator in."""
 
     await _enforce_rate_limit(request, body.email)
+
+    if not body.terms_accepted:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "Terms of service and privacy policy must be accepted to register.",
+        )
+
+    try:
+        validate_password_complexity(body.password)
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+
+    effective_display_name = (body.full_name or body.display_name or body.username or "").strip()
+    if len(effective_display_name) < 2:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "Full name must contain at least 2 characters.",
+        )
+
+    effective_company_name = (body.company_name or "").strip()
+    if not effective_company_name:
+        domain_part = body.email.split("@")[1].split(".")[0].title()
+        effective_company_name = (
+            f"{effective_display_name}'s {domain_part} Org"
+            if domain_part
+            else f"{effective_display_name}'s Workspace"
+        )
+
     tenant_id = uuid4()
     user_id = uuid4()
     started_at = datetime.now(UTC)
     pilot_expires = started_at + timedelta(days=14)
-    slug = _workspace_slug(body.company_name, tenant_id)
+    slug = _workspace_slug(effective_company_name, tenant_id)
     async for session in get_session():
         existing = (
             await session.execute(
@@ -150,7 +206,7 @@ async def register(
             ),
             {
                 "tenant_id": tenant_id,
-                "company_name": body.company_name,
+                "company_name": effective_company_name,
                 "slug": slug,
                 "pilot_expires": pilot_expires,
             },
@@ -173,7 +229,7 @@ async def register(
                 "user_id": user_id,
                 "tenant_id": tenant_id,
                 "email": body.email,
-                "display_name": body.display_name,
+                "display_name": effective_display_name,
                 "password_hash": hash_password(body.password),
             },
         )
@@ -206,9 +262,9 @@ async def register(
             "id": user_id,
             "tenant_id": tenant_id,
             "email": body.email,
-            "display_name": body.display_name,
+            "display_name": effective_display_name,
             "permission_role": "ADMIN",
-            "tenant_name": body.company_name,
+            "tenant_name": effective_company_name,
             "is_superuser": False,
             "stage_a_completed": False,
             "stage_b_completed": False,
@@ -281,6 +337,175 @@ async def login(
     raise HTTPException(
         status.HTTP_503_SERVICE_UNAVAILABLE, "Sign-in is temporarily unavailable"
     )
+
+
+class ForgotPasswordInput(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    email: str = Field(min_length=3, max_length=320)
+
+    @field_validator("email")
+    @classmethod
+    def normalise_email(cls, value: str) -> str:
+        return LoginInput.normalise_email(value)
+
+
+class ResetPasswordInput(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    token: str = Field(min_length=1)
+    password: str = Field(min_length=8, max_length=256)
+
+    @field_validator("password")
+    @classmethod
+    def validate_password_field(cls, value: str) -> str:
+        return RegisterInput.validate_password_field(value)
+
+
+def _generate_reset_token(user_id: UUID, email: str, secret: str, expires_in_seconds: int = 3600) -> str:
+    expires_at = int(time.time()) + expires_in_seconds
+    payload = json.dumps(
+        {"user_id": str(user_id), "email": email, "exp": expires_at, "purpose": "pwd_reset"},
+        separators=(",", ":"),
+    )
+    payload_b64 = base64.urlsafe_b64encode(payload.encode()).decode().rstrip("=")
+    sig = hmac.new(secret.encode(), payload_b64.encode(), hashlib.sha256).hexdigest()
+    return f"{payload_b64}.{sig}"
+
+
+def _verify_reset_token(token: str, secret: str) -> dict[str, Any] | None:
+    try:
+        parts = token.split(".")
+        if len(parts) != 2:
+            return None
+        payload_b64, sig = parts
+        expected_sig = hmac.new(secret.encode(), payload_b64.encode(), hashlib.sha256).hexdigest()
+        if not hmac.compare_digest(sig, expected_sig):
+            return None
+        payload_json = base64.urlsafe_b64decode(payload_b64 + "=" * (-len(payload_b64) % 4)).decode()
+        data = json.loads(payload_json)
+        if data.get("purpose") != "pwd_reset":
+            return None
+        if data.get("exp", 0) < time.time():
+            return None
+        return data
+    except Exception:
+        return None
+
+
+@router.post("/forgot-password")
+async def forgot_password(body: ForgotPasswordInput, request: Request) -> dict[str, Any]:
+    """Dispatch password reset instructions for an existing active workspace account."""
+    await _enforce_rate_limit(request, body.email)
+    secret = get_secret_string(get_settings().JWT_SIGNING_SECRET_ARN)
+    token = ""
+    async for session in get_session():
+        row = (
+            await session.execute(
+                text(
+                    """
+                    SELECT id, tenant_id, email FROM auth.users
+                    WHERE LOWER(email) = :email AND status = 'ACTIVE'
+                    LIMIT 1
+                    """
+                ),
+                {"email": body.email},
+            )
+        ).mappings().one_or_none()
+
+        if row is not None:
+            token = _generate_reset_token(row["id"], row["email"], secret, expires_in_seconds=3600)
+            token_hash = hashlib.sha256(token.encode()).hexdigest()
+            await session.execute(
+                text(
+                    """
+                    UPDATE auth.otp_verifications
+                    SET is_used = TRUE
+                    WHERE LOWER(email) = :email AND purpose = 'PASSWORD_RESET' AND NOT is_used
+                    """
+                ),
+                {"email": body.email},
+            )
+            await session.execute(
+                text(
+                    """
+                    INSERT INTO auth.otp_verifications (
+                        email, otp_code_hash, purpose, expires_at
+                    ) VALUES (
+                        :email, :token_hash, 'PASSWORD_RESET', NOW() + INTERVAL '1 hour'
+                    )
+                    """
+                ),
+                {"email": body.email, "token_hash": token_hash},
+            )
+            await session.commit()
+            logger.info("Generated password reset token for %s", body.email)
+
+        return {
+            "success": True,
+            "message": "If an active account exists for this email, password reset instructions have been dispatched.",
+            "reset_token": token,
+        }
+
+
+@router.post("/reset-password")
+async def reset_password(body: ResetPasswordInput, request: Request) -> dict[str, Any]:
+    """Validate signed reset token and securely update account password."""
+    secret = get_secret_string(get_settings().JWT_SIGNING_SECRET_ARN)
+    data = _verify_reset_token(body.token, secret)
+    if data is None:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "Invalid or expired password reset token.",
+        )
+
+    try:
+        validate_password_complexity(body.password)
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+
+    token_hash = hashlib.sha256(body.token.encode()).hexdigest()
+    user_id = UUID(data["user_id"])
+
+    async for session in get_session():
+        otp_row = (
+            await session.execute(
+                text(
+                    """
+                    SELECT id, is_used, expires_at FROM auth.otp_verifications
+                    WHERE otp_code_hash = :token_hash AND purpose = 'PASSWORD_RESET'
+                    LIMIT 1
+                    """
+                ),
+                {"token_hash": token_hash},
+            )
+        ).mappings().one_or_none()
+
+        if otp_row is not None and otp_row["is_used"]:
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                "This password reset link has already been used.",
+            )
+
+        new_hash = hash_password(body.password)
+        await session.execute(
+            text(
+                """
+                UPDATE auth.users
+                SET password_hash = :password_hash, updated_at = NOW()
+                WHERE id = :user_id
+                """
+            ),
+            {"user_id": user_id, "password_hash": new_hash},
+        )
+        if otp_row is not None:
+            await session.execute(
+                text("UPDATE auth.otp_verifications SET is_used = TRUE WHERE id = :id"),
+                {"id": otp_row["id"]},
+            )
+        await session.commit()
+        return {
+            "success": True,
+            "message": "Your password has been successfully updated. You may now sign in.",
+        }
 
 
 @router.post("/otp/request", status_code=status.HTTP_200_OK)

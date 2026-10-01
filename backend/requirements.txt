@@ -16,3 +16,5 @@ defusedxml>=0.7,<1.0
 exa-py>=1.8.0,<2.0
 python-multipart>=0.0.20,<1.0
 tiktoken>=0.7,<1.0
+bcrypt>=4.0.0,<6.0
+passlib>=1.7.4,<2.0
