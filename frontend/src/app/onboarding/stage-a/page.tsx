@@ -313,7 +313,7 @@ export default function StageAOnboardingPage() {
       </header>
 
       {/* Main Container - 1440px Canvas */}
-      <div className="flex-1 w-full max-w-7xl mx-auto px-6 sm:px-12 py-10 sm:py-14">
+      <div className="flex-1 w-full max-w-7xl mx-auto px-6 sm:px-12 py-8 sm:py-10 pb-24">
         {/* Mobile Horizontal Stepper */}
         <div className="lg:hidden mb-8 pb-4 border-b border-slate-200">
           <div className="flex items-center justify-between">
@@ -930,8 +930,8 @@ export default function StageAOnboardingPage() {
               </div>
             )}
 
-            {/* Bottom Actions Footer */}
-            <div className="border-t border-slate-200/80 pt-6 mt-12 flex items-center justify-between">
+            {/* Bottom Actions Footer - Sticky Docked */}
+            <div className="sticky bottom-0 z-20 bg-white/95 backdrop-blur-md border-t border-slate-200/80 -mx-4 sm:-mx-6 px-4 sm:px-6 py-4 mt-8 flex items-center justify-between shadow-xs">
               {activeStep > 1 ? (
                 <button
                   type="button"

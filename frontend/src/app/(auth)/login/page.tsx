@@ -53,37 +53,37 @@ function LoginForm() {
   }
 
   return (
-    <div className="w-full space-y-7">
+    <div className="w-full space-y-4 sm:space-y-4.5">
       {/* Brand Mark */}
       <div>
-        <Link href="/" className="inline-flex items-center gap-2.5 group">
+        <Link href="/" className="inline-flex items-center gap-2 group">
           <StemMark compact />
-          <span className="text-xl font-black tracking-tight text-[#0B0F1A]">
+          <span className="text-lg font-black tracking-tight text-[#0B0F1A]">
             Stem Cogent
           </span>
         </Link>
       </div>
 
       {/* Header Copy */}
-      <div className="space-y-1.5">
-        <h1 className="text-3xl sm:text-4xl font-black text-[#0B0F1A] tracking-tight">
+      <div className="space-y-1">
+        <h1 className="text-2xl sm:text-3xl font-black text-[#0B0F1A] tracking-tight">
           Welcome Back
         </h1>
-        <p className="text-sm sm:text-base text-[#64748B] font-normal">
+        <p className="text-xs sm:text-sm text-[#64748B] font-normal">
           Enter your credentials to access your enterprise workspace
         </p>
       </div>
 
       {/* Social Auth Providers (Reference Match) */}
-      <div className="grid grid-cols-2 gap-3 pt-1">
+      <div className="grid grid-cols-2 gap-2.5">
         <button
           type="button"
           onClick={() => {
             setError("Google single sign-on is managed via SAML/SSO for enterprise domains. Use corporate email below.");
           }}
-          className="flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl border border-[#E2E8F0] hover:bg-slate-50 hover:border-slate-300 transition text-xs font-semibold text-[#0B0F1A] shadow-xs cursor-pointer"
+          className="flex items-center justify-center gap-2 px-3 py-2 rounded-xl border border-[#E2E8F0] hover:bg-slate-50 hover:border-slate-300 transition text-xs font-semibold text-[#0B0F1A] shadow-xs cursor-pointer"
         >
-          <svg className="w-4 h-4" viewBox="0 0 24 24">
+          <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24">
             <path
               fill="#4285F4"
               d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
@@ -109,9 +109,9 @@ function LoginForm() {
           onClick={() => {
             setError("Apple authentication is restricted to verified tenant directories. Use corporate email below.");
           }}
-          className="flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl border border-[#E2E8F0] hover:bg-slate-50 hover:border-slate-300 transition text-xs font-semibold text-[#0B0F1A] shadow-xs cursor-pointer"
+          className="flex items-center justify-center gap-2 px-3 py-2 rounded-xl border border-[#E2E8F0] hover:bg-slate-50 hover:border-slate-300 transition text-xs font-semibold text-[#0B0F1A] shadow-xs cursor-pointer"
         >
-          <svg className="w-4 h-4 fill-current text-black" viewBox="0 0 24 24">
+          <svg className="w-4 h-4 shrink-0 fill-current text-black" viewBox="0 0 24 24">
             <path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.81-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M15.97 6.89c.65-.8 1.1-1.92.97-3.04-1 .04-2.14.67-2.82 1.46-.59.68-1.12 1.8-1 2.89 1.11.08 2.22-.56 2.85-1.31" />
           </svg>
           <span>Log in with Apple</span>
@@ -121,7 +121,7 @@ function LoginForm() {
       {/* Horizontal Divider */}
       <div className="relative flex items-center justify-center">
         <div className="w-full border-t border-slate-200" />
-        <span className="absolute bg-white px-3 text-xs text-[#64748B] font-medium uppercase tracking-wider">
+        <span className="absolute bg-white px-2.5 text-[11px] text-[#64748B] font-medium uppercase tracking-wider">
           or
         </span>
       </div>
@@ -130,19 +130,19 @@ function LoginForm() {
       {error && (
         <div
           role="alert"
-          className="p-3.5 rounded-xl bg-[#FEF2F2] border border-[#FECACA] text-xs font-semibold text-[#DC2626]"
+          className="p-3 rounded-xl bg-[#FEF2F2] border border-[#FECACA] text-xs font-semibold text-[#DC2626]"
         >
           {error}
         </div>
       )}
 
       {/* Login Form */}
-      <form onSubmit={handleSubmit} className="space-y-4" noValidate>
+      <form onSubmit={handleSubmit} className="space-y-3" noValidate>
         {/* Work Email Address */}
         <div>
           <label
             htmlFor="email"
-            className="block text-xs font-bold uppercase tracking-wider text-[#0B0F1A] mb-1.5"
+            className="block text-[11px] font-bold uppercase tracking-wider text-[#0B0F1A] mb-1"
           >
             Email address
           </label>
@@ -158,22 +158,22 @@ function LoginForm() {
               setEmail(e.target.value);
               if (error) setError(null);
             }}
-            className="block w-full rounded-xl border border-[#E2E8F0] px-3.5 py-2.5 text-sm text-[#0B0F1A] placeholder-[#64748B]/60 focus:border-[#2A4BFF] focus:outline-none focus:ring-2 focus:ring-[#2A4BFF]/15 transition font-medium bg-white"
+            className="block w-full rounded-xl border border-[#E2E8F0] px-3 py-2 text-sm text-[#0B0F1A] placeholder-[#64748B]/60 focus:border-[#2A4BFF] focus:outline-none focus:ring-2 focus:ring-[#2A4BFF]/15 transition font-medium bg-white"
           />
         </div>
 
         {/* Password */}
         <div>
-          <div className="flex items-center justify-between mb-1.5">
+          <div className="flex items-center justify-between mb-1">
             <label
               htmlFor="password"
-              className="block text-xs font-bold uppercase tracking-wider text-[#0B0F1A]"
+              className="block text-[11px] font-bold uppercase tracking-wider text-[#0B0F1A]"
             >
               Password
             </label>
             <Link
               href="/forgot-password"
-              className="text-xs font-semibold text-[#2A4BFF] hover:underline hover:text-[#1E3AE5]"
+              className="text-[11px] font-semibold text-[#2A4BFF] hover:underline hover:text-[#1E3AE5]"
             >
               Forgot password?
             </Link>
@@ -191,14 +191,14 @@ function LoginForm() {
                 setPassword(e.target.value);
                 if (error) setError(null);
               }}
-              className="block w-full rounded-xl border border-[#E2E8F0] px-3.5 py-2.5 pr-14 text-sm text-[#0B0F1A] placeholder-[#64748B]/60 focus:border-[#2A4BFF] focus:outline-none focus:ring-2 focus:ring-[#2A4BFF]/15 transition font-medium bg-white"
+              className="block w-full rounded-xl border border-[#E2E8F0] px-3 py-2 pr-14 text-sm text-[#0B0F1A] placeholder-[#64748B]/60 focus:border-[#2A4BFF] focus:outline-none focus:ring-2 focus:ring-[#2A4BFF]/15 transition font-medium bg-white"
             />
             <button
               type="button"
               id="toggle-password"
               aria-label={showPassword ? "Hide password" : "Show password"}
               onClick={() => setShowPassword(!showPassword)}
-              className="absolute right-2.5 top-1/2 -translate-y-1/2 inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs font-semibold text-[#64748B] hover:text-[#0B0F1A] hover:bg-slate-100 transition cursor-pointer"
+              className="absolute right-2 top-1/2 -translate-y-1/2 inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[11px] font-semibold text-[#64748B] hover:text-[#0B0F1A] hover:bg-slate-100 transition cursor-pointer"
             >
               <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 {showPassword ? (
@@ -213,7 +213,7 @@ function LoginForm() {
         </div>
 
         {/* Remember me toggle */}
-        <div className="pt-1">
+        <div className="pt-0.5">
           <label className="flex items-center gap-2 cursor-pointer select-none">
             <input
               type="checkbox"
@@ -230,7 +230,7 @@ function LoginForm() {
           id="submit_button"
           type="submit"
           disabled={loading}
-          className="w-full py-3.5 px-4 rounded-xl text-sm font-bold text-white bg-[#2A4BFF] hover:bg-[#1E3AE5] active:bg-[#162ED0] focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[#2A4BFF] disabled:opacity-50 transition cursor-pointer shadow-md hover:shadow-lg flex items-center justify-center gap-2 mt-2"
+          className="w-full py-3 px-4 rounded-xl text-sm font-bold text-white bg-[#2A4BFF] hover:bg-[#1E3AE5] active:bg-[#162ED0] focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[#2A4BFF] disabled:opacity-50 transition cursor-pointer shadow-md hover:shadow-lg flex items-center justify-center gap-2 mt-1.5"
         >
           {loading ? (
             "Authenticating…"
@@ -243,7 +243,7 @@ function LoginForm() {
       </form>
 
       {/* Footer Switch Link */}
-      <div className="pt-2 text-center text-xs sm:text-sm text-[#64748B]">
+      <div className="pt-1 text-center text-xs text-[#64748B]">
         Don&apos;t have an account?{" "}
         <Link
           href="/signup"

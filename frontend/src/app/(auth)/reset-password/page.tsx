@@ -65,10 +65,10 @@ function ResetPasswordForm() {
   }
 
   return (
-    <div className="w-full space-y-8">
+    <div className="w-full space-y-4 sm:space-y-5">
       {/* Brand Mark */}
       <div>
-        <Link href="/" className="inline-flex items-center gap-2.5 group">
+        <Link href="/" className="inline-flex items-center gap-2 group">
           <StemMark compact />
           <span className="text-lg font-black tracking-tight text-[#0B0F1A]">
             Stem Cogent
@@ -77,11 +77,11 @@ function ResetPasswordForm() {
       </div>
 
       {/* Header Copy */}
-      <div className="space-y-2">
-        <h1 className="text-3xl sm:text-4xl font-black text-[#0B0F1A] tracking-tight">
+      <div className="space-y-1">
+        <h1 className="text-2xl sm:text-3xl font-black text-[#0B0F1A] tracking-tight">
           Set New Password
         </h1>
-        <p className="text-sm sm:text-base text-[#64748B] font-normal">
+        <p className="text-xs sm:text-sm text-[#64748B] font-normal">
           Create a secure password for your enterprise workspace
         </p>
       </div>
