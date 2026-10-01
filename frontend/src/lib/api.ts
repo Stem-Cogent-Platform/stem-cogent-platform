@@ -304,6 +304,9 @@ export type StageACompanyInput = {
   operating_licenses: string[];
   active_products: string[];
   clearing_rails: string[];
+  jurisdiction?: string;
+  company_size?: string;
+  company_website?: string;
   primary_country?: string;
   compliance_thresholds?: Record<string, unknown>;
 };
@@ -316,6 +319,17 @@ export type StageBLensInput = {
 };
 
 export async function submitStageA(input: StageACompanyInput) {
+  const jurisdictionToCountry: Record<string, string> = {
+    Nigeria: "NG",
+    Ghana: "GH",
+    Kenya: "KE",
+    "Pan-African": "NG",
+  };
+  const primary_country =
+    input.primary_country ||
+    (input.jurisdiction && jurisdictionToCountry[input.jurisdiction]) ||
+    "NG";
+
   return apiRequest<{
     success: boolean;
     organization_id: string;
@@ -324,7 +338,7 @@ export async function submitStageA(input: StageACompanyInput) {
   }>("/api/v1/onboarding/stage-a", {
     method: "POST",
     body: JSON.stringify({
-      primary_country: "NG",
+      primary_country,
       compliance_thresholds: {},
       ...input,
     }),

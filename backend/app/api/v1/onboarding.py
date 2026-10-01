@@ -36,12 +36,15 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 class CompanySetupInput(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")
     company_name: str = Field(min_length=2, max_length=255)
     operating_licenses: list[str] = Field(default_factory=list, max_length=50)
     active_products: list[str] = Field(default_factory=list, max_length=50)
     clearing_rails: list[str] = Field(default_factory=list, max_length=50)
     primary_country: str = Field(default="NG", min_length=2, max_length=2)
+    jurisdiction: str | None = Field(default=None, max_length=100)
+    company_size: str | None = Field(default=None, max_length=100)
+    company_website: str | None = Field(default=None, max_length=255)
     compliance_thresholds: dict[str, Any] = Field(default_factory=dict)
 
     @field_validator("company_name")
@@ -145,6 +148,26 @@ async def submit_stage_a_company(
         {"tenant_id": tenant_id, "name": body.company_name},
     )
 
+    country_code = body.primary_country
+    if body.jurisdiction:
+        jur_map = {
+            "nigeria": "NG",
+            "ghana": "GH",
+            "kenya": "KE",
+            "pan-african": "NG",
+        }
+        mapped = jur_map.get(body.jurisdiction.strip().lower())
+        if mapped:
+            country_code = mapped
+
+    thresholds = dict(body.compliance_thresholds)
+    if body.company_size:
+        thresholds["company_size"] = body.company_size
+    if body.jurisdiction:
+        thresholds["jurisdiction"] = body.jurisdiction
+    if body.company_website:
+        thresholds["company_website"] = body.company_website
+
     # 2. Upsert context.company_profiles
     await context.session.execute(
         text(
@@ -171,8 +194,8 @@ async def submit_stage_a_company(
             "licenses": body.operating_licenses,
             "products": body.active_products,
             "rails": body.clearing_rails,
-            "thresholds": __import__("json").dumps(body.compliance_thresholds),
-            "country": body.primary_country,
+            "thresholds": __import__("json").dumps(thresholds),
+            "country": country_code,
         },
     )
 
