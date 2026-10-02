@@ -206,11 +206,13 @@ function ArtifactsContent() {
           {(activeTab === "ALL" || activeTab === "gap_matrix") && (
             <EvidenceReviewer initialSignalId={searchParams.get("signal_id")} />
           )}
-          {errorNotice && (
-            <p role="alert" className="rounded-lg bg-red-50 p-3 text-sm text-red-800">
-              {errorNotice}
-            </p>
-          )}
+          {(activeTab === "ALL" || activeTab === "rail_stress") && (
+            <>
+              {errorNotice && (
+                <p role="alert" className="rounded-lg bg-red-50 p-3 text-sm text-red-800">
+                  {errorNotice}
+                </p>
+              )}
       {loading ? (
         <div className="space-y-6">
           <GapMatrixSkeleton />
@@ -287,6 +289,8 @@ function ArtifactsContent() {
           })}
         </div>
       )}
+            </>
+          )}
         </>
       )}
     </div>

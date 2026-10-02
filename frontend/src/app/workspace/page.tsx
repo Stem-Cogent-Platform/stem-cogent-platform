@@ -4,6 +4,7 @@ import { Suspense, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { CompetitiveResearchResult } from "@/components/competitive/evidence";
+import { MarkdownRenderer } from "@/components/markdown-renderer";
 import type { ResearchResult } from "@/lib/competitors";
 import { LocalErrorBoundary } from "@/components/error-boundary";
 import { WorkspaceShell } from "@/components/workspace-shell";
@@ -20,10 +21,26 @@ import type {
   WorkspaceSession,
 } from "@/lib/types";
 
-function displayMessage(content: string) {
+function displayMessage(content: string): string {
   try {
     const value = JSON.parse(content);
-    if (value.operational_exposure && value.context_and_precedents) return `${value.operational_exposure}\n\n${value.context_and_precedents}`;
+    if (value.operational_exposure && value.context_and_precedents) {
+      const sections: string[] = [];
+      sections.push(`### Direct Operational Exposure\n\n${value.operational_exposure}`);
+      sections.push(`### Precedents & Regulatory Context\n\n${value.context_and_precedents}`);
+      if (value.role_action_items?.length) {
+        sections.push(`### Department Directives\n\n${value.role_action_items.map(
+          (item: { department?: string; action?: string; urgency?: string }) =>
+            `- **${(item.department || 'Department').toUpperCase()}** (${item.urgency || 'monitor'}): ${item.action}`
+        ).join('\n')}`);
+      }
+      if (value.web_sources?.length) {
+        sections.push(`### Sources\n\n${value.web_sources.map(
+          (s: { title?: string; url?: string }) => `- [${s.title}](${s.url})`
+        ).join('\n')}`);
+      }
+      return sections.join('\n\n---\n\n');
+    }
   } catch { /* Plain conversation text. */ }
   return content;
 }
@@ -259,7 +276,7 @@ ${(turn.synthesis.role_action_items || [])
     }
   }
 
-  function handleExport(format: "md" | "txt" | "pdf") {
+  async function handleExport(format: "md" | "txt" | "pdf") {
     if (format === "md" || format === "txt") {
       const blob = new Blob([canvasMarkdown], { type: "text/plain;charset=utf-8" });
       const url = URL.createObjectURL(blob);
@@ -269,8 +286,39 @@ ${(turn.synthesis.role_action_items || [])
       a.click();
       URL.revokeObjectURL(url);
     } else {
-      // PDF print dialog trigger
-      window.print();
+      // Use the backend PDF generator instead of window.print()
+      try {
+        const { accessToken: getToken } = await import("@/lib/api");
+        const response = await fetch("/api/v1/workspace/export", {
+          method: "POST",
+          credentials: "include",
+          headers: {
+            "Content-Type": "application/json",
+            ...(getToken() ? { Authorization: `Bearer ${getToken()}` } : {}),
+          },
+          body: JSON.stringify({
+            format: "pdf",
+            title: canvasTitle,
+            operational_exposure: canvasMarkdown,
+            context_and_precedents: "",
+            role_action_items: canvasActions,
+            citations: [],
+          }),
+        });
+        if (!response.ok) throw new Error("PDF generation failed");
+        const blob = await response.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `stem-executive-brief-${Date.now()}.pdf`;
+        a.click();
+        URL.revokeObjectURL(url);
+      } catch (err) {
+        console.error("PDF export failed:", err);
+        setExportNotice("PDF export failed. Try .MD instead.");
+        setTimeout(() => setExportNotice(null), 3000);
+        return;
+      }
     }
     setExportNotice(`Exported as .${format}`);
     setTimeout(() => setExportNotice(null), 2000);
@@ -343,9 +391,15 @@ ${(turn.synthesis.role_action_items || [])
           {research && <CompetitiveResearchResult result={research} />}
           {/* Markdown Content Surface */}
           <div className="prose prose-slate max-w-none text-slate-800 leading-relaxed font-sans">
-            <div className="rounded-xl border border-slate-200 bg-slate-50/50 p-6 whitespace-pre-line text-xs font-mono text-slate-800 leading-relaxed shadow-2xs">
-              {canvasMarkdown}
-            </div>
+            {canvasMarkdown ? (
+              <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-2xs">
+                <MarkdownRenderer content={canvasMarkdown} />
+              </div>
+            ) : (
+              <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50/50 p-8 text-center">
+                <p className="text-sm text-slate-500">Ask a question in the Copilot to generate an executive synthesis here.</p>
+              </div>
+            )}
           </div>
 
           {/* Role-Delineated Department Directives */}
@@ -413,7 +467,7 @@ ${(turn.synthesis.role_action_items || [])
                       : "bg-white text-slate-800 border border-slate-200 font-sans"
                   }`}
                 >
-                  <div className="whitespace-pre-line">{displayMessage(msg.content)}</div>
+                  <MarkdownRenderer content={displayMessage(msg.content)} />
                 </div>
                 <span className="mt-1 px-1 text-[10px] text-slate-400 font-mono">
                   {isUser ? "Executive Query" : "Decision Agent"}

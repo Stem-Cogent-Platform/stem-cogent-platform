@@ -107,6 +107,12 @@ async def audit_signal(session, run: dict, signal: dict, *, embedder=None, verif
         FROM organizations.tenant_policies WHERE organization_id=:org AND active
         AND processing_status='ready' ORDER BY id'''), {'org': run['organization_id']})).mappings().all()
     ids = [row['id'] for row in policies]
+    if not ids:
+        await session.execute(text('''UPDATE pipeline.compliance_gap_runs
+            SET processing_status='failed', error_code='needs_policies', completed_at=now(), lease_until=NULL
+            WHERE id=:run AND organization_id=:org'''),
+            {'run': run['id'], 'org': run['organization_id']})
+        return 0
     owned_embedder, owned_verifier = embedder is None, verifier is None
     embedder = embedder or (embedding_client() if ids else None)
     verifier = verifier or (build_generation_client() if ids else None)

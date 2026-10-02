@@ -36,6 +36,18 @@ export function clearSession() {
   activeSessionOrigin = "";
 }
 
+/**
+ * Force refresh the in-memory session from the backend.
+ * Call after any operation that changes the tenant name (e.g., Stage A onboarding)
+ * so the workspace shell header displays the current company name.
+ */
+export async function refreshUserSession(): Promise<boolean> {
+  activeAccessToken = null;
+  activeUser = null;
+  refreshInFlight = null;
+  return bootstrapSession();
+}
+
 export async function login(input: { email: string; password: string; workspace_id?: string }) {
   const response = await rawRequest<AuthResponse>("/api/v1/auth/login", {
     method: "POST",

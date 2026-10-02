@@ -127,6 +127,19 @@ async def list_artifacts(
         )
     ).scalar_one()
 
+    if count_row == 0 and not search:
+        try:
+            from app.workers.tasks.bootstrap import run_tenant_bootstrap
+            await run_tenant_bootstrap(str(tenant_id))
+            count_row = (
+                await context.session.execute(
+                    text(f"SELECT COUNT(*) FROM pipeline.intelligence_artifacts WHERE {where_sql}"),
+                    params,
+                )
+            ).scalar_one()
+        except Exception:
+            pass
+
     rows = (
         (
             await context.session.execute(

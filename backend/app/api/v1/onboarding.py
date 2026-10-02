@@ -168,16 +168,20 @@ async def submit_stage_a_company(
     if body.company_website:
         thresholds["company_website"] = body.company_website
 
-    # 2. Upsert context.company_profiles
+    # 2. Upsert context.company_profiles with complete operational schema
     await context.session.execute(
         text(
             """
             INSERT INTO context.company_profiles (
                 tenant_id, operating_licenses, active_products, clearing_rails,
-                compliance_thresholds, operating_markets, profile_completeness
+                compliance_thresholds, operating_markets, business_categories,
+                strategic_priorities, profile_completeness
             ) VALUES (
                 :tenant_id, :licenses, :products, :rails,
-                CAST(:thresholds AS JSONB), ARRAY[:country]::TEXT[], 1.0
+                CAST(:thresholds AS JSONB), ARRAY[:country]::TEXT[],
+                ARRAY['FINTECH', 'PAYMENTS']::TEXT[],
+                ARRAY['SETTLEMENT_RELIABILITY', 'REGULATORY_COMPLIANCE']::TEXT[],
+                1.0
             )
             ON CONFLICT (tenant_id) DO UPDATE SET
                 operating_licenses = EXCLUDED.operating_licenses,
@@ -199,7 +203,56 @@ async def submit_stage_a_company(
         },
     )
 
-    # 2b. Upsert organizations.company_context with custom tags
+    # 2b. Sync context.company_objects for structured CIL and readiness tracking
+    for product_name in body.active_products:
+        if product_name and product_name.strip():
+            await context.session.execute(
+                text(
+                    """
+                    INSERT INTO context.company_objects (
+                        tenant_id, object_type, name, resolution_status, active
+                    ) VALUES (
+                        :tenant_id, 'PRODUCT', :name, 'NOT_APPLICABLE', TRUE
+                    )
+                    ON CONFLICT (tenant_id, object_type, LOWER(name)) WHERE active DO NOTHING
+                    """
+                ),
+                {"tenant_id": tenant_id, "name": product_name.strip()},
+            )
+
+    for rail_name in body.clearing_rails:
+        if rail_name and rail_name.strip():
+            await context.session.execute(
+                text(
+                    """
+                    INSERT INTO context.company_objects (
+                        tenant_id, object_type, name, resolution_status, active
+                    ) VALUES (
+                        :tenant_id, 'DEPENDENCY', :name, 'UNRESOLVED', TRUE
+                    )
+                    ON CONFLICT (tenant_id, object_type, LOWER(name)) WHERE active DO NOTHING
+                    """
+                ),
+                {"tenant_id": tenant_id, "name": rail_name.strip()},
+            )
+
+    for license_name in body.operating_licenses:
+        if license_name and license_name.strip():
+            await context.session.execute(
+                text(
+                    """
+                    INSERT INTO context.company_objects (
+                        tenant_id, object_type, name, resolution_status, active
+                    ) VALUES (
+                        :tenant_id, 'REGULATORY_CATEGORY', :name, 'NOT_APPLICABLE', TRUE
+                    )
+                    ON CONFLICT (tenant_id, object_type, LOWER(name)) WHERE active DO NOTHING
+                    """
+                ),
+                {"tenant_id": tenant_id, "name": license_name.strip()},
+            )
+
+    # 2c. Upsert organizations.company_context with custom tags
     custom_tags = [t for t in (body.operating_licenses + body.clearing_rails) if t.startswith("CUSTOM:")]
     await context.session.execute(
         text(
@@ -219,14 +272,14 @@ async def submit_stage_a_company(
 
     await context.session.commit()
 
-    # 3. Asynchronously dispatch Celery bootstrap task
+    # 3. Asynchronously dispatch Celery bootstrap task (workspace also has lazy fallback)
     bootstrap_task_dispatched = False
     try:
         bootstrap_tenant_artifacts.delay(str(tenant_id))
         bootstrap_task_dispatched = True
     except Exception as exc:
         logger.warning(
-            "Celery broker unavailable for tenant bootstrap: %s (will process on demand)",
+            "Celery broker unavailable for tenant bootstrap: %s (workspace will synthesize lazily on access)",
             exc,
         )
 
@@ -641,7 +694,7 @@ async def get_onboarding_status(
     days_remaining = None
     if is_pilot and pilot_expires:
         delta = (pilot_expires - datetime.now(UTC)).total_seconds()
-        days_remaining = max(0, int(delta // 86400))
+        days_remaining = max(0, int(__import__("math").ceil(delta / 86400.0))) if delta > 0 else 0
 
     return {
         "organization_id": str(tenant_id),

@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { FormEvent, ReactNode, useCallback, useEffect, useState } from "react";
+import { ReactNode, useCallback, useEffect, useState } from "react";
 
 import { DealSignalIntake } from "@/components/competitive/deal-signal-modal";
 import { StemMark } from "@/components/stem-mark";
@@ -45,7 +45,7 @@ export function WorkspaceShell({ children }: { children: ReactNode }) {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [user, setUser] = useState<Record<string, unknown>>({});
-  const [query, setQuery] = useState("");
+
   const [alerts, setAlerts] = useState<ShellAlert[]>([]);
   const [alertsError, setAlertsError] = useState("");
   const [openingAlert, setOpeningAlert] = useState<string | null>(null);
@@ -91,11 +91,7 @@ export function WorkspaceShell({ children }: { children: ReactNode }) {
     router.replace("/login");
   }
 
-  function search(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const normalized = query.trim();
-    if (normalized.length >= 2) router.push(`/search?q=${encodeURIComponent(normalized)}`);
-  }
+
 
   async function openAlert(alert: ShellAlert) {
     setOpeningAlert(alert.id);
@@ -131,7 +127,7 @@ export function WorkspaceShell({ children }: { children: ReactNode }) {
         <div className="sidebar-section-label">Workspace</div>
         <nav aria-label="Primary navigation">
           {navigation.map(([href, text, icon]) => {
-            const active = pathname.startsWith(href);
+            const active = href === "/workspace" ? pathname === "/workspace" : pathname.startsWith(href);
             return <Link aria-current={active ? "page" : undefined} className={active ? "active" : ""} href={href} key={href} onClick={() => setMobileOpen(false)}><NavIcon name={icon} /><span>{text}</span></Link>;
           })}
         </nav>
@@ -148,7 +144,7 @@ export function WorkspaceShell({ children }: { children: ReactNode }) {
       <div className="app-frame">
         <header className="app-topnav">
           <button aria-label="Open navigation" className="mobile-menu" onClick={() => setMobileOpen(true)} type="button">☰</button>
-          <form className="global-search" onSubmit={search} role="search"><span aria-hidden="true">⌕</span><input aria-label="Search intelligence or ask Cogent" onChange={(event) => setQuery(event.target.value)} placeholder="Search intelligence or ask Cogent…" type="search" value={query} /><button className="sr-only" type="submit">Search</button></form>
+          <div className="global-search"><span className="text-xs font-semibold text-slate-500 tracking-wide">Stem Cogent · {workspaceName}</span></div>
           <div className="topnav-actions">
             {["ADMIN", "ANALYST"].includes(String(user.permission_role)) && <DealSignalIntake />}
             <button aria-expanded={notificationsOpen} aria-label={unreadAlerts ? `View ${unreadAlerts} unread alerts` : "View alerts"} className="topnav-icon" onClick={() => setNotificationsOpen((value) => !value)} type="button"><NavIcon name="alerts" />{unreadAlerts > 0 && <i />}</button>

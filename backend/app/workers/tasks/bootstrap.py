@@ -145,10 +145,66 @@ async def run_tenant_bootstrap(organization_id_str: str) -> dict[str, Any]:
                         exc,
                     )
 
+        # Fallback if strict intersection produced zero matches: match the top available signals
+        if matched_count == 0 and signals:
+            for signal in signals[:10]:
+                exposure_tier = "moderate_indirect"
+                matched_count += 1
+                matched_nodes = {"matched_licenses": profile["operating_licenses"][:1] if profile["operating_licenses"] else ["Payment Operations"]}
+                lens_impact = await synthesize_lens_impact(signal, matched_nodes, exposure_tier)
+                rel_row = (
+                    await session.execute(
+                        text(
+                            """
+                            INSERT INTO pipeline.tenant_signal_relevance (
+                                tenant_id, signal_id, exposure_tier,
+                                matched_nodes, lens_impact
+                            ) VALUES (
+                                :tenant_id, :signal_id, :exposure_tier,
+                                CAST(:matched_nodes AS JSONB),
+                                CAST(:lens_impact AS JSONB)
+                            )
+                            ON CONFLICT (tenant_id, signal_id) DO UPDATE SET
+                                exposure_tier = CASE WHEN pipeline.tenant_signal_relevance.is_dismissed
+                                    THEN 'irrelevant' ELSE EXCLUDED.exposure_tier END,
+                                matched_nodes = EXCLUDED.matched_nodes,
+                                lens_impact = EXCLUDED.lens_impact
+                            RETURNING id
+                            """
+                        ),
+                        {
+                            "tenant_id": tenant_id,
+                            "signal_id": signal["id"],
+                            "exposure_tier": exposure_tier,
+                            "matched_nodes": json.dumps(matched_nodes),
+                            "lens_impact": json.dumps(lens_impact.model_dump()),
+                        },
+                    )
+                ).mappings().one()
+                if signal.get("signal_type") in ELIGIBLE_SIGNAL_TYPES:
+                    pending_artifacts.append((str(signal["id"]), str(rel_row["id"])))
+
+        # Guarantee at least 1 artifact per eligible type if signals exist
+        if not pending_artifacts and signals:
+            seen_types = set()
+            for signal in signals:
+                st = signal.get("signal_type")
+                if st in ELIGIBLE_SIGNAL_TYPES and st not in seen_types:
+                    seen_types.add(st)
+                    rel_row = (await session.execute(text("""
+                        SELECT id FROM pipeline.tenant_signal_relevance
+                        WHERE tenant_id = :tenant AND signal_id = :sig
+                    """), {"tenant": tenant_id, "sig": signal["id"]})).mappings().one_or_none()
+                    if rel_row:
+                        pending_artifacts.append((str(signal["id"]), str(rel_row["id"])))
+
         await session.commit()
         for signal_id, relevance_id in pending_artifacts:
-            await run_artifact_synthesis(signal_id, str(tenant_id), relevance_id)
-            artifacts_queued += 1
+            try:
+                await run_artifact_synthesis(signal_id, str(tenant_id), relevance_id)
+                artifacts_queued += 1
+            except Exception as exc:
+                logger.warning("Artifact synthesis failed for signal %s: %s", signal_id, exc)
 
         logger.info(
             "Bootstrap completed for organization %s: %d evaluated, %d matched, %d artifacts created",

@@ -84,7 +84,7 @@ jobs:
             exit 1
           fi
           grep -F 'Tenant-scoped reports cannot safely be reverted to a shared cache' downgrade-guard.log
-          alembic current | grep -E '^0047 \(head\)'
+          alembic current | grep -E '^0048 \(head\)'
         env:
           DATABASE_URL: postgresql://sc_test:sc_test@127.0.0.1:${{ job.services.postgres.ports[5432] }}/sc_test
           ENVIRONMENT: test

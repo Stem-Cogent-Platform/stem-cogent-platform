@@ -863,7 +863,10 @@ async def refresh(
                         """
                     SELECT users.id, users.tenant_id, users.email, users.display_name,
                            users.permission_role, users.onboarding_completed_at,
-                           tenants.name AS tenant_name,
+                           users.is_superuser, users.stage_b_completed, users.decision_lens,
+                           users.business_function,
+                           tenants.name AS tenant_name, tenants.stage_a_completed,
+                           tenants.subscription_tier,
                            sessions.refresh_token_hash, sessions.mfa_verified_at
                     FROM auth.sessions AS sessions
                     JOIN auth.users AS users

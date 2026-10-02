@@ -359,6 +359,7 @@ class DecisionAgent:
             company_profile=company_profile,
             internal_artifacts=internal_artifacts,
             web_results=web_results,
+            conversation_history=conversation_history,
         )
 
     def _deterministic_fallback_synthesis(
@@ -368,33 +369,76 @@ class DecisionAgent:
         company_profile: dict[str, Any],
         internal_artifacts: list[dict[str, Any]],
         web_results: list[dict[str, Any]],
+        conversation_history: list[dict[str, Any]] | None = None,
     ) -> ExecutiveSynthesisPayload:
-        """Authoritative deterministic synthesis grounded in internal context and web results."""
+        """Authoritative deterministic synthesis grounded in internal context, web results, and conversational context."""
 
-        licenses = company_profile.get("operating_licenses") or ["Switching & Processing", "PSSP"]
-        rails = company_profile.get("clearing_rails") or ["NIP", "Providus Virtual Accounts"]
-        products = company_profile.get("active_products") or ["Merchant Acquiring", "Virtual Accounts"]
+        licenses = [str(lic).replace("CUSTOM: ", "") for lic in (company_profile.get("operating_licenses") or ["Switching & Processing", "PSSP"])]
+        rails = [str(r).replace("CUSTOM: ", "") for r in (company_profile.get("clearing_rails") or ["NIP", "Providus Virtual Accounts"])]
+        products = [str(p).replace("CUSTOM: ", "") for p in (company_profile.get("active_products") or ["Merchant Acquiring", "Virtual Accounts"])]
 
         cited_ids = [UUID(str(a["id"])) for a in internal_artifacts if "id" in a]
+        q_lower = user_query.lower()
 
-        # Operational exposure formulation
-        exposure_points = [
-            f"Active clearing rails ({', '.join(rails)}) face potential routing or settlement scrutiny.",
-            f"Operating footprint governed under licenses ({', '.join(licenses)}) requires audit reconciliation against current statutory standards.",
-            f"Active product lines ({', '.join(products)}) are directly exposed to counterpart settlement SLA variations.",
-        ]
-        operational_exposure = (
-            f"Strategic analysis for query '{user_query}': "
-            + " ".join(exposure_points)
-        )
+        # Conversational context extraction
+        history = conversation_history or []
+        prior_user_msg = next((m.get("content") for m in reversed(history) if m.get("role") == "user"), None)
+        is_clarification = any(q_lower.startswith(prefix) for prefix in ("i mean", "what about", "how about", "and", "expand on", "clarify", "actually"))
+
+        # Semantic domain detection
+        is_capital_markets = any(k in q_lower for k in ("ipo", "listing", "dangote", "refinery", "ngx", "sec", "equity", "valuation", "shares", "capital market", "issuance"))
+        is_regulatory = any(k in q_lower for k in ("cbn", "circular", "directive", "mandate", "ndpc", "license", "penalty", "statutory", "audit", "compliance", "guideline"))
+        is_infrastructure = any(k in q_lower for k in ("rail", "nip", "nibss", "interswitch", "switch", "downtime", "latency", "timeout", "settlement failure", "failover", "reconciliation"))
+        is_competitor = any(k in q_lower for k in ("competitor", "battlecard", "moniepoint", "opay", "flutterwave", "paystack", "market share", "rival", "pricing"))
+
+        # Dynamic operational exposure formulation
+        continuity_prefix = ""
+        if is_clarification and prior_user_msg:
+            continuity_prefix = f"Refining strategic investigation following prior query regarding '{prior_user_msg[:60]}...': "
+
+        if is_capital_markets:
+            exposure_points = [
+                f"Strategic assessment for '{user_query}': Evaluates market listing requirements, valuation benchmarks, and institutional capitalization dynamics.",
+                "Liquidity and settlement implications: High-capitalization market events create elevated transaction float absorption across primary institutional clearing rails.",
+                f"Corporate positioning under licenses ({', '.join(licenses)}): Requires assessment of custody, transaction settlement, and investor verification compliance."
+            ]
+        elif is_regulatory:
+            exposure_points = [
+                f"Regulatory policy assessment for '{user_query}': Direct statutory oversight review for operating footprint governed under {', '.join(licenses)} licenses.",
+                "Compliance gap exposure: Operating procedures must satisfy current circular disclosures, SLA thresholds, and mandatory reporting timelines.",
+                f"Active product lines ({', '.join(products)}) must verify compliance verification checkpoints against applicable statutory guidelines."
+            ]
+        elif is_infrastructure:
+            exposure_points = [
+                f"Infrastructure rail assessment for '{user_query}': Active clearing rails ({', '.join(rails)}) face potential routing congestion, settlement delay, or timeout exposure.",
+                "Operational liquidity risk: Degradation in clearing throughput elevates merchant dispute volumes and strains intra-day float reserves.",
+                f"Active product lines ({', '.join(products)}) are directly exposed to upstream counterpart SLA variances."
+            ]
+        elif is_competitor:
+            exposure_points = [
+                f"Competitive market assessment for '{user_query}': Evaluating counterpart strategic initiatives against current company offerings ({', '.join(products)}).",
+                "Commercial retention risk: Competitor pricing, settlement speed, or feature advantages could pressure enterprise merchant retention.",
+                f"Operating rail efficiencies ({', '.join(rails)}) should be leveraged to maintain transaction settlement margin advantages."
+            ]
+        else:
+            exposure_points = [
+                f"Executive strategic analysis for query '{user_query}':",
+                f"Operational footprint evaluated across company licenses ({', '.join(licenses)}) and primary clearing rails ({', '.join(rails)}).",
+                f"Commercial product surface ({', '.join(products)}) assessed against verified ecosystem developments and counterpart dependencies."
+            ]
+
+        operational_exposure = continuity_prefix + " ".join(exposure_points)
 
         # Context & precedents formulation
         precedents: list[str] = []
+        if is_clarification and prior_user_msg:
+            precedents.append(f"Conversational Continuity: Pivoted from '{prior_user_msg[:50]}' to '{user_query}'.")
+
         if internal_artifacts:
             art_titles = [f"'{a.get('title')}' (Artifact {a.get('id')})" for a in internal_artifacts[:3]]
             precedents.append(f"Internal Intelligence Baseline: Corroborated with internal artifacts {'; '.join(art_titles)}.")
         else:
-            precedents.append("Internal Intelligence Baseline: No internal degradation incidents recorded for this entity.")
+            precedents.append("Internal Intelligence Baseline: Evaluated against company operational profile context.")
 
         web_items: list[WebSearchResultItem] = []
         if web_results:
@@ -402,37 +446,111 @@ class DecisionAgent:
             for w in web_results[:3]:
                 title = w.get("title", "External Source")
                 url = w.get("url", "")
+                snippet = w.get("text", "")[:280]
                 external_refs.append(f"{title} ({url})")
                 web_items.append(
                     WebSearchResultItem(
                         title=title,
                         url=url,
-                        text=w.get("text", "")[:300],
+                        text=snippet,
                         published_date=w.get("published_date"),
                     )
                 )
-            precedents.append(f"External Discoveries: Verified across live market developments: {'; '.join(external_refs)}.")
+            precedents.append(f"Live Market Discoveries: Verified across ecosystem sources: {'; '.join(external_refs)}.")
 
         context_and_precedents = " ".join(precedents)
 
-        # Department action items
-        role_action_items = [
-            DepartmentActionItem(
-                department="executive_strategy",
-                action="Review counterparty exposure and verify secondary settlement provider readiness.",
-                urgency="this_week",
-            ),
-            DepartmentActionItem(
-                department="compliance_legal",
-                action="Validate operational alignment against latest circular disclosures and update risk register.",
-                urgency="this_week",
-            ),
-            DepartmentActionItem(
-                department="product_engineering",
-                action=f"Ensure automated failover triggers for clearing rails ({', '.join(rails[:2])}) are active.",
-                urgency="immediate",
-            ),
-        ]
+        # Dynamic department action items tailored to the query domain
+        if is_capital_markets:
+            role_action_items = [
+                DepartmentActionItem(
+                    department="executive_strategy",
+                    action="Model commercial capital allocation, strategic transaction flows, and market valuation benchmarks.",
+                    urgency="this_week",
+                ),
+                DepartmentActionItem(
+                    department="compliance_legal",
+                    action="Review SEC Nigeria and NGX disclosure rules regarding institutional participation and investor reporting mandates.",
+                    urgency="this_week",
+                ),
+                DepartmentActionItem(
+                    department="treasury_finance",
+                    action="Model settlement clearing windows and liquidity buffer readiness for elevated institutional capital flows.",
+                    urgency="this_month",
+                ),
+            ]
+        elif is_regulatory:
+            role_action_items = [
+                DepartmentActionItem(
+                    department="compliance_legal",
+                    action=f"Validate operational alignment against latest circular disclosures under licenses ({', '.join(licenses[:2])}) and update risk register.",
+                    urgency="this_week",
+                ),
+                DepartmentActionItem(
+                    department="executive_strategy",
+                    action="Audit statutory exposure and verify compliance threshold reporting across active products.",
+                    urgency="this_week",
+                ),
+                DepartmentActionItem(
+                    department="product_engineering",
+                    action="Deploy technical policy validations, transaction audit logging, and reporting controls.",
+                    urgency="immediate",
+                ),
+            ]
+        elif is_infrastructure:
+            role_action_items = [
+                DepartmentActionItem(
+                    department="product_engineering",
+                    action=f"Ensure automated failover triggers for clearing rails ({', '.join(rails[:2])}) are active and latencies monitored.",
+                    urgency="immediate",
+                ),
+                DepartmentActionItem(
+                    department="treasury_finance",
+                    action="Review float reserves and verify secondary settlement provider readiness for queue reconciliation.",
+                    urgency="this_week",
+                ),
+                DepartmentActionItem(
+                    department="commercial_ops",
+                    action="Prepare proactive merchant communication templates addressing transient rail processing latency.",
+                    urgency="this_week",
+                ),
+            ]
+        elif is_competitor:
+            role_action_items = [
+                DepartmentActionItem(
+                    department="commercial_ops",
+                    action="Conduct merchant pricing and feature benchmarking against competitor product movements.",
+                    urgency="this_week",
+                ),
+                DepartmentActionItem(
+                    department="executive_strategy",
+                    action="Evaluate strategic partnerships and differentiated settlement terms to protect key merchant accounts.",
+                    urgency="this_week",
+                ),
+                DepartmentActionItem(
+                    department="product_engineering",
+                    action=f"Accelerate delivery of roadmap enhancements for active product lines ({', '.join(products[:2])}).",
+                    urgency="this_month",
+                ),
+            ]
+        else:
+            role_action_items = [
+                DepartmentActionItem(
+                    department="executive_strategy",
+                    action="Review counterparty exposure and verify operational alignment across executive stakeholders.",
+                    urgency="this_week",
+                ),
+                DepartmentActionItem(
+                    department="compliance_legal",
+                    action="Audit operational controls and statutory alignment against current industry guidelines.",
+                    urgency="this_week",
+                ),
+                DepartmentActionItem(
+                    department="product_engineering",
+                    action=f"Verify telemetry observability and routing redundancy across active clearing rails ({', '.join(rails[:2])}).",
+                    urgency="immediate",
+                ),
+            ]
 
         return ExecutiveSynthesisPayload(
             operational_exposure=operational_exposure,

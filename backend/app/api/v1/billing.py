@@ -195,9 +195,11 @@ async def initialize_checkout(
     else:
         try:
             quote = await quote_usd_ngn()
-            settlement_amount_kobo = usd_cents_to_ngn_kobo(
+            raw_kobo = usd_cents_to_ngn_kobo(
                 usd_cents=plan["monthly_price_cents"], rate=quote.rate
             )
+            # Round to nearest 100 Naira (10,000 kobo) for clean, professional invoice amounts
+            settlement_amount_kobo = int((raw_kobo + 5000) // 10000 * 10000)
         except (FxQuoteError, ValueError) as exc:
             logger.warning("Official USD/NGN quote unavailable", extra={"plan_code": plan["plan_code"]})
             raise HTTPException(

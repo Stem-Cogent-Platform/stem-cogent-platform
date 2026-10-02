@@ -73,7 +73,9 @@ function RadarContent() {
 
       setTelemetry(telemRes);
       setLoadError("");
-      const rawSignals = (signalsRes.signals || signalsRes.items || []) as SignalItem[];
+      const signalsData = signalsRes as { signals?: SignalItem[]; items?: SignalItem[] } | SignalItem[];
+      const rawSignalsList: SignalItem[] = Array.isArray(signalsData) ? signalsData : (signalsData.signals || signalsData.items || []);
+      const rawSignals = rawSignalsList.map((sig) => ({ ...sig, created_at: sig.created_at || (sig as { published_at?: string }).published_at || (sig as { synthesized_at?: string }).synthesized_at || new Date().toISOString() })) as SignalItem[];
       setSignals(rawSignals);
       setArtifacts(artifactsRes.items || []);
       if (statusRes) setOnboarding(statusRes);
@@ -106,7 +108,8 @@ function RadarContent() {
         <div>
           <div className="flex items-center gap-2.5">
             <span className="relative flex h-3 w-3">
-              <span className="relative inline-flex rounded-full h-3 w-3 bg-slate-400" />
+              {!loadError && !loading && <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />}
+              <span className={`relative inline-flex rounded-full h-3 w-3 ${loadError ? 'bg-red-400' : loading ? 'bg-slate-400' : 'bg-emerald-500'}`} />
             </span>
             <span className="text-xs font-bold uppercase tracking-wider text-slate-500">
               {loadError ? "Radar refresh unavailable" : "Ecosystem Radar"}
@@ -130,7 +133,7 @@ function RadarContent() {
             href="/artifacts"
             className="inline-flex items-center gap-2 rounded-xl bg-slate-900 px-4 py-2.5 text-xs font-bold text-white shadow-sm hover:bg-slate-800 transition"
           >
-            <span>Browse 3 Decision Units</span>
+            <span>Browse Decision Units</span>
             <span className="text-blue-400 font-bold">({artifacts.length}) →</span>
           </Link>
           <Link
@@ -146,7 +149,31 @@ function RadarContent() {
       {/* Real-Time Telemetry Node Row */}
       {loadError && <p role="alert" className="text-sm text-red-700">{loadError} <button onClick={() => void loadData()} type="button">Retry</button></p>}
       {telemetryError && <p role="status" className="text-sm text-slate-600">Telemetry unavailable: {telemetryError}</p>}
-      {!loading && !telemetryError && !telemetry?.nodes?.length && <p className="text-sm text-slate-600">No measured rail telemetry is available.</p>}
+      {!loading && !telemetryError && !telemetry?.nodes?.length && (
+        <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-6 shadow-2xs">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-slate-100 text-slate-500 font-mono text-sm">
+                📡
+              </div>
+              <div>
+                <h4 className="text-sm font-bold text-slate-900">
+                  Switching Rail Telemetry Feed: Standby
+                </h4>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Direct webhook probe integration is awaiting connection. Public status page listeners for NIBSS NIP, Interswitch, and Providus will activate automatically when telemetry sources are linked.
+                </p>
+              </div>
+            </div>
+            <Link
+              href="/settings"
+              className="inline-flex items-center justify-center shrink-0 rounded-lg border border-slate-300 bg-white px-3.5 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 transition shadow-2xs"
+            >
+              Configure Integrations →
+            </Link>
+          </div>
+        </div>
+      )}
       {loading ? (
         <TelemetrySkeleton />
       ) : (

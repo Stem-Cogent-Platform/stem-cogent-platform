@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import {
   getMarketReports,
   getMarketReport,
+  getMarketReportStatus,
   generateMarketReport,
 } from "@/lib/market-reports";
 import type {
@@ -83,31 +84,65 @@ export function MarketReportsExplorer() {
 
     const currentSlug = selectedSlug;
     let active = true;
+    let pollTimer: ReturnType<typeof setInterval> | null = null;
+
     async function fetchReport() {
       try {
-        // Auto-generate if missing
         const res = await getMarketReport(currentSlug, true);
-        if (active) {
+        if (!active) return;
+
+        if (res.report_payload) {
           setActiveReport(res);
-          // Update catalog item state
           setSectors((prev) =>
             prev.map((item) => (item.sector_slug === res.sector_slug ? res : item))
           );
+          setLoadingReport(false);
+          return;
         }
+
+        // Response indicated synthesis is in progress: start polling status
+        pollTimer = setInterval(async () => {
+          if (!active) {
+            if (pollTimer) clearInterval(pollTimer);
+            return;
+          }
+          try {
+            const statusRes = await getMarketReportStatus(currentSlug);
+            if (statusRes.status === "completed") {
+              if (pollTimer) clearInterval(pollTimer);
+              const completedReport = statusRes.report || await getMarketReport(currentSlug, false);
+              if (active) {
+                setActiveReport(completedReport);
+                setSectors((prev) =>
+                  prev.map((item) => (item.sector_slug === completedReport.sector_slug ? completedReport : item))
+                );
+                setLoadingReport(false);
+              }
+            } else if (statusRes.status === "failed") {
+              if (pollTimer) clearInterval(pollTimer);
+              if (active) {
+                setErrorNotice(statusRes.error || "Market report synthesis encountered an error.");
+                setLoadingReport(false);
+              }
+            }
+          } catch {
+            // Keep polling until success or component unmount
+          }
+        }, 3000);
       } catch (err) {
         if (active) {
           setErrorNotice(
             err instanceof Error ? err.message : "Failed to load report for this sector."
           );
+          setLoadingReport(false);
         }
-      } finally {
-        if (active) setLoadingReport(false);
       }
     }
 
     void fetchReport();
     return () => {
       active = false;
+      if (pollTimer) clearInterval(pollTimer);
     };
   }, [selectedSlug]);
 
@@ -122,38 +157,95 @@ export function MarketReportsExplorer() {
     setGenerating(true);
     setErrorNotice(null);
     try {
-      const updated = await generateMarketReport(slug);
-      setActiveReport(updated);
-      setSectors((prev) =>
-        prev.map((item) => (item.sector_slug === slug ? updated : item))
-      );
+      await generateMarketReport(slug);
+      let attempts = 0;
+      const interval = setInterval(async () => {
+        attempts += 1;
+        try {
+          const statusRes = await getMarketReportStatus(slug);
+          if (statusRes.status === "completed") {
+            clearInterval(interval);
+            const updated = statusRes.report || await getMarketReport(slug, false);
+            setActiveReport(updated);
+            setSectors((prev) =>
+              prev.map((item) => (item.sector_slug === slug ? updated : item))
+            );
+            setGenerating(false);
+          } else if (statusRes.status === "failed") {
+            clearInterval(interval);
+            setErrorNotice(statusRes.error || "Failed to refresh market report.");
+            setGenerating(false);
+          } else if (attempts >= 40) {
+            clearInterval(interval);
+            setErrorNotice("Report generation is taking longer than expected. Please check back shortly.");
+            setGenerating(false);
+          }
+        } catch {
+          if (attempts >= 40) {
+            clearInterval(interval);
+            setGenerating(false);
+          }
+        }
+      }, 3000);
     } catch (err) {
       setErrorNotice(
         err instanceof Error ? err.message : "Failed to refresh market report."
       );
-    } finally {
       setGenerating(false);
     }
   }
 
-  function handlePrintPdf() {
-    window.print();
+  async function handlePrintPdf() {
+    if (!activeReport?.report_payload) return;
+    try {
+      const { accessToken: getToken } = await import("@/lib/api");
+      const payload = activeReport.report_payload;
+      const response = await fetch("/api/v1/workspace/export", {
+        method: "POST",
+        credentials: "include",
+        headers: {
+          "Content-Type": "application/json",
+          ...(getToken() ? { Authorization: `Bearer ${getToken()}` } : {}),
+        },
+        body: JSON.stringify({
+          format: "pdf",
+          title: payload.vertical_name || activeReport.sector_title || "Market Intelligence Report",
+          operational_exposure: `Market Architecture: ${payload.vertical_name || activeReport.sector_title}\n\nCommercial Economics:\n${payload.commercial_economics}\n\nStrategic Outlook:\n${payload.strategic_outlook}`,
+          context_and_precedents: payload.regulatory_headwinds.join("\n"),
+          role_action_items: [],
+          citations: [],
+        }),
+      });
+      if (!response.ok) throw new Error("PDF generation failed");
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `stem-market-report-${selectedSlug}-${Date.now()}.pdf`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error("PDF export failed:", err);
+      setErrorNotice("PDF export failed. Please try again.");
+    }
   }
 
   return (
     <div className="space-y-6">
-      {errorNotice && (
+      {loadingList ? (
+        <div className="grid gap-5 md:grid-cols-2">
+          {[1, 2, 3, 4].map((i) => (
+            <div key={i} className="h-52 rounded-2xl border border-slate-200 bg-slate-100 animate-pulse" />
+          ))}
+        </div>
+      ) : errorNotice && !selectedSlug ? (
         <div
           role="alert"
           className="rounded-xl border border-red-200 bg-red-50 p-4 text-xs font-semibold text-red-800"
         >
           {errorNotice}
         </div>
-      )}
-
-      {loadingList && <p role="status">Loading report catalog...</p>}
-      {/* Grid or Detailed Report View */}
-      {!selectedSlug ? (
+      ) : !selectedSlug ? (
         <div className="space-y-6">
           <div className="border-b border-slate-200 pb-4">
             <h2 className="text-xl font-bold text-slate-900">

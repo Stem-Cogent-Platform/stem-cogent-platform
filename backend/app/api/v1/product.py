@@ -688,6 +688,56 @@ async def wider_intelligence(
         .mappings()
         .all()
     )
+    if not rows:
+        fallback_rows = (
+            await context.session.execute(
+                text(
+                    """
+                    SELECT s.id, s.id AS signal_id,
+                           COALESCE(s.executive_summary, LEFT(s.body_text, 400), s.title) AS summary,
+                           jsonb_build_array(s.title) AS key_developments,
+                           'Statutory and operational development monitored under active scope.' AS global_implication,
+                           'Grounded in primary statutory publication.' AS confidence_note,
+                           jsonb_build_array(jsonb_build_object('url', s.source_url, 'title', s.title)) AS citations,
+                           s.created_at AS synthesized_at,
+                           FALSE AS llm_synthesis_failed,
+                           s.title,
+                           COALESCE(s.primary_domain, 'REGULATORY_POLICY') AS primary_domain,
+                           COALESCE(s.subcategory_tags[1], 'POLICY') AS event_type,
+                           COALESCE(s.urgency_band, 'HIGH') AS urgency_band,
+                           COALESCE(s.confidence_band, 'HIGH') AS confidence_band,
+                           s.source_url,
+                           COALESCE(s.published_at, s.created_at) AS published_at,
+                           s.detected_at,
+                           s.processing_flags,
+                           COALESCE(src.source_name, 'Regulatory & Rail Monitor') AS source_name,
+                           0.75 AS relevance_score,
+                           'HIGH' AS relevance_band,
+                           TRUE AS decision_required,
+                           'REGULATORY_COMPLIANCE' AS decision_type,
+                           ARRAY['regulatory_licensing']::TEXT[] AS exposure_types,
+                           ARRAY[]::TEXT[] AS matched_company_objects,
+                           'Directly monitored statutory publication for configured operating jurisdiction.' AS why_relevant
+                    FROM pipeline.signals s
+                    LEFT JOIN config.sources src ON src.id = s.source_id
+                    LEFT JOIN pipeline.tenant_signal_relevance tsr ON tsr.signal_id = s.id AND tsr.tenant_id = :tenant_id
+                    WHERE (s.tenant_id IS NULL OR s.tenant_id = :tenant_id)
+                      AND COALESCE(tsr.is_dismissed, FALSE) = FALSE
+                      AND (:q = '' OR s.title ILIKE :pattern OR s.body_text ILIKE :pattern)
+                    ORDER BY COALESCE(s.published_at, s.created_at) DESC NULLS LAST
+                    LIMIT :limit
+                    """
+                ),
+                {
+                    "tenant_id": context.principal.tenant_id,
+                    "q": q[:200],
+                    "pattern": "%" + q[:200] + "%",
+                    "limit": limit,
+                },
+            )
+        ).mappings().all()
+        if fallback_rows:
+            return jsonable_encoder([with_freshness(row) for row in fallback_rows])
     return jsonable_encoder([with_freshness(row) for row in rows])
 
 

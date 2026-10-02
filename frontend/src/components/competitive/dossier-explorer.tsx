@@ -49,8 +49,48 @@ export function DossierExplorer() {
       {error && <p role="alert" className="m-5 rounded bg-red-50 p-3 text-sm text-red-800">{error}</p>}
       <div className="grid md:grid-cols-[220px_1fr]"><nav aria-label="Competitor dossiers" className="space-y-2 border-b border-slate-200 bg-slate-50 p-3 md:border-b-0 md:border-r">{items.map(item => <button key={item.id} onClick={() => setSelected(item.id)} aria-current={selected === item.id ? "true" : undefined} className={`w-full rounded-lg border p-3 text-left text-sm font-semibold ${selected === item.id ? "border-blue-500 bg-white text-blue-800" : "border-transparent text-slate-700"}`}>{item.competitor_name}</button>)}{!items.length && <p className="p-3 text-xs text-slate-500">Your researched competitors will appear here.</p>}</nav>
         <div className="min-w-0 space-y-5 p-5">{!dossier ? <p className="py-8 text-center text-sm text-slate-500">{selected ? "Loading dossier…" : "Enter a competitor name to start an evidence-backed profile."}</p> : <>
-          <div className="flex flex-wrap items-start justify-between gap-3"><div><h3 className="text-xl font-bold">{dossier.competitor_name}</h3><p className="mt-1 text-xs text-slate-500">{dossier.last_refreshed_at ? `Last researched ${new Date(dossier.last_refreshed_at).toLocaleString()}` : "Not researched yet"}{dossier.canonical_domain && ` · ${dossier.canonical_domain}`}</p></div><button disabled={busy || pending} onClick={() => void generate(dossier.competitor_name, true)} className="rounded-lg border px-3 py-2 text-xs font-semibold disabled:opacity-40">Refresh research</button></div>
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h3 className="text-xl font-bold">{dossier.competitor_name}</h3>
+              <p className="mt-1 text-xs text-slate-500">
+                {dossier.last_refreshed_at ? `Last researched ${new Date(dossier.last_refreshed_at).toLocaleString()}` : "Not researched yet"}
+                {dossier.canonical_domain && ` · ${dossier.canonical_domain}`}
+              </p>
+            </div>
+            <button
+              disabled={busy || pending}
+              onClick={() => void generate(dossier.competitor_name, Boolean(dossier.last_refreshed_at))}
+              className={`rounded-lg px-3.5 py-2 text-xs font-semibold disabled:opacity-40 transition ${
+                dossier.last_refreshed_at
+                  ? "border border-slate-300 text-slate-700 hover:bg-slate-50"
+                  : "bg-blue-600 text-white hover:bg-blue-700 shadow-2xs font-bold"
+              }`}
+            >
+              {dossier.last_refreshed_at ? "Refresh research" : "Generate initial profile"}
+            </button>
+          </div>
           {pending && <p role="status" className="rounded bg-blue-50 p-3 text-sm text-blue-900">Research queued or running. Gathering public evidence and comparing your footprint…{dossier.last_refreshed_at && " The previous profile remains visible until the refresh completes."}</p>}
+          {!dossier.last_refreshed_at && !pending && (
+            <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50/70 p-6 text-center space-y-3">
+              <div className="mx-auto flex h-10 w-10 items-center justify-center rounded-full bg-blue-50 text-blue-600 text-lg">
+                🎯
+              </div>
+              <h4 className="text-sm font-bold text-slate-900">
+                Initial Dossier for {dossier.competitor_name} Not Generated Yet
+              </h4>
+              <p className="text-xs text-slate-500 max-w-md mx-auto">
+                This competitor exists in your field records or directory. Generate an evidence-grounded profile to analyze known licenses, settlement rails, fee structures, and side-by-side strengths and vulnerabilities.
+              </p>
+              <button
+                disabled={busy || pending}
+                onClick={() => void generate(dossier.competitor_name, false)}
+                className="inline-flex items-center gap-2 rounded-xl bg-slate-900 px-4 py-2 text-xs font-bold text-white shadow-2xs hover:bg-slate-800 disabled:opacity-40 transition"
+              >
+                <span>Generate Evidence Profile</span>
+                <span>⚡</span>
+              </button>
+            </div>
+          )}
           {dossier.processing_status === "failed" && <p role="status" className="rounded bg-amber-50 p-3 text-sm text-amber-900">{dossier.error_code === "NOT_RESEARCHED" ? "Field reports are linked to this competitor. Request research to build its dossier." : "Research could not be completed. Try refreshing; any previous profile is retained."}</p>}
           {dossier.last_refreshed_at && <>
             {dossier.provenance.live_search_available === false && <p className="text-xs text-amber-900">Live web evidence was unavailable. This profile uses previously collected signals.</p>}

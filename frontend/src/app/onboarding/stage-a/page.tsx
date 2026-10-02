@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { StemMark } from "@/components/stem-mark";
-import { submitStageA, StageACompanyInput } from "@/lib/api";
+import { submitStageA, StageACompanyInput, refreshUserSession } from "@/lib/api";
 
 interface StepMeta {
   number: number;
@@ -241,6 +241,11 @@ export default function StageAOnboardingPage() {
       };
 
       await submitStageA(payload);
+      try {
+        await refreshUserSession();
+      } catch {
+        // Continue even if immediate refresh fails; radar page will bootstrap
+      }
 
       // Direct, zero-barrier redirect to live workspace / radar
       router.push("/radar");

@@ -32,9 +32,25 @@ export function WinLossPanel({competitor = ""}: {competitor?: string}) {
     {error && <p role="alert" className="rounded bg-red-50 p-3 text-sm text-red-800">{error}</p>}
     {!data && !error && <p role="status" className="text-sm text-slate-500">Loading field intelligence…</p>}
     {data && <>
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">{[["Won", data.metrics.won], ["Lost", data.metrics.lost], ["Churned", data.metrics.churned], ["Win rate", data.metrics.win_rate === null ? "Not established" : `${data.metrics.win_rate}%`]].map(([label, value]) => <div key={label} className="rounded-xl bg-slate-50 p-4"><p className="text-xs text-slate-500">{label}</p><p className="mt-2 text-2xl font-bold">{value}</p></div>)}</div>
-      <p className="text-xs text-slate-500">{data.metric_definition} {data.metrics.pending > 0 && `${data.metrics.pending} reports are being processed.`} {data.metrics.failed > 0 && `${data.metrics.failed} reports need extraction retry.`}</p>
-      {data.metrics.reported === 0 && <p className="rounded-lg border border-dashed p-6 text-center text-sm text-slate-500">No field reports in this scope. Use “Log deal signal” to record a merchant decision.</p>}
+      {data.metrics.reported === 0 ? (
+        <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50/60 p-8 text-center space-y-3">
+          <div className="mx-auto flex h-10 w-10 items-center justify-center rounded-full bg-slate-100 text-slate-400">
+            📊
+          </div>
+          <h3 className="text-sm font-bold text-slate-800">
+            No Field Intelligence Logged Yet {competitor ? `for ${competitor}` : ""}
+          </h3>
+          <p className="text-xs text-slate-500 max-w-md mx-auto">
+            Win/loss analytics, pitch talk tracks, and objection patterns are synthesized from field deal signals.
+            Log merchant deal notes using the intake button in the navigation bar to build your competitive evidence base.
+          </p>
+        </div>
+      ) : (
+        <>
+          <div className="grid grid-cols-2 gap-3 md:grid-cols-4">{[["Won", data.metrics.won], ["Lost", data.metrics.lost], ["Churned", data.metrics.churned], ["Win rate", data.metrics.win_rate === null ? "Not established" : `${data.metrics.win_rate}%`]].map(([label, value]) => <div key={label} className="rounded-xl bg-slate-50 p-4"><p className="text-xs text-slate-500">{label}</p><p className="mt-2 text-2xl font-bold">{value}</p></div>)}</div>
+          <p className="text-xs text-slate-500">{data.metric_definition} {data.metrics.pending > 0 && `${data.metrics.pending} reports are being processed.`} {data.metrics.failed > 0 && `${data.metrics.failed} reports need extraction retry.`}</p>
+        </>
+      )}
       {data.themes.length > 0 && <div><h3 className="mb-3 text-sm font-bold">Decision drivers by outcome</h3><div className="flex flex-wrap gap-2">{data.themes.map(item => <span key={`${item.theme}-${item.deal_outcome}`} className="rounded-lg border border-slate-200 px-3 py-2 text-xs"><strong className="capitalize">{item.theme}</strong> · {item.deal_outcome}: {item.count}</span>)}</div></div>}
       <div className="grid gap-5 lg:grid-cols-2"><div><h3 className="mb-3 text-sm font-bold">Win stories & reported talk tracks</h3><div className="space-y-3">{data.recent_signals.filter(item => item.deal_outcome === "won" && item.processing_status === "ready").map(item => <article key={item.id} className="rounded-xl border border-emerald-200 bg-emerald-50/40 p-4"><h4 className="text-sm font-semibold">Won {item.deal_size_arr_or_gmv || "a merchant"} against {item.competitor_name_raw}</h4><p className="mt-1 text-xs text-slate-500">{item.merchant_segment} · {item.occurred_on} · Field report</p><p className="mt-3 text-sm">{item.extracted_decision_drivers.join(" · ") || "No explicit driver recorded"}</p>{item.winning_talk_track && <><p className="mt-3 text-xs font-semibold">{item.talk_track_kind === "observed" ? "Reported pitch" : "Suggested pitch — untested"}</p><blockquote className="mt-1 text-sm">{item.winning_talk_track}</blockquote><button className="mt-2 text-xs text-blue-700 underline" onClick={() => void copy(item)}>{copied === item.id ? "Copied" : "Copy talk track"}</button></>}<button className="ml-3 mt-2 text-xs text-blue-700 underline" onClick={() => void getDeal(item.id).then(setDetail).catch(err => setError(err.message))}>Inspect field evidence</button></article>)}</div></div>
         <div><h3 className="mb-3 text-sm font-bold">Objection library</h3><div className="space-y-3">{data.objections.map(item => <article key={item.objection} className="rounded-xl border border-slate-200 p-4"><p className="text-sm font-semibold">{item.objection}</p><p className="mt-1 text-xs text-slate-500">{item.count} field reports</p><div className="mt-2 flex flex-wrap gap-3">{item.source_ids.map((id, index) => <button key={id} className="text-xs text-blue-700 underline" onClick={() => void getDeal(id).then(setDetail).catch(err => setError(err.message))}>Evidence {index + 1}</button>)}</div></article>)}</div></div></div>

@@ -983,7 +983,7 @@ function BillingSettingsPanel({ me }: { me: Me }) {
     void getOnboardingStatus().then((res) => setOnboardingStatus(res)).catch(() => {});
   }, []);
 
-  const pilotDaysRemaining = onboardingStatus?.pilot_days_remaining ?? 12;
+  const pilotDaysRemaining = onboardingStatus?.pilot_days_remaining ?? 14;
   const totalTrialDays = 14;
   const elapsedDays = Math.max(0, totalTrialDays - pilotDaysRemaining);
   const percentRemaining = Math.round((pilotDaysRemaining / totalTrialDays) * 100);
@@ -1053,31 +1053,34 @@ function BillingSettingsPanel({ me }: { me: Me }) {
       )}
 
       {/* Plan Details & Paystack Upgrade */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-        <div className="rounded-xl border border-slate-200 bg-white p-5 space-y-3 shadow-2xs">
-          <span className="text-xs font-bold uppercase text-slate-400">Current Entitlement</span>
-          <div className="text-lg font-black text-slate-900">{me.plan_code}</div>
-          <p className="text-xs text-slate-600 leading-relaxed">
-            Status:{" "}
-            <strong className="text-emerald-700 uppercase">
-              {me.billing_status.replaceAll("_", " ")}
-            </strong>
-          </p>
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+        <div className="rounded-xl border border-slate-200 bg-white p-5 space-y-3 shadow-2xs flex flex-col justify-between">
+          <div>
+            <span className="text-xs font-bold uppercase text-slate-400">Current Entitlement</span>
+            <div className="text-lg font-black text-slate-900 mt-1">{me.plan_code.toUpperCase()}</div>
+            <p className="text-xs text-slate-600 leading-relaxed mt-1">
+              Status:{" "}
+              <strong className="text-emerald-700 uppercase">
+                {me.billing_status.replaceAll("_", " ")}
+              </strong>
+            </p>
+          </div>
           <div className="pt-2 border-t border-slate-100 text-xs text-slate-500 font-mono">
             Monthly Queries: {onboardingStatus?.queries_used_this_period || 0} /{" "}
-            {onboardingStatus?.monthly_workspace_query_limit || 500}
+            {onboardingStatus?.monthly_workspace_query_limit || 30}
           </div>
         </div>
 
         <div className="rounded-xl border border-slate-900 bg-slate-900 p-5 space-y-3 text-white shadow-md flex flex-col justify-between">
           <div>
             <div className="flex items-center justify-between">
-              <span className="text-xs font-bold uppercase text-blue-400">Upgrade Plan</span>
+              <span className="text-xs font-bold uppercase text-blue-400">Growth Plan</span>
               <span className="text-[11px] font-mono text-emerald-400">Paystack Protected</span>
             </div>
             <div className="mt-1 text-lg font-black">Operator Growth Tier</div>
-            <p className="text-xs text-slate-300 mt-1 leading-relaxed">
-              Lock in full enterprise CBN gazette horizon monitoring, unlimited Copilot war room turns, and webhook uptime alerts.
+            <div className="text-xs font-mono text-slate-400 mt-0.5">$499 / mo (settled in NGN)</div>
+            <p className="text-xs text-slate-300 mt-2 leading-relaxed">
+              Full enterprise CBN gazette horizon monitoring, 250 Copilot turns, 10 team seats, and automated rail alerts.
             </p>
           </div>
 
@@ -1085,9 +1088,32 @@ function BillingSettingsPanel({ me }: { me: Me }) {
             type="button"
             onClick={() => void handleTriggerUpgrade("operator_growth")}
             disabled={isCheckingOut}
-            className="w-full h-10 rounded-lg bg-blue-600 text-white font-bold text-xs hover:bg-blue-500 active:scale-95 transition flex items-center justify-center gap-2 shadow-sm disabled:opacity-50 cursor-pointer"
+            className="w-full h-10 rounded-lg bg-blue-600 text-white font-bold text-xs hover:bg-blue-500 active:scale-95 transition flex items-center justify-center gap-2 shadow-sm disabled:opacity-50 cursor-pointer mt-3"
           >
-            {isCheckingOut ? "Connecting to Paystack..." : "Upgrade to Growth Tier via Paystack →"}
+            {isCheckingOut ? "Connecting to Paystack..." : "Upgrade to Growth Tier →"}
+          </button>
+        </div>
+
+        <div className="rounded-xl border border-indigo-900 bg-gradient-to-b from-slate-900 to-indigo-950 p-5 space-y-3 text-white shadow-md flex flex-col justify-between">
+          <div>
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold uppercase text-indigo-400">Scale Plan</span>
+              <span className="text-[11px] font-mono text-indigo-300">Enterprise</span>
+            </div>
+            <div className="mt-1 text-lg font-black">Institutional Scale Tier</div>
+            <div className="text-xs font-mono text-slate-400 mt-0.5">$1,250 / mo (settled in NGN)</div>
+            <p className="text-xs text-slate-300 mt-2 leading-relaxed">
+              1,000 Copilot turns, 50 seats, dedicated regulatory liaison, custom clearing rail telemetry, and SLA guarantees.
+            </p>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => void handleTriggerUpgrade("institutional_scale")}
+            disabled={isCheckingOut}
+            className="w-full h-10 rounded-lg bg-indigo-600 text-white font-bold text-xs hover:bg-indigo-500 active:scale-95 transition flex items-center justify-center gap-2 shadow-sm disabled:opacity-50 cursor-pointer mt-3"
+          >
+            {isCheckingOut ? "Connecting to Paystack..." : "Upgrade to Scale Tier →"}
           </button>
         </div>
       </div>
